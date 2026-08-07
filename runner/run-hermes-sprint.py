@@ -2,10 +2,10 @@
 """
 Hermes Sprint Runner (Sprint 02)
 Controller script for managing multi-agent sprint workflows, worktrees, git operations,
-and automated test validation.
+agent execution, fail-fast validations, and automated test validation.
 
 Governance Boundaries:
-- Canonical repo: ~/hermes-lab
+- Canonical repo: ~/hermes-lab (must be clean)
 - Worktrees: ~/hermes-worktrees/hermes-lab-s02/
 - Runs/Logs: ~/hermes-runs/
 - Git operations are strictly controller-owned. Agents edit files only.
@@ -102,8 +102,7 @@ class HermesSprintRunner:
                 timeout=timeout
             )
             if check and res.returncode != 0:
-                # Check for permission denial
-                if "Permission denied" in res.stderr:
+                if "Permission denied" in res.stderr or "permission denied" in res.stderr:
                     raise SprintRunnerError("FAILED_PERMISSION_DENIED", f"Permission denied during command: {cmd}\n{res.stderr}")
                 raise SprintRunnerError("FAILED_COMMAND_EXECUTION", f"Command failed: {cmd}\nExit Code: {res.returncode}\nStderr: {res.stderr}")
             return res
@@ -115,10 +114,13 @@ class HermesSprintRunner:
         if not self.canonical_repo.exists():
             raise SprintRunnerError("FAILED_CANONICAL_REPO_MISSING", f"Canonical repo does not exist at {self.canonical_repo}")
 
-        # Check canonical repo status
+        # Canonical repo safety: MUST fail if dirty
         res = self.run_cmd(["git", "status", "--porcelain"], cwd=self.canonical_repo)
         if res.stdout.strip():
-            self.logger.warning("Canonical repo working tree has uncommitted changes.")
+            raise SprintRunnerError(
+                "FAILED_DIRTY_REPO",
+                f"Canonical repo at {self.canonical_repo} has uncommitted changes:\n{res.stdout.strip()}"
+            )
 
         self.worktree_root.mkdir(parents=True, exist_ok=True)
         base_branch = self.spec.get("base_branch", "main")
@@ -139,12 +141,157 @@ class HermesSprintRunner:
             self.logger.info(f"Worktree directory exists at {path}")
         else:
             self.logger.info(f"Creating worktree at {path} for branch {branch} (from {base_branch})")
-            # Check if branch exists
             res = self.run_cmd(["git", "branch", "--list", branch], cwd=self.canonical_repo)
             if res.stdout.strip():
                 self.run_cmd(["git", "worktree", "add", str(path), branch], cwd=self.canonical_repo)
             else:
                 self.run_cmd(["git", "worktree", "add", "-b", branch, str(path), base_branch], cwd=self.canonical_repo)
+
+    def sync_claude_worktree(self, claude_wt_dir, target_branch="s02/integration"):
+        self.logger.info(f"Synchronizing Claude worktree ({claude_wt_dir.name}) to latest {target_branch}")
+        self.run_cmd(["git", "fetch", ".", target_branch], cwd=claude_wt_dir)
+        self.run_cmd(["git", "reset", "--hard", target_branch], cwd=claude_wt_dir)
+        
+        # Verify HANDOFF_AGY.md exists in claude worktree
+        handoff_agy = claude_wt_dir / "HANDOFF_AGY.md"
+        if not handoff_agy.exists():
+            raise SprintRunnerError(
+                "FAILED_PHASE_SYNC",
+                f"Phase sync failed: HANDOFF_AGY.md not present in Claude worktree after reset to {target_branch}"
+            )
+        self.logger.info(f"Phase synchronization successful: Claude worktree updated to {target_branch} with HANDOFF_AGY.md")
+
+    def parse_antigravity_stream_json(self, stdout_text, stderr_text=""):
+        if "Permission denied" in stderr_text or "permission denied" in stderr_text:
+            raise SprintRunnerError("FAILED_PERMISSION_DENIED", f"Antigravity permission denied in stderr:\n{stderr_text}")
+
+        lines = stdout_text.strip().split("\n")
+        for line_idx, line in enumerate(lines):
+            line_str = line.strip()
+            if not line_str:
+                continue
+
+            try:
+                event = json.loads(line_str)
+            except json.JSONDecodeError:
+                if "permission denied" in line_str.lower() or "eacces" in line_str.lower():
+                    raise SprintRunnerError("FAILED_PERMISSION_DENIED", f"Antigravity permission error on line {line_idx+1}: {line_str}")
+                continue
+
+            if not isinstance(event, dict):
+                continue
+
+            # Tool error or non-null error object
+            err = event.get("error")
+            if err is not None and err is not False and err != "":
+                err_msg = str(err)
+                if "permission" in err_msg.lower() or "denied" in err_msg.lower():
+                    raise SprintRunnerError("FAILED_PERMISSION_DENIED", f"Antigravity tool permission error: {err_msg}")
+                raise SprintRunnerError("FAILED_ANTIGRAVITY_TOOL_ERROR", f"Antigravity tool error on line {line_idx+1}: {err_msg}")
+
+            status = str(event.get("status", "")).upper()
+            if status in ["ERROR", "FAILED"]:
+                msg = event.get("message") or event.get("details") or line_str
+                raise SprintRunnerError("FAILED_ANTIGRAVITY_TOOL_ERROR", f"Antigravity tool event status {status}: {msg}")
+
+            if event.get("is_error") is True:
+                msg = event.get("message") or line_str
+                raise SprintRunnerError("FAILED_ANTIGRAVITY_TOOL_ERROR", f"Antigravity tool error event: {msg}")
+
+            msg = str(event.get("message", ""))
+            if "permission denied" in msg.lower() or "eacces" in msg.lower():
+                raise SprintRunnerError("FAILED_PERMISSION_DENIED", f"Antigravity permission error in message: {msg}")
+
+    def parse_claude_json(self, stdout_text, stderr_text=""):
+        if "Permission denied" in stderr_text or "permission denied" in stderr_text:
+            raise SprintRunnerError("FAILED_PERMISSION_DENIED", f"Claude permission denied in stderr:\n{stderr_text}")
+
+        stdout_clean = stdout_text.strip()
+        if not stdout_clean:
+            raise SprintRunnerError("FAILED_CLAUDE_EMPTY_OUTPUT", "Claude emitted no output")
+
+        data = None
+        try:
+            data = json.loads(stdout_clean)
+        except json.JSONDecodeError:
+            lines = [l.strip() for l in stdout_clean.split("\n") if l.strip()]
+            for line in reversed(lines):
+                try:
+                    data = json.loads(line)
+                    break
+                except json.JSONDecodeError:
+                    continue
+
+        if data is None or not isinstance(data, dict):
+            raise SprintRunnerError("FAILED_CLAUDE_INVALID_JSON", f"Failed to parse JSON response from Claude: {stdout_clean[:200]}")
+
+        if data.get("is_error") is True or data.get("type") == "error":
+            err_msg = data.get("error") or data.get("message") or "Unknown error"
+            raise SprintRunnerError("FAILED_CLAUDE_ERROR", f"Claude execution returned is_error=True: {err_msg}")
+
+        subtype = str(data.get("subtype", "")).lower()
+        if "max_turns" in subtype or "max-turn" in subtype:
+            raise SprintRunnerError("FAILED_CLAUDE_MAX_TURNS", f"Claude reached maximum turn limit: {subtype}")
+
+        denials = data.get("permission_denials") or []
+        if denials:
+            raise SprintRunnerError("FAILED_PERMISSION_DENIED", f"Claude encountered permission denials: {denials}")
+
+        result = str(data.get("result", "")).lower()
+        status = str(data.get("status", "")).lower()
+
+        if result and result not in ["success", "ok", "completed"]:
+            raise SprintRunnerError("FAILED_CLAUDE_NON_SUCCESS", f"Claude result is non-success: {result}")
+        if status and status not in ["success", "ok", "completed"]:
+            raise SprintRunnerError("FAILED_CLAUDE_NON_SUCCESS", f"Claude status is non-success: {status}")
+
+    def execute_agent(self, phase, wt_dir):
+        agent = phase["agent"]
+        prompt_file = self.canonical_repo / phase["prompt_file"]
+        cmd_opts = phase.get("cmd_options", {})
+        timeout_sec = self.limits.get("timeout_seconds", 300)
+
+        with open(prompt_file, "r", encoding="utf-8") as f:
+            prompt_content = f.read().strip()
+
+        stdout_file = self.run_dir / f"{phase['name']}_{agent}_stdout.log"
+        stderr_file = self.run_dir / f"{phase['name']}_{agent}_stderr.log"
+
+        if agent == "antigravity":
+            cmd = ["agy", "-p", prompt_content, "--output-format", cmd_opts.get("output_format", "stream-json")]
+            if cmd_opts.get("dangerously_skip_permissions", True):
+                cmd.append("--dangerously-skip-permissions")
+        elif agent == "claude":
+            cmd = [
+                "claude", "-p", prompt_content,
+                "--model", cmd_opts.get("model", "sonnet"),
+                "--max-turns", str(cmd_opts.get("max_turns", 30)),
+                "--permission-mode", cmd_opts.get("permission_mode", "dontAsk"),
+                "--output-format", cmd_opts.get("output_format", "json")
+            ]
+        else:
+            raise SprintRunnerError("FAILED_UNKNOWN_AGENT", f"Unknown agent type: {agent}")
+
+        self.logger.info(f"Launching agent process: {cmd[0]} in worktree {wt_dir.name}")
+        res = self.run_cmd(cmd, cwd=wt_dir, timeout=timeout_sec, check=False)
+
+        with open(stdout_file, "w", encoding="utf-8") as f:
+            f.write(res.stdout)
+        with open(stderr_file, "w", encoding="utf-8") as f:
+            f.write(res.stderr)
+
+        self.logger.info(f"Agent {agent} process completed with exit code {res.returncode}")
+
+        if res.returncode != 0:
+            if "Permission denied" in res.stderr or "permission denied" in res.stderr:
+                raise SprintRunnerError("FAILED_PERMISSION_DENIED", f"Agent {agent} permission denied:\n{res.stderr}")
+            raise SprintRunnerError("FAILED_AGENT_EXECUTION", f"Agent {agent} exited with code {res.returncode}:\n{res.stderr}")
+
+        # Fail-fast parsing
+        if agent == "antigravity":
+            self.parse_antigravity_stream_json(res.stdout, res.stderr)
+        elif agent == "claude":
+            self.parse_claude_json(res.stdout, res.stderr)
 
     def validate_changed_files(self, worktree_path):
         res = self.run_cmd(["git", "status", "--porcelain"], cwd=worktree_path)
@@ -152,6 +299,11 @@ class HermesSprintRunner:
         max_limit = self.limits.get("max_changed_files", 15)
         
         self.logger.info(f"Changed files count in {worktree_path.name}: {len(lines)} (Limit: {max_limit})")
+        if len(lines) == 0:
+            raise SprintRunnerError(
+                "FAILED_NO_CHANGES",
+                f"Worktree {worktree_path.name} produced NO file changes."
+            )
         if len(lines) > max_limit:
             raise SprintRunnerError(
                 "FAILED_EXCESSIVE_FILES",
@@ -193,52 +345,43 @@ class HermesSprintRunner:
         if not prompt_file.exists():
             raise SprintRunnerError("FAILED_MISSING_PROMPT", f"Prompt file not found: {prompt_file}")
 
-        # If agent execution is enabled, invoke agent CLI if available
+        # Phase Synchronization for Claude
+        if agent == "claude":
+            target_branch = self.spec.get("target_branch", "s02/integration")
+            self.sync_claude_worktree(wt_dir, target_branch)
+
+        # Agent execution
         if not self.skip_agent_exec and not self.dry_run:
-            self.logger.info(f"Simulating/Invoking agent '{agent}' using prompt '{prompt_file.name}' in {wt_dir}")
-            # Note: Agents operate directly in their designated worktrees
+            self.execute_agent(phase, wt_dir)
         else:
-            self.logger.info(f"Skipping external agent CLI invocation (skip_agent_exec={self.skip_agent_exec}, dry_run={self.dry_run})")
+            self.logger.info(f"Skipping agent execution CLI (skip_agent_exec={self.skip_agent_exec}, dry_run={self.dry_run})")
 
         # Controller validation checks
         self.validate_python_syntax(wt_dir)
-        changed_files = self.validate_changed_files(wt_dir)
+        changed_files = self.validate_changed_files(wt_dir)  # Fails fast on NO_CHANGES or EXCESSIVE_FILES
+        self.validate_handoff_file(wt_dir, expected_handoff)
 
-        if changed_files:
-            self.validate_handoff_file(wt_dir, expected_handoff)
+        # Controller stages and commits
+        self.logger.info(f"Controller staging changes in {wt_dir.name}")
+        self.run_cmd(["git", "add", "."], cwd=wt_dir)
+        self.run_cmd(["git", "commit", "-m", commit_msg], cwd=wt_dir)
+        
+        sha_res = self.run_cmd(["git", "rev-parse", "HEAD"], cwd=wt_dir)
+        commit_sha = sha_res.stdout.strip()
+        self.logger.info(f"Committed phase changes: {commit_sha[:7]} - {commit_msg}")
 
-            # Controller stages and commits
-            self.logger.info(f"Controller staging changes in {wt_dir.name}")
-            self.run_cmd(["git", "add", "."], cwd=wt_dir)
-            commit_res = self.run_cmd(["git", "commit", "-m", commit_msg], cwd=wt_dir)
-            
-            # Get commit SHA
-            sha_res = self.run_cmd(["git", "rev-parse", "HEAD"], cwd=wt_dir)
-            commit_sha = sha_res.stdout.strip()
-            self.logger.info(f"Committed phase changes: {commit_sha[:7]} - {commit_msg}")
+        # Merge commit into integration worktree
+        integration_dir = self.worktree_root / "integration"
+        self.logger.info(f"Controller merging commit {commit_sha[:7]} into integration worktree")
+        self.run_cmd(["git", "merge", "--no-ff", "-m", f"merge({self.sprint_id}): merge {agent} phase ({commit_sha[:7]})", commit_sha], cwd=integration_dir)
 
-            # Merge commit into integration worktree
-            integration_dir = self.worktree_root / "integration"
-            self.logger.info(f"Controller merging commit {commit_sha[:7]} into integration worktree")
-            self.run_cmd(["git", "merge", "--no-ff", "-m", f"merge({self.sprint_id}): merge {agent} phase ({commit_sha[:7]})", commit_sha], cwd=integration_dir)
-
-            phase_result = {
-                "phase": phase_name,
-                "agent": agent,
-                "status": "SUCCESS",
-                "commit_sha": commit_sha,
-                "changed_files_count": len(changed_files)
-            }
-        else:
-            self.logger.info(f"No changes detected in worktree {wt_dir.name} for phase {phase_name}")
-            phase_result = {
-                "phase": phase_name,
-                "agent": agent,
-                "status": "NO_CHANGES",
-                "commit_sha": None,
-                "changed_files_count": 0
-            }
-
+        phase_result = {
+            "phase": phase_name,
+            "agent": agent,
+            "status": "SUCCESS",
+            "commit_sha": commit_sha,
+            "changed_files_count": len(changed_files)
+        }
         self.run_summary["phases"].append(phase_result)
 
     def run_tests_in_venv(self):
@@ -274,6 +417,20 @@ class HermesSprintRunner:
             raise SprintRunnerError("FAILED_TESTS", f"Pytest suite failed in integration worktree: {e}")
 
     def finalize(self):
+        # Validate that all phases succeeded and pytest passed before granting READY_FOR_REVIEW
+        for p in self.run_summary["phases"]:
+            if p["status"] != "SUCCESS":
+                raise SprintRunnerError(
+                    "FAILED_INCOMPLETE_PHASE",
+                    f"Phase '{p['phase']}' did not reach SUCCESS status (was {p['status']})."
+                )
+
+        if not self.run_summary.get("test_results") or self.run_summary["test_results"].get("status") != "PASSED":
+            raise SprintRunnerError(
+                "FAILED_TESTS",
+                "Pytest validation failed or did not run."
+            )
+
         integration_dir = self.worktree_root / "integration"
         sha_res = self.run_cmd(["git", "rev-parse", "HEAD"], cwd=integration_dir)
         self.run_summary["integration_commit"] = sha_res.stdout.strip()

@@ -18,7 +18,11 @@
       "branch": "s02/antigravity",
       "prompt_file": "prompts/s02-agy.md",
       "expected_handoff": "HANDOFF_AGY.md",
-      "commit_message": "scaffold(s02): Antigravity metrics & info endpoints implementation"
+      "commit_message": "scaffold(s02): Antigravity metrics & info endpoints implementation",
+      "cmd_options": {
+        "output_format": "stream-json",
+        "dangerously_skip_permissions": true
+      }
     },
     {
       "name": "review_extend",
@@ -27,7 +31,13 @@
       "branch": "s02/claude",
       "prompt_file": "prompts/s02-claude.md",
       "expected_handoff": "HANDOFF_CLAUDE.md",
-      "commit_message": "feat(s02): Claude review and service extension"
+      "commit_message": "feat(s02): Claude review and service extension",
+      "cmd_options": {
+        "model": "sonnet",
+        "max_turns": 30,
+        "permission_mode": "dontAsk",
+        "output_format": "json"
+      }
     }
   ]
 }

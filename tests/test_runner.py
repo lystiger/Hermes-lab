@@ -14,6 +14,7 @@ spec.loader.exec_module(runner_module)
 
 HermesSprintRunner = runner_module.HermesSprintRunner
 SprintRunnerError = runner_module.SprintRunnerError
+scoped_antigravity_permissions = runner_module.scoped_antigravity_permissions
 
 
 class TestHermesSprintRunnerValidation(unittest.TestCase):
@@ -162,6 +163,46 @@ class TestHermesSprintRunnerValidation(unittest.TestCase):
             with self.assertRaises(SprintRunnerError) as ctx:
                 self.runner._ensure_worktree(Path("/home/lystiger/hermes-worktrees/hermes-lab-s02/antigravity"), "s02/antigravity", "s02/integration")
             self.assertEqual(ctx.exception.code, "FAILED_DIRTY_WORKTREE")
+
+    # 7. Scoped Antigravity Permissions Tests
+    def test_scoped_permissions_installed_and_restored_on_success(self):
+        wt_dir = Path("/home/lystiger/hermes-worktrees/hermes-lab-s02/antigravity")
+        canonical_repo = Path("/home/lystiger/hermes-lab")
+        settings_path = Path("/home/lystiger/.gemini/antigravity-cli/settings.json")
+
+        initial_content = settings_path.read_text(encoding="utf-8") if settings_path.exists() else None
+
+        with scoped_antigravity_permissions(wt_dir, canonical_repo):
+            self.assertTrue(settings_path.exists())
+            current_settings = json.loads(settings_path.read_text(encoding="utf-8"))
+            
+            self.assertIn(str(wt_dir.resolve()), current_settings.get("trustedWorkspaces", []))
+
+            allow_rules = current_settings.get("permissions", {}).get("allow", [])
+            self.assertIn(f"read_file({wt_dir.resolve()})", allow_rules)
+            self.assertIn(f"write_file({wt_dir.resolve()})", allow_rules)
+            self.assertIn(f"read_file({canonical_repo.resolve()}/.git)", allow_rules)
+
+            deny_rules = current_settings.get("permissions", {}).get("deny", [])
+            self.assertIn(f"write_file({wt_dir.resolve()}/.git)", deny_rules)
+            self.assertIn(f"write_file({canonical_repo.resolve()}/.git)", deny_rules)
+
+        after_content = settings_path.read_text(encoding="utf-8") if settings_path.exists() else None
+        self.assertEqual(initial_content, after_content)
+
+    def test_scoped_permissions_restored_on_exception(self):
+        wt_dir = Path("/home/lystiger/hermes-worktrees/hermes-lab-s02/antigravity")
+        canonical_repo = Path("/home/lystiger/hermes-lab")
+        settings_path = Path("/home/lystiger/.gemini/antigravity-cli/settings.json")
+
+        initial_content = settings_path.read_text(encoding="utf-8") if settings_path.exists() else None
+
+        with self.assertRaises(RuntimeError):
+            with scoped_antigravity_permissions(wt_dir, canonical_repo):
+                raise RuntimeError("Simulated failure inside AGY context")
+
+        after_content = settings_path.read_text(encoding="utf-8") if settings_path.exists() else None
+        self.assertEqual(initial_content, after_content)
 
 
 if __name__ == "__main__":

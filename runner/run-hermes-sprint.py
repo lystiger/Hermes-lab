@@ -22,6 +22,7 @@ import py_compile
 import logging
 from pathlib import Path
 from datetime import datetime
+from contextlib import contextmanager
 
 
 class SprintRunnerError(Exception):
@@ -30,6 +31,99 @@ class SprintRunnerError(Exception):
         super().__init__(message)
         self.code = code
         self.message = message
+
+
+@contextmanager
+def scoped_antigravity_permissions(wt_dir, canonical_repo):
+    """
+    Context manager to provision temporary, narrowly-scoped permissions in
+    ~/.gemini/antigravity-cli/settings.json specifically for the assigned Antigravity worker.
+    Restores exact original settings.json upon exit (even on exception/timeout).
+    """
+    settings_path = Path("/home/lystiger/.gemini/antigravity-cli/settings.json")
+    original_content = None
+    existed = settings_path.exists()
+
+    if existed:
+        try:
+            with open(settings_path, "r", encoding="utf-8") as f:
+                original_content = f.read()
+        except Exception:
+            original_content = None
+
+    try:
+        settings = {}
+        if original_content:
+            try:
+                settings = json.loads(original_content)
+            except Exception:
+                settings = {}
+
+        if "permissions" not in settings or not isinstance(settings["permissions"], dict):
+            settings["permissions"] = {"allow": [], "deny": []}
+
+        perms = settings["permissions"]
+        if "allow" not in perms or not isinstance(perms["allow"], list):
+            perms["allow"] = []
+        if "deny" not in perms or not isinstance(perms["deny"], list):
+            perms["deny"] = []
+        if "trustedWorkspaces" not in settings or not isinstance(settings["trustedWorkspaces"], list):
+            settings["trustedWorkspaces"] = []
+
+        wt_str = str(wt_dir.resolve())
+        canonical_str = str(canonical_repo.resolve())
+        git_wt_str = str((wt_dir / ".git").resolve())
+        git_canonical_str = str((canonical_repo / ".git").resolve())
+
+        # 1. Trusted workspace for Antigravity CLI
+        if wt_str not in settings["trustedWorkspaces"]:
+            settings["trustedWorkspaces"].append(wt_str)
+
+        # 2. Narrowly scoped allow rules
+        allow_rules = [
+            f"read_file({wt_str})",
+            f"read_file({wt_str}/**)",
+            f"write_file({wt_str})",
+            f"write_file({wt_str}/**)",
+            # Read-only access for Git worktree metadata
+            f"read_file({canonical_str}/.git)",
+            f"read_file({canonical_str}/.git/**)"
+        ]
+
+        # 3. Explicit deny rules protecting .git directories from writes
+        deny_rules = [
+            f"write_file({git_wt_str})",
+            f"write_file({git_wt_str}/**)",
+            f"write_file({git_canonical_str})",
+            f"write_file({git_canonical_str}/**)"
+        ]
+
+        for rule in allow_rules:
+            if rule not in perms["allow"]:
+                perms["allow"].append(rule)
+
+        for rule in deny_rules:
+            if rule not in perms["deny"]:
+                perms["deny"].append(rule)
+
+        settings_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(settings_path, "w", encoding="utf-8") as f:
+            json.dump(settings, f, indent=2)
+
+        yield
+
+    finally:
+        if existed and original_content is not None:
+            try:
+                with open(settings_path, "w", encoding="utf-8") as f:
+                    f.write(original_content)
+            except Exception:
+                pass
+        elif not existed and settings_path.exists():
+            try:
+                settings_path.unlink()
+            except Exception:
+                pass
 
 
 class HermesSprintRunner:
@@ -275,8 +369,6 @@ class HermesSprintRunner:
         if denials:
             raise SprintRunnerError("FAILED_PERMISSION_DENIED", f"Claude encountered permission denials: {denials}")
 
-        # Note: Do NOT interpret data.get("result") as a status string. result is arbitrary model output.
-
     def execute_agent(self, phase, wt_dir):
         agent = phase["agent"]
         prompt_file = self.canonical_repo / phase["prompt_file"]
@@ -291,7 +383,6 @@ class HermesSprintRunner:
 
         if agent == "antigravity":
             cmd = ["agy", "-p", prompt_content, "--output-format", cmd_opts.get("output_format", "stream-json")]
-            # Default for dangerously_skip_permissions is False
             if cmd_opts.get("dangerously_skip_permissions", False):
                 cmd.append("--dangerously-skip-permissions")
         elif agent == "claude":
@@ -306,7 +397,12 @@ class HermesSprintRunner:
             raise SprintRunnerError("FAILED_UNKNOWN_AGENT", f"Unknown agent type: {agent}")
 
         self.logger.info(f"Launching agent process: {cmd[0]} in worktree {wt_dir.name}")
-        res = self.run_cmd(cmd, cwd=wt_dir, timeout=timeout_sec, check=False)
+
+        if agent == "antigravity":
+            with scoped_antigravity_permissions(wt_dir, self.canonical_repo):
+                res = self.run_cmd(cmd, cwd=wt_dir, timeout=timeout_sec, check=False)
+        else:
+            res = self.run_cmd(cmd, cwd=wt_dir, timeout=timeout_sec, check=False)
 
         with open(stdout_file, "w", encoding="utf-8") as f:
             f.write(res.stdout)

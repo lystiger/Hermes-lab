@@ -138,7 +138,22 @@ class HermesSprintRunner:
 
     def _ensure_worktree(self, path, branch, base_branch):
         if path.exists():
-            self.logger.info(f"Worktree directory exists at {path}")
+            self.logger.info(f"Validating existing worktree at {path} (expected branch: {branch})")
+            # 1. Check if inside worktree
+            res_wt = self.run_cmd(["git", "rev-parse", "--is-inside-work-tree"], cwd=path, check=False)
+            if res_wt.returncode != 0 or res_wt.stdout.strip() != "true":
+                raise SprintRunnerError("FAILED_INVALID_WORKTREE", f"Directory {path} exists but is not a valid Git worktree.")
+            
+            # 2. Check current branch
+            res_branch = self.run_cmd(["git", "branch", "--show-current"], cwd=path, check=False)
+            curr_branch = res_branch.stdout.strip()
+            if curr_branch != branch:
+                raise SprintRunnerError("FAILED_WRONG_BRANCH", f"Worktree at {path} is on branch '{curr_branch}', expected '{branch}'.")
+
+            # 3. Check clean status
+            res_status = self.run_cmd(["git", "status", "--porcelain"], cwd=path, check=False)
+            if res_status.stdout.strip():
+                raise SprintRunnerError("FAILED_DIRTY_WORKTREE", f"Worktree at {path} has uncommitted changes:\n{res_status.stdout.strip()}")
         else:
             self.logger.info(f"Creating worktree at {path} for branch {branch} (from {base_branch})")
             res = self.run_cmd(["git", "branch", "--list", branch], cwd=self.canonical_repo)
@@ -181,7 +196,20 @@ class HermesSprintRunner:
             if not isinstance(event, dict):
                 continue
 
-            # Tool error or non-null error object
+            # 1. Primary check: nested step_update.tool_info.error
+            if event.get("event") == "step_update" or "step_update" in event:
+                step_update = event.get("step_update")
+                if isinstance(step_update, dict) and step_update.get("step_type") == "tool":
+                    tool_info = step_update.get("tool_info")
+                    if isinstance(tool_info, dict):
+                        tool_err = tool_info.get("error")
+                        if tool_err is not None and tool_err is not False and tool_err != "":
+                            err_str = str(tool_err)
+                            if "permission" in err_str.lower() or "denied" in err_str.lower() or "eacces" in err_str.lower():
+                                raise SprintRunnerError("FAILED_PERMISSION_DENIED", f"Antigravity tool permission error: {err_str}")
+                            raise SprintRunnerError("FAILED_ANTIGRAVITY_TOOL_ERROR", f"Antigravity tool error on line {line_idx+1}: {err_str}")
+
+            # 2. Defensive top-level checks
             err = event.get("error")
             if err is not None and err is not False and err != "":
                 err_msg = str(err)
@@ -225,25 +253,29 @@ class HermesSprintRunner:
         if data is None or not isinstance(data, dict):
             raise SprintRunnerError("FAILED_CLAUDE_INVALID_JSON", f"Failed to parse JSON response from Claude: {stdout_clean[:200]}")
 
-        if data.get("is_error") is True or data.get("type") == "error":
-            err_msg = data.get("error") or data.get("message") or "Unknown error"
-            raise SprintRunnerError("FAILED_CLAUDE_ERROR", f"Claude execution returned is_error=True: {err_msg}")
+        # 1. Require type == "result"
+        type_val = data.get("type")
+        if type_val != "result":
+            raise SprintRunnerError("FAILED_CLAUDE_ERROR", f"Claude output type is '{type_val}', expected 'result'")
 
-        subtype = str(data.get("subtype", "")).lower()
-        if "max_turns" in subtype or "max-turn" in subtype:
-            raise SprintRunnerError("FAILED_CLAUDE_MAX_TURNS", f"Claude reached maximum turn limit: {subtype}")
+        # 2. Require subtype == "success"
+        subtype_val = data.get("subtype")
+        if subtype_val == "max_turns_exceeded" or "max_turns" in str(subtype_val).lower():
+            raise SprintRunnerError("FAILED_CLAUDE_MAX_TURNS", f"Claude reached maximum turn limit: {subtype_val}")
+        if subtype_val != "success":
+            raise SprintRunnerError("FAILED_CLAUDE_ERROR", f"Claude output subtype is '{subtype_val}', expected 'success'")
 
+        # 3. Require is_error == False
+        if data.get("is_error") is not False:
+            err_msg = data.get("error") or data.get("message") or f"is_error is {data.get('is_error')}"
+            raise SprintRunnerError("FAILED_CLAUDE_ERROR", f"Claude execution returned is_error={data.get('is_error')}: {err_msg}")
+
+        # 4. Require permission_denials empty
         denials = data.get("permission_denials") or []
         if denials:
             raise SprintRunnerError("FAILED_PERMISSION_DENIED", f"Claude encountered permission denials: {denials}")
 
-        result = str(data.get("result", "")).lower()
-        status = str(data.get("status", "")).lower()
-
-        if result and result not in ["success", "ok", "completed"]:
-            raise SprintRunnerError("FAILED_CLAUDE_NON_SUCCESS", f"Claude result is non-success: {result}")
-        if status and status not in ["success", "ok", "completed"]:
-            raise SprintRunnerError("FAILED_CLAUDE_NON_SUCCESS", f"Claude status is non-success: {status}")
+        # Note: Do NOT interpret data.get("result") as a status string. result is arbitrary model output.
 
     def execute_agent(self, phase, wt_dir):
         agent = phase["agent"]
@@ -259,7 +291,8 @@ class HermesSprintRunner:
 
         if agent == "antigravity":
             cmd = ["agy", "-p", prompt_content, "--output-format", cmd_opts.get("output_format", "stream-json")]
-            if cmd_opts.get("dangerously_skip_permissions", True):
+            # Default for dangerously_skip_permissions is False
+            if cmd_opts.get("dangerously_skip_permissions", False):
                 cmd.append("--dangerously-skip-permissions")
         elif agent == "claude":
             cmd = [

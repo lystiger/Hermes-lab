@@ -21,7 +21,7 @@
       "commit_message": "scaffold(s02): Antigravity metrics & info endpoints implementation",
       "cmd_options": {
         "output_format": "stream-json",
-        "dangerously_skip_permissions": true
+        "dangerously_skip_permissions": false
       }
     },
     {

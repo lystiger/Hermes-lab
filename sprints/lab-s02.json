@@ -1,0 +1,33 @@
+{
+  "sprint_id": "lab-s02",
+  "name": "Hermes Lab Sprint 02 - Core Service Enhancement & Metrics",
+  "canonical_repo": "/home/lystiger/hermes-lab",
+  "base_branch": "main",
+  "target_branch": "s02/integration",
+  "worktree_root": "/home/lystiger/hermes-worktrees/hermes-lab-s02",
+  "runs_root": "/home/lystiger/hermes-runs",
+  "limits": {
+    "max_changed_files": 15,
+    "timeout_seconds": 300
+  },
+  "phases": [
+    {
+      "name": "scaffold",
+      "agent": "antigravity",
+      "worktree_dir": "antigravity",
+      "branch": "s02/antigravity",
+      "prompt_file": "prompts/s02-agy.md",
+      "expected_handoff": "HANDOFF_AGY.md",
+      "commit_message": "scaffold(s02): Antigravity metrics & info endpoints implementation"
+    },
+    {
+      "name": "review_extend",
+      "agent": "claude",
+      "worktree_dir": "claude",
+      "branch": "s02/claude",
+      "prompt_file": "prompts/s02-claude.md",
+      "expected_handoff": "HANDOFF_CLAUDE.md",
+      "commit_message": "feat(s02): Claude review and service extension"
+    }
+  ]
+}

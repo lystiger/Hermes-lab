@@ -24,6 +24,7 @@ from agents.antigravity import AntigravityAdapter
 from agents.claude import ClaudeAdapter
 from agents.codex import CodexAdapter
 from agents.registry import AgentRegistry, default_registry
+from backends.subprocess_backend import SubprocessBackend
 
 
 class TestHermesSprintRunnerValidation(unittest.TestCase):
@@ -304,8 +305,8 @@ class TestAgentExecution(unittest.TestCase):
         runner = SimpleNamespace(
             logger=MagicMock(),
             canonical_repo=root,
-            run_cmd=MagicMock(side_effect=error) if error else MagicMock(return_value=result),
         )
+        run_process = MagicMock(side_effect=error) if error else MagicMock(return_value=result)
         return AgentContext(
             runner=runner,
             phase={"name": "verification", "agent": name},
@@ -315,6 +316,7 @@ class TestAgentExecution(unittest.TestCase):
             stdout_file=root / "stdout.log",
             stderr_file=root / "stderr.log",
             timeout_seconds=10,
+            backend=SubprocessBackend(run_process=run_process),
         )
 
     def test_codex_success_persists_output(self):
@@ -333,6 +335,16 @@ class TestAgentExecution(unittest.TestCase):
                 CodexAdapter().execute(context)
             self.assertEqual(ctx.exception.code, "FAILED_AGENT_EXECUTION")
             self.assertEqual(context.stderr_file.read_text(encoding="utf-8"), "failure")
+
+    def test_subprocess_permission_error_is_rejected_by_adapter(self):
+        with tempfile.TemporaryDirectory() as temporary_dir:
+            result = subprocess.CompletedProcess(
+                ["codex"], 1, "", "Permission denied by policy"
+            )
+            context = self.make_context(temporary_dir, result=result)
+            with self.assertRaises(SprintRunnerError) as ctx:
+                CodexAdapter().execute(context)
+            self.assertEqual(ctx.exception.code, "FAILED_PERMISSION_DENIED")
 
     def test_codex_empty_output_is_rejected(self):
         with tempfile.TemporaryDirectory() as temporary_dir:
@@ -579,9 +591,14 @@ class TestControllerDispatch(unittest.TestCase):
                     {
                         "phase": "verification",
                         "agent": "codex",
+                        "backend": "herdr",
                         "status": "SUCCESS",
                         "changed_files_count": 4,
                         "commit_sha": "worker-secret-sha",
+                        "runtime_metadata": {
+                            "herdr_workspace_id": "machine-workspace",
+                            "herdr_pane_id": "machine-pane",
+                        },
                         "stdout": "SECRET MODEL OUTPUT",
                     }
                 ],
@@ -599,6 +616,7 @@ class TestControllerDispatch(unittest.TestCase):
                 "phases": [
                     {
                         "agent": "codex",
+                        "backend": "herdr",
                         "changed_files_count": 4,
                         "phase": "verification",
                         "status": "SUCCESS",
@@ -611,6 +629,8 @@ class TestControllerDispatch(unittest.TestCase):
         )
         self.assertNotIn("SECRET", report_text)
         self.assertNotIn("/home/", report_text)
+        self.assertNotIn("machine-workspace", report_text)
+        self.assertNotIn("machine-pane", report_text)
 
     def test_default_report_path_is_deterministic_and_opt_in(self):
         runner = HermesSprintRunner(

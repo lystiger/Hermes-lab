@@ -3,6 +3,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Mapping
 
+from backends.base import ExecutionRequest
+
 from .errors import SprintRunnerError
 
 
@@ -16,6 +18,7 @@ class AgentContext:
     stdout_file: Path
     stderr_file: Path
     timeout_seconds: int
+    backend: Any
 
 
 class AgentAdapter(ABC):
@@ -43,25 +46,25 @@ class AgentAdapter(ABC):
 
         try:
             self.prepare(context)
-            try:
-                result = context.runner.run_cmd(
-                    command,
+            result = context.backend.execute(
+                ExecutionRequest(
+                    agent_name=self.name,
+                    command=tuple(command),
                     cwd=context.worktree,
-                    timeout=context.timeout_seconds,
-                    check=False,
+                    timeout_seconds=context.timeout_seconds,
+                    stdout_file=context.stdout_file,
+                    stderr_file=context.stderr_file,
+                    metadata={"phase": context.phase.get("name", "")},
                 )
-            except FileNotFoundError as exc:
-                raise SprintRunnerError(
-                    "FAILED_AGENT_EXECUTABLE_MISSING",
-                    f"Executable for agent '{self.name}' was not found: {command[0]}",
-                ) from exc
+            )
         finally:
             self.cleanup(context)
 
-        context.stdout_file.write_text(result.stdout or "", encoding="utf-8")
-        context.stderr_file.write_text(result.stderr or "", encoding="utf-8")
         context.runner.logger.info(
-            "Agent %s process completed with exit code %s", self.name, result.returncode
+            "Agent %s process completed via %s with exit code %s",
+            self.name,
+            result.backend,
+            result.returncode,
         )
 
         if result.returncode != 0:

@@ -29,6 +29,7 @@ from agents.base import AgentContext
 from agents.errors import SprintRunnerError
 from agents.permissions import scoped_antigravity_permissions
 from agents.registry import default_registry
+from backends.registry import default_backend_registry
 
 
 class HermesSprintRunner:
@@ -39,6 +40,8 @@ class HermesSprintRunner:
         skip_agent_exec=False,
         verbose=False,
         agent_registry=None,
+        backend_registry=None,
+        backend_override=None,
         export_report=False,
     ):
         self.spec_path = Path(spec_path).resolve()
@@ -46,6 +49,8 @@ class HermesSprintRunner:
         self.skip_agent_exec = skip_agent_exec
         self.verbose = verbose
         self.agent_registry = agent_registry or default_registry
+        self.backend_registry = backend_registry or default_backend_registry
+        self.backend_override = backend_override
         
         self.spec = self._load_spec()
         self.sprint_id = self.spec.get("sprint_id", "lab-s02")
@@ -66,6 +71,7 @@ class HermesSprintRunner:
         self.run_dir = self.runs_root / f"{timestamp}_{self.sprint_id}"
         self.log_file = self.run_dir / "runner.log"
         self.summary_file = self.run_dir / "run_summary.json"
+        self._backend_cache = {}
         
         self.logger = self._setup_logging()
         self.run_summary = {
@@ -150,6 +156,7 @@ class HermesSprintRunner:
         # 2. Setup agent worktrees
         for phase in self.spec.get("phases", []):
             self.agent_registry.get(phase["agent"])
+            self._get_backend(self.resolve_backend_name(phase))
             wt_dir = self.worktree_root / phase["worktree_dir"]
             branch = phase["branch"]
             self._ensure_worktree(wt_dir, branch, target_branch)
@@ -211,9 +218,29 @@ class HermesSprintRunner:
 
         return ClaudeAdapter.parse_json(stdout_text, stderr_text)
 
+    def resolve_backend_name(self, phase):
+        return (
+            phase.get("execution_backend")
+            or self.backend_override
+            or self.spec.get("execution_backend")
+            or "subprocess"
+        )
+
+    def _get_backend(self, backend_name):
+        if backend_name not in self._backend_cache:
+            self._backend_cache[backend_name] = self.backend_registry.get(
+                backend_name,
+                run_dir=self.run_dir,
+                sprint_id=self.sprint_id,
+                logger=self.logger,
+                keep_workspace=self.spec.get("keep_herdr_workspace", True),
+            )
+        return self._backend_cache[backend_name]
+
     def execute_agent(self, phase, wt_dir):
         agent_name = phase["agent"]
         adapter = self.agent_registry.get(agent_name)
+        backend = self._get_backend(self.resolve_backend_name(phase))
         prompt_file = self.canonical_repo / phase["prompt_file"]
         context = AgentContext(
             runner=self,
@@ -224,6 +251,7 @@ class HermesSprintRunner:
             stdout_file=self.run_dir / f"{phase['name']}_{agent_name}_stdout.log",
             stderr_file=self.run_dir / f"{phase['name']}_{agent_name}_stderr.log",
             timeout_seconds=self.limits.get("timeout_seconds", 300),
+            backend=backend,
         )
         return adapter.execute(context)
 
@@ -279,6 +307,8 @@ class HermesSprintRunner:
         commit_msg = phase["commit_message"]
 
         self.logger.info(f"\n=== Executing Phase: {phase_name} (Agent: {agent}) ===")
+        backend_name = self.resolve_backend_name(phase)
+        self._get_backend(backend_name)
 
         if not prompt_file.exists():
             raise SprintRunnerError("FAILED_MISSING_PROMPT", f"Prompt file not found: {prompt_file}")
@@ -290,8 +320,9 @@ class HermesSprintRunner:
 
         # Agent execution
         if not self.skip_agent_exec and not self.dry_run:
-            self.execute_agent(phase, wt_dir)
+            execution_result = self.execute_agent(phase, wt_dir)
         else:
+            execution_result = None
             self.logger.info(f"Skipping agent execution CLI (skip_agent_exec={self.skip_agent_exec}, dry_run={self.dry_run})")
 
         # Controller validation checks
@@ -316,9 +347,13 @@ class HermesSprintRunner:
         phase_result = {
             "phase": phase_name,
             "agent": agent,
+            "backend": backend_name,
             "status": "SUCCESS",
             "commit_sha": commit_sha,
-            "changed_files_count": len(changed_files)
+            "changed_files_count": len(changed_files),
+            "runtime_metadata": (
+                dict(execution_result.runtime_metadata) if execution_result else {}
+            ),
         }
         self.run_summary["phases"].append(phase_result)
 
@@ -397,6 +432,11 @@ class HermesSprintRunner:
                     "agent": phase.get("agent"),
                     "status": phase.get("status"),
                     "changed_files_count": phase.get("changed_files_count"),
+                    **(
+                        {"backend": phase.get("backend")}
+                        if phase.get("backend")
+                        else {}
+                    ),
                 }
                 for phase in self.run_summary.get("phases", [])
             ],
@@ -424,6 +464,16 @@ class HermesSprintRunner:
             self.run_summary["errors"].append({"code": e.code, "message": e.message})
             self.logger.error(f"FAIL-FAST TRIGGERED: [{e.code}] {e.message}")
         finally:
+            sprint_succeeded = self.run_summary["status"] == "READY_FOR_REVIEW"
+            for backend in self._backend_cache.values():
+                try:
+                    backend.cleanup(success=sprint_succeeded)
+                except SprintRunnerError as cleanup_error:
+                    self.logger.error(
+                        "Backend cleanup failed: [%s] %s",
+                        cleanup_error.code,
+                        cleanup_error.message,
+                    )
             with open(self.summary_file, "w", encoding="utf-8") as f:
                 json.dump(self.run_summary, f, indent=2)
             self.logger.info(f"Run summary written to {self.summary_file}")
@@ -435,10 +485,14 @@ class HermesSprintRunner:
 
 def main():
     parser = argparse.ArgumentParser(description="Hermes Sprint Workflow Runner")
-    parser.add_argument("--spec", default="sprints/lab-s03.json", help="Path to sprint JSON specification")
+    parser.add_argument("--spec", default="sprints/lab-s04.json", help="Path to sprint JSON specification")
     parser.add_argument("--dry-run", action="store_true", help="Simulate run without modifying git state")
     parser.add_argument("--skip-agent-execution", action="store_true", help="Skip invoking external agent CLI")
     parser.add_argument("--verbose", "-v", action="store_true", help="Enable verbose debug logging")
+    parser.add_argument(
+        "--backend",
+        help="Globally override the sprint execution backend unless a phase overrides it",
+    )
     parser.add_argument(
         "--export-report",
         nargs="?",
@@ -458,6 +512,7 @@ def main():
         dry_run=args.dry_run,
         skip_agent_exec=args.skip_agent_execution,
         verbose=args.verbose,
+        backend_override=args.backend,
         export_report=args.export_report,
     )
     

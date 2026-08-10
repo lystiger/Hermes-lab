@@ -4,7 +4,7 @@ Automated controller framework for orchestrating adapter-backed agent workflows 
 
 ## Overview
 
-The runner supports Antigravity, Claude, and Codex through a common registry. Adapters own CLI construction and result validation; the controller retains worktree governance, handoff and change validation, Git commits and merges, integration tests, summaries, and final status.
+The runner supports Antigravity, Claude, and Codex through a common registry. Adapters own CLI construction and result validation. Execution backends own process hosting, output capture, and timeouts. The controller retains worktree governance, handoff and change validation, Git commits and merges, integration tests, summaries, and final status.
 
 ## Directory & File Layout
 
@@ -13,15 +13,19 @@ The runner supports Antigravity, Claude, and Codex through a common registry. Ad
 ├── runner/
 │   ├── run-hermes-sprint.py  # Executable sprint runner controller script
 │   ├── agents/               # Agent interface, adapters, registry, permissions
+│   ├── backends/             # Subprocess and one-shot Herdr runtimes
 │   └── README.md             # Architecture & usage documentation
 ├── prompts/
 │   ├── s02-agy.md            # Scaffold prompt for Antigravity agent phase
 │   ├── s02-claude.md         # Review & extend prompt for Claude agent phase
 │   ├── s03-claude.md         # Adapter implementation prompt
-│   └── s03-codex.md          # Independent verification prompt
+│   ├── s03-codex.md          # Independent verification prompt
+│   ├── s04-claude.md         # Backend implementation prompt
+│   └── s04-codex.md          # Herdr verification prompt
 └── sprints/
     ├── lab-s02.json          # Backwards-compatible Sprint 02 specification
-    └── lab-s03.json          # Claude implementation + Codex verification
+    ├── lab-s03.json          # Claude implementation + Codex verification
+    └── lab-s04.json          # Staged subprocess + Herdr backend workflow
 ```
 
 ## Worktree & Execution Architecture
@@ -42,6 +46,7 @@ The runner supports Antigravity, Claude, and Codex through a common registry. Ad
 1. **Environment & Safety Check**: Verifies the canonical repository is clean, validates registered agents, and creates or validates configured worktrees.
    Clean integration and phase worktrees are reset to their configured starting refs on every run, so prior sprint commits cannot affect a rerun. Dirty or wrongly assigned worktrees fail before reset.
 2. **Agent Dispatch**: Resolves the phase agent through the registry. The adapter invokes its CLI and validates its result while writing phase stdout/stderr logs.
+   The selected execution backend hosts that unchanged one-shot CLI. `subprocess` is the compatibility reference; `herdr` uses a runner-owned persistent workspace and pane.
 3. **Controller Validation**: Recursively compiles Python, enforces the changed-file limit, and requires the configured non-empty handoff.
 4. **Controller Integration**: The controller alone stages, commits, and merges the phase. Each later phase is synchronized to the latest integration branch first.
 5. **Verification & Testing**:
@@ -60,6 +65,11 @@ The runner supports Antigravity, Claude, and Codex through a common registry. Ad
 - `FAILED_AGENT_EXECUTABLE_MISSING`: The configured agent CLI is unavailable.
 - `FAILED_AGENT_EXECUTION`: An agent CLI returned a non-zero exit.
 - `FAILED_CODEX_EMPTY_OUTPUT`: Codex returned successfully without a result.
+- `FAILED_UNKNOWN_BACKEND`: The configured execution backend is unsupported.
+- `FAILED_HERDR_EXECUTABLE_MISSING`: The Herdr CLI is unavailable.
+- `FAILED_HERDR_UNAVAILABLE`: The Herdr server cannot be reached.
+- `FAILED_HERDR_PROTOCOL`: Herdr returned malformed JSON or omitted a required runtime ID.
+- `FAILED_HERDR_COMMAND`: Workspace, pane, or control execution failed.
 - `FAILED_NO_CHANGES`: Agent phase produced zero file changes.
 - `FAILED_MISSING_HANDOFF`: Required handoff file missing or empty.
 - `FAILED_EXCESSIVE_FILES`: Worktree modified more than `limits.max_changed_files` files.
@@ -79,6 +89,14 @@ Use `--export-report` to write deterministic, reviewable evidence to `reports/<s
 
 The export happens after sprint execution, so it cannot affect worker changed-file validation or the integration commit. Exporting into the canonical repository intentionally leaves that report as an uncommitted file; commit, move, or remove it before the next run because canonical dirty-repository protection remains enforced.
 
+## Execution Backends
+
+Backend selection precedence is phase override, CLI override, sprint specification, then `subprocess`. Unknown backends fail with `FAILED_UNKNOWN_BACKEND`; explicitly selected Herdr never silently falls back.
+
+The Herdr backend checks the Herdr executable, server reachability, and worker executable. It creates one runner-owned workspace, parses workspace and pane IDs from JSON, and runs each existing one-shot agent CLI through a generated Bash argv-array wrapper. Prompts remain data even when they contain quotes, newlines, shell operators, substitutions, Unicode, or Markdown. Stdout, stderr, exit status, and a nonce completion marker preserve the adapter result contract.
+
+Worker panes remain available for inspection by default. Set `keep_herdr_workspace` to `false` only when runner-owned workspace cleanup is desired. The backend never stops the Herdr server or closes pre-existing workspaces.
+
 ## Usage
 
 ### Run Sprint Pipeline
@@ -87,6 +105,12 @@ python3 runner/run-hermes-sprint.py
 
 # Re-run the Sprint 02 workflow explicitly
 python3 runner/run-hermes-sprint.py --spec sprints/lab-s02.json
+
+# Run Sprint 04's staged subprocess/Herdr workflow
+python3 runner/run-hermes-sprint.py --spec sprints/lab-s04.json
+
+# Deliberately select Herdr globally for specs without phase overrides
+python3 runner/run-hermes-sprint.py --spec <spec.json> --backend herdr
 
 # Export safe evidence at the default deterministic path
 python3 runner/run-hermes-sprint.py --export-report

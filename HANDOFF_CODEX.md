@@ -1,20 +1,21 @@
-# Sprint 03 Verification Handoff
+# Sprint 04 Verification Handoff
 
-## Review scope
+## Verified
 
-Verified the registry contract, all three adapter command builders, agent result failures, Codex log persistence, unknown agents, Antigravity permission restoration, controller validation ownership, and sequential integration behavior.
+- Backend registry and selection precedence.
+- Subprocess stdout, stderr, exit, missing-executable, and timeout parity.
+- Herdr preflight and distinct protocol/runtime error mappings.
+- Opaque workspace, root-pane, and worker-pane JSON ID parsing.
+- Adversarial prompt/argv safety across shell metacharacters, substitutions, Unicode, newlines, and large Markdown.
+- Exact completion nonce behavior, non-zero propagation, partial logs, targeted timeout interruption, and runner-owned cleanup.
+- Existing controller and worker sandbox invariants.
 
-## Findings
+## Runtime status
 
-- Agent-specific command construction is absent from controller dispatch.
-- Adapters do not invoke Git.
-- Unknown agents fail through the registry with `FAILED_UNKNOWN_AGENT`.
-- Codex uses installed `codex exec` in non-interactive, ephemeral mode and is scoped to its assigned worktree.
-- Non-zero exits, timeouts, missing executables, empty Codex output, malformed Claude JSON, malformed Antigravity stream JSON, and permission errors fail fast.
-- Sprint 02 can still be selected explicitly.
+The real Herdr smoke/dogfood test is skipped unless the test process is inside a Herdr-managed pane with a reachable server. This implementation session had `HERDR_ENV` unset, so the Herdr skill prohibited controlling a live workspace from it.
 
 ## Test result
 
-`pytest -q`: **32 passed** in an isolated repository virtual environment.
+`pytest -q`: **61 passed, 1 skipped** in the isolated repository environment.
 
-One dependency warning remains: Starlette currently deprecates the `httpx`-backed compatibility import used by `fastapi.testclient`. It is outside the Sprint 03 adapter scope and does not affect test results.
+The skipped test is the live Herdr shell smoke test described above. One existing Starlette `TestClient` deprecation warning remains and does not affect Sprint 04.

@@ -1,0 +1,47 @@
+{
+  "sprint_id": "lab-s04",
+  "name": "Execution Backend Abstraction + Herdr Runtime",
+  "canonical_repo": "/home/lystiger/hermes-lab",
+  "base_branch": "main",
+  "target_branch": "s04/integration",
+  "worktree_root": "/home/lystiger/hermes-worktrees/hermes-lab-s04",
+  "runs_root": "/home/lystiger/hermes-runs",
+  "execution_backend": "subprocess",
+  "keep_herdr_workspace": true,
+  "limits": {
+    "max_changed_files": 20,
+    "timeout_seconds": 600
+  },
+  "phases": [
+    {
+      "name": "backend_implementation",
+      "agent": "claude",
+      "execution_backend": "subprocess",
+      "worktree_dir": "claude",
+      "branch": "s04/claude",
+      "prompt_file": "prompts/s04-claude.md",
+      "expected_handoff": "HANDOFF_CLAUDE.md",
+      "commit_message": "feat(s04): add execution backend abstraction and Herdr runtime",
+      "cmd_options": {
+        "model": "sonnet",
+        "max_turns": 40,
+        "permission_mode": "dontAsk",
+        "output_format": "json"
+      }
+    },
+    {
+      "name": "backend_verification",
+      "agent": "codex",
+      "execution_backend": "herdr",
+      "worktree_dir": "codex",
+      "branch": "s04/codex",
+      "prompt_file": "prompts/s04-codex.md",
+      "expected_handoff": "HANDOFF_CODEX.md",
+      "commit_message": "test(s04): verify subprocess and Herdr execution backends",
+      "cmd_options": {
+        "sandbox": "workspace-write",
+        "ephemeral": true
+      }
+    }
+  ]
+}

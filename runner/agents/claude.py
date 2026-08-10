@@ -32,21 +32,21 @@ _CLAUDE_MUTATING_GIT_SUBCOMMANDS = (
 CLAUDE_GIT_MUTATION_DENIALS = tuple(
     pattern
     for subcommand in _CLAUDE_MUTATING_GIT_SUBCOMMANDS
-    for pattern in (f"Bash(git {subcommand})", f"Bash(git {subcommand} *)")
+    for pattern in (f"Bash(git {subcommand})", f"Bash(git {subcommand}:*)")
 ) + (
-    "Bash(git branch --copy *)",
-    "Bash(git branch --delete *)",
-    "Bash(git branch --move *)",
-    "Bash(git branch -C *)",
-    "Bash(git branch -D *)",
-    "Bash(git branch -M *)",
-    "Bash(git branch -c *)",
-    "Bash(git branch -d *)",
-    "Bash(git branch -m *)",
-    "Bash(git remote add *)",
-    "Bash(git remote remove *)",
-    "Bash(git remote rename *)",
-    "Bash(git remote set-url *)",
+    "Bash(git branch --copy:*)",
+    "Bash(git branch --delete:*)",
+    "Bash(git branch --move:*)",
+    "Bash(git branch -C:*)",
+    "Bash(git branch -D:*)",
+    "Bash(git branch -M:*)",
+    "Bash(git branch -c:*)",
+    "Bash(git branch -d:*)",
+    "Bash(git branch -m:*)",
+    "Bash(git remote add:*)",
+    "Bash(git remote remove:*)",
+    "Bash(git remote rename:*)",
+    "Bash(git remote set-url:*)",
 )
 
 
@@ -72,7 +72,7 @@ class ClaudeAdapter(AgentAdapter):
             options.get("permission_mode", "dontAsk"),
             "--output-format",
             options.get("output_format", "json"),
-            "--disallowed-tools",
+            "--disallowedTools",
             ",".join(disallowed_tools),
         ]
 

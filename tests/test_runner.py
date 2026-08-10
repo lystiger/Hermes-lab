@@ -1,5 +1,6 @@
 import json
 import inspect
+import shutil
 import subprocess
 import tempfile
 import unittest
@@ -258,15 +259,32 @@ class TestAgentRegistryAndCommands(unittest.TestCase):
         )
         self.assertEqual(command[:12], [
             "claude", "-p", "do work", "--model", "sonnet", "--max-turns", "12",
-            "--permission-mode", "dontAsk", "--output-format", "json", "--disallowed-tools",
+            "--permission-mode", "dontAsk", "--output-format", "json", "--disallowedTools",
         ])
         denials = command[12].split(",")
         self.assertIn("Bash(git commit)", denials)
-        self.assertIn("Bash(git commit *)", denials)
-        self.assertIn("Bash(git push *)", denials)
-        self.assertIn("Bash(git reset *)", denials)
-        self.assertNotIn("Bash(git status *)", denials)
+        self.assertIn("Bash(git commit:*)", denials)
+        self.assertIn("Bash(git push:*)", denials)
+        self.assertIn("Bash(git reset:*)", denials)
+        self.assertIn("Bash(git merge:*)", denials)
+        self.assertIn("Bash(git rebase:*)", denials)
+        self.assertNotIn("Bash(git status:*)", denials)
+        self.assertNotIn("Bash(git diff:*)", denials)
+        self.assertNotIn("Bash(git log:*)", denials)
         self.assertNotIn("Bash(git branch --show-current)", denials)
+        self.assertNotIn("Bash(git rev-parse:*)", denials)
+
+    @unittest.skipUnless(shutil.which("claude"), "Claude Code CLI is not installed")
+    def test_installed_claude_supports_disallowed_tools_flag(self):
+        result = subprocess.run(
+            ["claude", "--help"],
+            capture_output=True,
+            text=True,
+            timeout=10,
+            check=False,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("--disallowedTools", result.stdout)
 
     def test_codex_command_is_non_interactive_and_scoped(self):
         worktree = Path("/tmp/worker")

@@ -1,10 +1,10 @@
-# Hermes Sprint Runner (Sprint 02)
+# Hermes Sprint Runner
 
-Automated controller framework for orchestrating multi-agent sprint workflows across isolated Git worktrees.
+Automated controller framework for orchestrating adapter-backed agent workflows across isolated Git worktrees.
 
 ## Overview
 
-The Hermes Sprint Runner turns the manual Sprint 01 agent workflow into an automated, reproducible pipeline. It orchestrates agent execution (`agy` and `claude`) across dedicated worktrees, enforces fail-fast governance controls, validates Python syntax and handoff documentation, manages git commits/merges, and runs pytest validation inside isolated Python virtual environments.
+The runner supports Antigravity, Claude, and Codex through a common registry. Adapters own CLI construction and result validation; the controller retains worktree governance, handoff and change validation, Git commits and merges, integration tests, summaries, and final status.
 
 ## Directory & File Layout
 
@@ -12,21 +12,25 @@ The Hermes Sprint Runner turns the manual Sprint 01 agent workflow into an autom
 ~/hermes-lab/
 ├── runner/
 │   ├── run-hermes-sprint.py  # Executable sprint runner controller script
+│   ├── agents/               # Agent interface, adapters, registry, permissions
 │   └── README.md             # Architecture & usage documentation
 ├── prompts/
 │   ├── s02-agy.md            # Scaffold prompt for Antigravity agent phase
-│   └── s02-claude.md         # Review & extend prompt for Claude agent phase
+│   ├── s02-claude.md         # Review & extend prompt for Claude agent phase
+│   ├── s03-claude.md         # Adapter implementation prompt
+│   └── s03-codex.md          # Independent verification prompt
 └── sprints/
-    └── lab-s02.json          # Sprint 02 specification & phase definitions
+    ├── lab-s02.json          # Backwards-compatible Sprint 02 specification
+    └── lab-s03.json          # Claude implementation + Codex verification
 ```
 
 ## Worktree & Execution Architecture
 
 - **Canonical Repository**: `~/hermes-lab` (`main` branch - MUST BE CLEAN)
-- **Runtime Worktrees**: `~/hermes-worktrees/hermes-lab-s02/`
-  - `integration/` (`s02/integration`) - Target integration branch receiving tested phase commits
-  - `antigravity/` (`s02/antigravity`) - Workspace for Antigravity scaffold phase (`agy`)
-  - `claude/` (`s02/claude`) - Workspace for Claude review & extension phase (`claude`)
+- **Runtime Worktrees**: configured by each sprint specification. Sprint 03 uses `~/hermes-worktrees/hermes-lab-s03/`:
+  - `integration/` (`s03/integration`) - Target integration branch receiving validated phase commits
+  - `claude/` (`s03/claude`) - Adapter implementation workspace
+  - `codex/` (`s03/codex`) - Independent verification workspace
 - **Runtime Logs & Venv**: `~/hermes-runs/<timestamp>_<sprint_id>/`
   - `run_summary.json` - Structured JSON execution summary
   - `runner.log` - Full timestamped controller log output
@@ -35,30 +39,14 @@ The Hermes Sprint Runner turns the manual Sprint 01 agent workflow into an autom
 
 ## Workflow Sequence
 
-1. **Environment & Safety Check**: Verifies canonical repository status (fails immediately if dirty) and ensures Git worktrees exist under `~/hermes-worktrees/hermes-lab-s02/`.
-2. **Phase 1: Antigravity Scaffold**:
-   - Executes Antigravity agent: `agy -p <prompt> --output-format stream-json --dangerously-skip-permissions`.
-   - Captures stdout/stderr logs into run directory.
-   - Parses `stream-json` events for tool errors or permission denials.
-   - Controller checks Python syntax (`py_compile`).
-   - Controller validates file limit (`1 <= changed_files <= 15`).
-   - Controller validates presence of non-empty `HANDOFF_AGY.md`.
-   - Controller stages (`git add .`) and commits changes in `s02/antigravity`.
-   - Controller merges commit into `s02/integration`.
-3. **Phase Synchronization**:
-   - Resets `s02/claude` worktree onto the latest `s02/integration` HEAD.
-   - Verifies `HANDOFF_AGY.md` and Antigravity changes are present before starting Claude.
-4. **Phase 2: Claude Review & Extension**:
-   - Executes Claude Code headlessly: `claude -p <prompt> --model sonnet --max-turns 30 --permission-mode dontAsk --output-format json`.
-   - Captures stdout/stderr logs into run directory.
-   - Parses Claude JSON response for `is_error`, max turns exceeded, permission denials, or non-success result.
-   - Controller validates Python syntax, file limits, and `HANDOFF_CLAUDE.md`.
-   - Controller stages and commits changes in `s02/claude`.
-   - Controller merges commit into `s02/integration`.
+1. **Environment & Safety Check**: Verifies the canonical repository is clean, validates registered agents, and creates or validates configured worktrees.
+2. **Agent Dispatch**: Resolves the phase agent through the registry. The adapter invokes its CLI and validates its result while writing phase stdout/stderr logs.
+3. **Controller Validation**: Recursively compiles Python, enforces the changed-file limit, and requires the configured non-empty handoff.
+4. **Controller Integration**: The controller alone stages, commits, and merges the phase. Each later phase is synchronized to the latest integration branch first.
 5. **Verification & Testing**:
    - Controller creates isolated venv in `~/hermes-runs/<run_id>/venv`.
    - Installs dependencies from `integration/requirements.txt`.
-   - Runs `pytest` suite against `s02/integration`.
+   - Runs the complete `pytest` suite against the integration worktree.
    - Final state transitions to `READY_FOR_REVIEW` ONLY if all phases and tests succeed without `NO_CHANGES` or failures.
 
 ## Fail-Fast Guardrails
@@ -68,6 +56,9 @@ The Hermes Sprint Runner turns the manual Sprint 01 agent workflow into an autom
 - `FAILED_PERMISSION_DENIED`: Tool event or process encountered permission denial.
 - `FAILED_ANTIGRAVITY_TOOL_ERROR`: Antigravity tool call returned a non-null error.
 - `FAILED_CLAUDE_ERROR` / `FAILED_CLAUDE_MAX_TURNS`: Claude returned error or reached max turn limit.
+- `FAILED_AGENT_EXECUTABLE_MISSING`: The configured agent CLI is unavailable.
+- `FAILED_AGENT_EXECUTION`: An agent CLI returned a non-zero exit.
+- `FAILED_CODEX_EMPTY_OUTPUT`: Codex returned successfully without a result.
 - `FAILED_NO_CHANGES`: Agent phase produced zero file changes.
 - `FAILED_MISSING_HANDOFF`: Required handoff file missing or empty.
 - `FAILED_EXCESSIVE_FILES`: Worktree modified more than `limits.max_changed_files` files.
@@ -84,6 +75,9 @@ The Hermes Sprint Runner turns the manual Sprint 01 agent workflow into an autom
 ### Run Sprint Pipeline
 ```bash
 python3 runner/run-hermes-sprint.py
+
+# Re-run the Sprint 02 workflow explicitly
+python3 runner/run-hermes-sprint.py --spec sprints/lab-s02.json
 ```
 
 ### Dry-Run / Validation Options

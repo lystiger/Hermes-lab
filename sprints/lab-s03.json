@@ -1,0 +1,43 @@
+{
+  "sprint_id": "lab-s03",
+  "name": "Agent Abstraction + Codex Worker",
+  "canonical_repo": "/home/lystiger/hermes-lab",
+  "base_branch": "main",
+  "target_branch": "s03/integration",
+  "worktree_root": "/home/lystiger/hermes-worktrees/hermes-lab-s03",
+  "runs_root": "/home/lystiger/hermes-runs",
+  "limits": {
+    "max_changed_files": 20,
+    "timeout_seconds": 600
+  },
+  "phases": [
+    {
+      "name": "agent_refactor",
+      "agent": "claude",
+      "worktree_dir": "claude",
+      "branch": "s03/claude",
+      "prompt_file": "prompts/s03-claude.md",
+      "expected_handoff": "HANDOFF_CLAUDE.md",
+      "commit_message": "refactor(s03): introduce agent adapter architecture",
+      "cmd_options": {
+        "model": "sonnet",
+        "max_turns": 30,
+        "permission_mode": "dontAsk",
+        "output_format": "json"
+      }
+    },
+    {
+      "name": "verification",
+      "agent": "codex",
+      "worktree_dir": "codex",
+      "branch": "s03/codex",
+      "prompt_file": "prompts/s03-codex.md",
+      "expected_handoff": "HANDOFF_CODEX.md",
+      "commit_message": "test(s03): verify agent adapters and codex integration",
+      "cmd_options": {
+        "sandbox": "workspace-write",
+        "ephemeral": true
+      }
+    }
+  ]
+}

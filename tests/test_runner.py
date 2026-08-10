@@ -1,9 +1,11 @@
-import os
-import sys
 import json
+import inspect
+import subprocess
+import tempfile
 import unittest
 import importlib.util
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 # Dynamically import runner/run-hermes-sprint.py
@@ -15,6 +17,12 @@ spec.loader.exec_module(runner_module)
 HermesSprintRunner = runner_module.HermesSprintRunner
 SprintRunnerError = runner_module.SprintRunnerError
 scoped_antigravity_permissions = runner_module.scoped_antigravity_permissions
+AgentContext = runner_module.AgentContext
+
+from agents.antigravity import AntigravityAdapter
+from agents.claude import ClaudeAdapter
+from agents.codex import CodexAdapter
+from agents.registry import AgentRegistry, default_registry
 
 
 class TestHermesSprintRunnerValidation(unittest.TestCase):
@@ -203,6 +211,237 @@ class TestHermesSprintRunnerValidation(unittest.TestCase):
 
         after_content = settings_path.read_text(encoding="utf-8") if settings_path.exists() else None
         self.assertEqual(initial_content, after_content)
+
+
+class TestAgentRegistryAndCommands(unittest.TestCase):
+    def test_known_agents_resolve(self):
+        self.assertIsInstance(default_registry.get("antigravity"), AntigravityAdapter)
+        self.assertIsInstance(default_registry.get("claude"), ClaudeAdapter)
+        self.assertIsInstance(default_registry.get("codex"), CodexAdapter)
+
+    def test_unknown_agent_fails_without_instantiation(self):
+        unsupported = MagicMock()
+        registry = AgentRegistry({"known": unsupported})
+        with self.assertRaises(SprintRunnerError) as ctx:
+            registry.get("missing")
+        self.assertEqual(ctx.exception.code, "FAILED_UNKNOWN_AGENT")
+        unsupported.assert_not_called()
+
+    def test_antigravity_command(self):
+        command = AntigravityAdapter().build_command(
+            "do work", {"output_format": "stream-json", "dangerously_skip_permissions": False}
+        )
+        self.assertEqual(command, ["agy", "-p", "do work", "--output-format", "stream-json"])
+
+    def test_claude_command(self):
+        command = ClaudeAdapter().build_command(
+            "do work",
+            {"model": "sonnet", "max_turns": 12, "permission_mode": "dontAsk", "output_format": "json"},
+        )
+        self.assertEqual(
+            command,
+            [
+                "claude", "-p", "do work", "--model", "sonnet", "--max-turns", "12",
+                "--permission-mode", "dontAsk", "--output-format", "json",
+            ],
+        )
+
+    def test_codex_command_is_non_interactive_and_scoped(self):
+        worktree = Path("/tmp/worker")
+        command = CodexAdapter().build_command("do work", {"sandbox": "workspace-write"}, worktree)
+        self.assertEqual(
+            command,
+            [
+                "codex", "exec", "--color", "never", "--cd", str(worktree),
+                "--sandbox", "workspace-write", "--ephemeral", "do work",
+            ],
+        )
+
+
+class TestAgentExecution(unittest.TestCase):
+    def make_context(self, temporary_dir, result=None, error=None, name="codex"):
+        root = Path(temporary_dir)
+        runner = SimpleNamespace(
+            logger=MagicMock(),
+            canonical_repo=root,
+            run_cmd=MagicMock(side_effect=error) if error else MagicMock(return_value=result),
+        )
+        return AgentContext(
+            runner=runner,
+            phase={"name": "verification", "agent": name},
+            worktree=root,
+            prompt="verify",
+            options={},
+            stdout_file=root / "stdout.log",
+            stderr_file=root / "stderr.log",
+            timeout_seconds=10,
+        )
+
+    def test_codex_success_persists_output(self):
+        with tempfile.TemporaryDirectory() as temporary_dir:
+            result = subprocess.CompletedProcess(["codex"], 0, "completed", "warning")
+            context = self.make_context(temporary_dir, result=result)
+            CodexAdapter().execute(context)
+            self.assertEqual(context.stdout_file.read_text(encoding="utf-8"), "completed")
+            self.assertEqual(context.stderr_file.read_text(encoding="utf-8"), "warning")
+
+    def test_codex_nonzero_exit_is_rejected_and_logged(self):
+        with tempfile.TemporaryDirectory() as temporary_dir:
+            result = subprocess.CompletedProcess(["codex"], 7, "partial", "failure")
+            context = self.make_context(temporary_dir, result=result)
+            with self.assertRaises(SprintRunnerError) as ctx:
+                CodexAdapter().execute(context)
+            self.assertEqual(ctx.exception.code, "FAILED_AGENT_EXECUTION")
+            self.assertEqual(context.stderr_file.read_text(encoding="utf-8"), "failure")
+
+    def test_codex_empty_output_is_rejected(self):
+        with tempfile.TemporaryDirectory() as temporary_dir:
+            result = subprocess.CompletedProcess(["codex"], 0, "", "")
+            context = self.make_context(temporary_dir, result=result)
+            with self.assertRaises(SprintRunnerError) as ctx:
+                CodexAdapter().execute(context)
+            self.assertEqual(ctx.exception.code, "FAILED_CODEX_EMPTY_OUTPUT")
+
+    def test_codex_timeout_is_preserved(self):
+        with tempfile.TemporaryDirectory() as temporary_dir:
+            timeout = SprintRunnerError("FAILED_TIMEOUT", "timed out")
+            context = self.make_context(temporary_dir, error=timeout)
+            with self.assertRaises(SprintRunnerError) as ctx:
+                CodexAdapter().execute(context)
+            self.assertEqual(ctx.exception.code, "FAILED_TIMEOUT")
+
+    def test_codex_missing_executable_has_clear_error(self):
+        with tempfile.TemporaryDirectory() as temporary_dir:
+            context = self.make_context(temporary_dir, error=FileNotFoundError("codex"))
+            with self.assertRaises(SprintRunnerError) as ctx:
+                CodexAdapter().execute(context)
+            self.assertEqual(ctx.exception.code, "FAILED_AGENT_EXECUTABLE_MISSING")
+
+    def test_claude_nonzero_exit_is_rejected(self):
+        with tempfile.TemporaryDirectory() as temporary_dir:
+            result = subprocess.CompletedProcess(["claude"], 2, "", "bad")
+            context = self.make_context(temporary_dir, result=result, name="claude")
+            with self.assertRaises(SprintRunnerError) as ctx:
+                ClaudeAdapter().execute(context)
+            self.assertEqual(ctx.exception.code, "FAILED_AGENT_EXECUTION")
+
+    def test_claude_is_error_is_rejected(self):
+        output = json.dumps(
+            {
+                "type": "result",
+                "subtype": "success",
+                "is_error": True,
+                "permission_denials": [],
+                "result": "failed",
+            }
+        )
+        with self.assertRaises(SprintRunnerError) as ctx:
+            ClaudeAdapter.parse_json(output)
+        self.assertEqual(ctx.exception.code, "FAILED_CLAUDE_ERROR")
+
+    def test_antigravity_permissions_restore_after_timeout(self):
+        settings_path = Path("/home/lystiger/.gemini/antigravity-cli/settings.json")
+        initial_content = settings_path.read_text(encoding="utf-8") if settings_path.exists() else None
+        with tempfile.TemporaryDirectory() as temporary_dir:
+            timeout = SprintRunnerError("FAILED_TIMEOUT", "timed out")
+            context = self.make_context(temporary_dir, error=timeout, name="antigravity")
+            with self.assertRaises(SprintRunnerError):
+                AntigravityAdapter().execute(context)
+        after_content = settings_path.read_text(encoding="utf-8") if settings_path.exists() else None
+        self.assertEqual(initial_content, after_content)
+
+    def test_malformed_agent_outputs_are_rejected(self):
+        with self.assertRaises(SprintRunnerError) as claude_ctx:
+            ClaudeAdapter.parse_json("not json")
+        self.assertEqual(claude_ctx.exception.code, "FAILED_CLAUDE_INVALID_JSON")
+        with self.assertRaises(SprintRunnerError) as agy_ctx:
+            AntigravityAdapter.parse_stream_json("not json")
+        self.assertEqual(agy_ctx.exception.code, "FAILED_ANTIGRAVITY_INVALID_OUTPUT")
+
+
+class TestControllerDispatch(unittest.TestCase):
+    def test_execute_agent_dispatches_through_registry(self):
+        adapter = MagicMock()
+        registry = MagicMock()
+        registry.get.return_value = adapter
+        runner = HermesSprintRunner(
+            spec_path=Path(__file__).resolve().parent.parent / "sprints" / "lab-s02.json",
+            dry_run=True,
+            skip_agent_exec=True,
+            agent_registry=registry,
+        )
+        phase = runner.spec["phases"][0]
+        with tempfile.TemporaryDirectory() as temporary_dir:
+            runner.execute_agent(phase, Path(temporary_dir))
+            registry.get.assert_called_once_with("antigravity")
+            adapter.execute.assert_called_once()
+
+    def test_controller_has_no_agent_command_construction(self):
+        source = inspect.getsource(HermesSprintRunner.execute_agent)
+        self.assertNotIn('"agy"', source)
+        self.assertNotIn('"claude"', source)
+        self.assertNotIn('"codex"', source)
+        for adapter_type in (AntigravityAdapter, ClaudeAdapter, CodexAdapter):
+            self.assertNotIn('"git"', inspect.getsource(adapter_type))
+
+    def test_changed_file_limit_and_handoff_remain_mandatory(self):
+        runner = HermesSprintRunner(
+            spec_path=Path(__file__).resolve().parent.parent / "sprints" / "lab-s02.json",
+            dry_run=True,
+            skip_agent_exec=True,
+        )
+        runner.run_cmd = MagicMock(
+            return_value=subprocess.CompletedProcess(
+                ["git", "status"], 0, "".join(f" M file{number}.py\n" for number in range(16)), ""
+            )
+        )
+        with self.assertRaises(SprintRunnerError) as changed_ctx:
+            runner.validate_changed_files(Path("/tmp/worktree"))
+        self.assertEqual(changed_ctx.exception.code, "FAILED_EXCESSIVE_FILES")
+        runner.run_cmd.assert_called_once_with(
+            ["git", "status", "--porcelain", "--untracked-files=all"],
+            cwd=Path("/tmp/worktree"),
+        )
+        with tempfile.TemporaryDirectory() as temporary_dir:
+            with self.assertRaises(SprintRunnerError) as handoff_ctx:
+                runner.validate_handoff_file(Path(temporary_dir), "HANDOFF.md")
+        self.assertEqual(handoff_ctx.exception.code, "FAILED_MISSING_HANDOFF")
+
+    def test_execute_phase_keeps_validation_commit_and_merge_in_controller(self):
+        runner = HermesSprintRunner(
+            spec_path=Path(__file__).resolve().parent.parent / "sprints" / "lab-s02.json",
+            dry_run=False,
+            skip_agent_exec=True,
+        )
+        runner.validate_python_syntax = MagicMock()
+        runner.validate_changed_files = MagicMock(return_value=[" M changed.py"])
+        runner.validate_handoff_file = MagicMock()
+
+        def command_result(command, **kwargs):
+            stdout = "abc123\n" if command[:3] == ["git", "rev-parse", "HEAD"] else ""
+            return subprocess.CompletedProcess(command, 0, stdout, "")
+
+        runner.run_cmd = MagicMock(side_effect=command_result)
+        phase = runner.spec["phases"][0]
+        runner.execute_phase(phase)
+        runner.validate_python_syntax.assert_called_once()
+        runner.validate_changed_files.assert_called_once()
+        runner.validate_handoff_file.assert_called_once()
+        commands = [call.args[0] for call in runner.run_cmd.call_args_list]
+        self.assertIn(["git", "add", "."], commands)
+        self.assertTrue(any(command[:2] == ["git", "commit"] for command in commands))
+        self.assertTrue(any(command[:2] == ["git", "merge"] for command in commands))
+
+    def test_ready_for_review_requires_integration_tests(self):
+        runner = HermesSprintRunner(
+            spec_path=Path(__file__).resolve().parent.parent / "sprints" / "lab-s02.json",
+            dry_run=True,
+            skip_agent_exec=True,
+        )
+        runner.run_summary["phases"] = [{"phase": "one", "status": "SUCCESS"}]
+        with self.assertRaises(SprintRunnerError) as ctx:
+            runner.finalize()
+        self.assertEqual(ctx.exception.code, "FAILED_TESTS")
 
 
 if __name__ == "__main__":

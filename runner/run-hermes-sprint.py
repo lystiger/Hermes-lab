@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Hermes Sprint Runner (Sprint 02)
+Hermes Sprint Runner
 Controller script for managing multi-agent sprint workflows, worktrees, git operations,
 agent execution, fail-fast validations, and automated test validation.
 
@@ -12,126 +12,39 @@ Governance Boundaries:
 - Does NOT push to remote, merge to main, or access production resources.
 """
 
-import os
 import sys
 import json
-import shutil
 import argparse
 import subprocess
 import py_compile
 import logging
 from pathlib import Path
 from datetime import datetime
-from contextlib import contextmanager
 
+SCRIPT_DIR = Path(__file__).resolve().parent
+if str(SCRIPT_DIR) not in sys.path:
+    sys.path.insert(0, str(SCRIPT_DIR))
 
-class SprintRunnerError(Exception):
-    """Custom exception class for sprint runner fail-fast conditions."""
-    def __init__(self, code, message):
-        super().__init__(message)
-        self.code = code
-        self.message = message
-
-
-@contextmanager
-def scoped_antigravity_permissions(wt_dir, canonical_repo):
-    """
-    Context manager to provision temporary, narrowly-scoped permissions in
-    ~/.gemini/antigravity-cli/settings.json specifically for the assigned Antigravity worker.
-    Restores exact original settings.json upon exit (even on exception/timeout).
-    """
-    settings_path = Path("/home/lystiger/.gemini/antigravity-cli/settings.json")
-    original_content = None
-    existed = settings_path.exists()
-
-    if existed:
-        try:
-            with open(settings_path, "r", encoding="utf-8") as f:
-                original_content = f.read()
-        except Exception:
-            original_content = None
-
-    try:
-        settings = {}
-        if original_content:
-            try:
-                settings = json.loads(original_content)
-            except Exception:
-                settings = {}
-
-        if "permissions" not in settings or not isinstance(settings["permissions"], dict):
-            settings["permissions"] = {"allow": [], "deny": []}
-
-        perms = settings["permissions"]
-        if "allow" not in perms or not isinstance(perms["allow"], list):
-            perms["allow"] = []
-        if "deny" not in perms or not isinstance(perms["deny"], list):
-            perms["deny"] = []
-        if "trustedWorkspaces" not in settings or not isinstance(settings["trustedWorkspaces"], list):
-            settings["trustedWorkspaces"] = []
-
-        wt_str = str(wt_dir.resolve())
-        canonical_str = str(canonical_repo.resolve())
-        git_wt_str = str((wt_dir / ".git").resolve())
-        git_canonical_str = str((canonical_repo / ".git").resolve())
-
-        # 1. Trusted workspace for Antigravity CLI
-        if wt_str not in settings["trustedWorkspaces"]:
-            settings["trustedWorkspaces"].append(wt_str)
-
-        # 2. Narrowly scoped allow rules
-        allow_rules = [
-            f"read_file({wt_str})",
-            f"read_file({wt_str}/**)",
-            f"write_file({wt_str})",
-            f"write_file({wt_str}/**)",
-            # Read-only access for Git worktree metadata
-            f"read_file({canonical_str}/.git)",
-            f"read_file({canonical_str}/.git/**)"
-        ]
-
-        # 3. Explicit deny rules protecting .git directories from writes
-        deny_rules = [
-            f"write_file({git_wt_str})",
-            f"write_file({git_wt_str}/**)",
-            f"write_file({git_canonical_str})",
-            f"write_file({git_canonical_str}/**)"
-        ]
-
-        for rule in allow_rules:
-            if rule not in perms["allow"]:
-                perms["allow"].append(rule)
-
-        for rule in deny_rules:
-            if rule not in perms["deny"]:
-                perms["deny"].append(rule)
-
-        settings_path.parent.mkdir(parents=True, exist_ok=True)
-        with open(settings_path, "w", encoding="utf-8") as f:
-            json.dump(settings, f, indent=2)
-
-        yield
-
-    finally:
-        if existed and original_content is not None:
-            try:
-                with open(settings_path, "w", encoding="utf-8") as f:
-                    f.write(original_content)
-            except Exception:
-                pass
-        elif not existed and settings_path.exists():
-            try:
-                settings_path.unlink()
-            except Exception:
-                pass
+from agents.base import AgentContext
+from agents.errors import SprintRunnerError
+from agents.permissions import scoped_antigravity_permissions
+from agents.registry import default_registry
 
 
 class HermesSprintRunner:
-    def __init__(self, spec_path, dry_run=False, skip_agent_exec=False, verbose=False):
+    def __init__(
+        self,
+        spec_path,
+        dry_run=False,
+        skip_agent_exec=False,
+        verbose=False,
+        agent_registry=None,
+    ):
         self.spec_path = Path(spec_path).resolve()
         self.dry_run = dry_run
         self.skip_agent_exec = skip_agent_exec
         self.verbose = verbose
+        self.agent_registry = agent_registry or default_registry
         
         self.spec = self._load_spec()
         self.sprint_id = self.spec.get("sprint_id", "lab-s02")
@@ -164,8 +77,9 @@ class HermesSprintRunner:
 
     def _setup_logging(self):
         self.run_dir.mkdir(parents=True, exist_ok=True)
-        logger = logging.getLogger("HermesSprintRunner")
+        logger = logging.getLogger(f"HermesSprintRunner.{id(self)}")
         logger.setLevel(logging.DEBUG if self.verbose else logging.INFO)
+        logger.propagate = False
         
         file_handler = logging.FileHandler(self.log_file)
         console_handler = logging.StreamHandler(sys.stdout)
@@ -226,6 +140,7 @@ class HermesSprintRunner:
 
         # 2. Setup agent worktrees
         for phase in self.spec.get("phases", []):
+            self.agent_registry.get(phase["agent"])
             wt_dir = self.worktree_root / phase["worktree_dir"]
             branch = phase["branch"]
             self._ensure_worktree(wt_dir, branch, target_branch)
@@ -256,174 +171,48 @@ class HermesSprintRunner:
             else:
                 self.run_cmd(["git", "worktree", "add", "-b", branch, str(path), base_branch], cwd=self.canonical_repo)
 
-    def sync_claude_worktree(self, claude_wt_dir, target_branch="s02/integration"):
-        self.logger.info(f"Synchronizing Claude worktree ({claude_wt_dir.name}) to latest {target_branch}")
-        self.run_cmd(["git", "fetch", ".", target_branch], cwd=claude_wt_dir)
-        self.run_cmd(["git", "reset", "--hard", target_branch], cwd=claude_wt_dir)
-        
-        # Verify HANDOFF_AGY.md exists in claude worktree
-        handoff_agy = claude_wt_dir / "HANDOFF_AGY.md"
-        if not handoff_agy.exists():
-            raise SprintRunnerError(
-                "FAILED_PHASE_SYNC",
-                f"Phase sync failed: HANDOFF_AGY.md not present in Claude worktree after reset to {target_branch}"
-            )
-        self.logger.info(f"Phase synchronization successful: Claude worktree updated to {target_branch} with HANDOFF_AGY.md")
+    def sync_phase_worktree(self, worktree, target_branch):
+        self.logger.info(
+            "Synchronizing phase worktree (%s) to latest %s",
+            worktree.name,
+            target_branch,
+        )
+        self.run_cmd(["git", "fetch", ".", target_branch], cwd=worktree)
+        self.run_cmd(["git", "reset", "--hard", target_branch], cwd=worktree)
 
+    # Compatibility helpers retained for callers that validated output through the runner.
     def parse_antigravity_stream_json(self, stdout_text, stderr_text=""):
-        if "Permission denied" in stderr_text or "permission denied" in stderr_text:
-            raise SprintRunnerError("FAILED_PERMISSION_DENIED", f"Antigravity permission denied in stderr:\n{stderr_text}")
+        from agents.antigravity import AntigravityAdapter
 
-        lines = stdout_text.strip().split("\n")
-        for line_idx, line in enumerate(lines):
-            line_str = line.strip()
-            if not line_str:
-                continue
-
-            try:
-                event = json.loads(line_str)
-            except json.JSONDecodeError:
-                if "permission denied" in line_str.lower() or "eacces" in line_str.lower():
-                    raise SprintRunnerError("FAILED_PERMISSION_DENIED", f"Antigravity permission error on line {line_idx+1}: {line_str}")
-                continue
-
-            if not isinstance(event, dict):
-                continue
-
-            # 1. Primary check: nested step_update.tool_info.error
-            if event.get("event") == "step_update" or "step_update" in event:
-                step_update = event.get("step_update")
-                if isinstance(step_update, dict) and step_update.get("step_type") == "tool":
-                    tool_info = step_update.get("tool_info")
-                    if isinstance(tool_info, dict):
-                        tool_err = tool_info.get("error")
-                        if tool_err is not None and tool_err is not False and tool_err != "":
-                            err_str = str(tool_err)
-                            if "permission" in err_str.lower() or "denied" in err_str.lower() or "eacces" in err_str.lower():
-                                raise SprintRunnerError("FAILED_PERMISSION_DENIED", f"Antigravity tool permission error: {err_str}")
-                            raise SprintRunnerError("FAILED_ANTIGRAVITY_TOOL_ERROR", f"Antigravity tool error on line {line_idx+1}: {err_str}")
-
-            # 2. Defensive top-level checks
-            err = event.get("error")
-            if err is not None and err is not False and err != "":
-                err_msg = str(err)
-                if "permission" in err_msg.lower() or "denied" in err_msg.lower():
-                    raise SprintRunnerError("FAILED_PERMISSION_DENIED", f"Antigravity tool permission error: {err_msg}")
-                raise SprintRunnerError("FAILED_ANTIGRAVITY_TOOL_ERROR", f"Antigravity tool error on line {line_idx+1}: {err_msg}")
-
-            status = str(event.get("status", "")).upper()
-            if status in ["ERROR", "FAILED"]:
-                msg = event.get("message") or event.get("details") or line_str
-                raise SprintRunnerError("FAILED_ANTIGRAVITY_TOOL_ERROR", f"Antigravity tool event status {status}: {msg}")
-
-            if event.get("is_error") is True:
-                msg = event.get("message") or line_str
-                raise SprintRunnerError("FAILED_ANTIGRAVITY_TOOL_ERROR", f"Antigravity tool error event: {msg}")
-
-            msg = str(event.get("message", ""))
-            if "permission denied" in msg.lower() or "eacces" in msg.lower():
-                raise SprintRunnerError("FAILED_PERMISSION_DENIED", f"Antigravity permission error in message: {msg}")
+        return AntigravityAdapter.parse_stream_json(stdout_text, stderr_text)
 
     def parse_claude_json(self, stdout_text, stderr_text=""):
-        if "Permission denied" in stderr_text or "permission denied" in stderr_text:
-            raise SprintRunnerError("FAILED_PERMISSION_DENIED", f"Claude permission denied in stderr:\n{stderr_text}")
+        from agents.claude import ClaudeAdapter
 
-        stdout_clean = stdout_text.strip()
-        if not stdout_clean:
-            raise SprintRunnerError("FAILED_CLAUDE_EMPTY_OUTPUT", "Claude emitted no output")
-
-        data = None
-        try:
-            data = json.loads(stdout_clean)
-        except json.JSONDecodeError:
-            lines = [l.strip() for l in stdout_clean.split("\n") if l.strip()]
-            for line in reversed(lines):
-                try:
-                    data = json.loads(line)
-                    break
-                except json.JSONDecodeError:
-                    continue
-
-        if data is None or not isinstance(data, dict):
-            raise SprintRunnerError("FAILED_CLAUDE_INVALID_JSON", f"Failed to parse JSON response from Claude: {stdout_clean[:200]}")
-
-        # 1. Require type == "result"
-        type_val = data.get("type")
-        if type_val != "result":
-            raise SprintRunnerError("FAILED_CLAUDE_ERROR", f"Claude output type is '{type_val}', expected 'result'")
-
-        # 2. Require subtype == "success"
-        subtype_val = data.get("subtype")
-        if subtype_val == "max_turns_exceeded" or "max_turns" in str(subtype_val).lower():
-            raise SprintRunnerError("FAILED_CLAUDE_MAX_TURNS", f"Claude reached maximum turn limit: {subtype_val}")
-        if subtype_val != "success":
-            raise SprintRunnerError("FAILED_CLAUDE_ERROR", f"Claude output subtype is '{subtype_val}', expected 'success'")
-
-        # 3. Require is_error == False
-        if data.get("is_error") is not False:
-            err_msg = data.get("error") or data.get("message") or f"is_error is {data.get('is_error')}"
-            raise SprintRunnerError("FAILED_CLAUDE_ERROR", f"Claude execution returned is_error={data.get('is_error')}: {err_msg}")
-
-        # 4. Require permission_denials empty
-        denials = data.get("permission_denials") or []
-        if denials:
-            raise SprintRunnerError("FAILED_PERMISSION_DENIED", f"Claude encountered permission denials: {denials}")
+        return ClaudeAdapter.parse_json(stdout_text, stderr_text)
 
     def execute_agent(self, phase, wt_dir):
-        agent = phase["agent"]
+        agent_name = phase["agent"]
+        adapter = self.agent_registry.get(agent_name)
         prompt_file = self.canonical_repo / phase["prompt_file"]
-        cmd_opts = phase.get("cmd_options", {})
-        timeout_sec = self.limits.get("timeout_seconds", 300)
-
-        with open(prompt_file, "r", encoding="utf-8") as f:
-            prompt_content = f.read().strip()
-
-        stdout_file = self.run_dir / f"{phase['name']}_{agent}_stdout.log"
-        stderr_file = self.run_dir / f"{phase['name']}_{agent}_stderr.log"
-
-        if agent == "antigravity":
-            cmd = ["agy", "-p", prompt_content, "--output-format", cmd_opts.get("output_format", "stream-json")]
-            if cmd_opts.get("dangerously_skip_permissions", False):
-                cmd.append("--dangerously-skip-permissions")
-        elif agent == "claude":
-            cmd = [
-                "claude", "-p", prompt_content,
-                "--model", cmd_opts.get("model", "sonnet"),
-                "--max-turns", str(cmd_opts.get("max_turns", 30)),
-                "--permission-mode", cmd_opts.get("permission_mode", "dontAsk"),
-                "--output-format", cmd_opts.get("output_format", "json")
-            ]
-        else:
-            raise SprintRunnerError("FAILED_UNKNOWN_AGENT", f"Unknown agent type: {agent}")
-
-        self.logger.info(f"Launching agent process: {cmd[0]} in worktree {wt_dir.name}")
-
-        if agent == "antigravity":
-            with scoped_antigravity_permissions(wt_dir, self.canonical_repo):
-                res = self.run_cmd(cmd, cwd=wt_dir, timeout=timeout_sec, check=False)
-        else:
-            res = self.run_cmd(cmd, cwd=wt_dir, timeout=timeout_sec, check=False)
-
-        with open(stdout_file, "w", encoding="utf-8") as f:
-            f.write(res.stdout)
-        with open(stderr_file, "w", encoding="utf-8") as f:
-            f.write(res.stderr)
-
-        self.logger.info(f"Agent {agent} process completed with exit code {res.returncode}")
-
-        if res.returncode != 0:
-            if "Permission denied" in res.stderr or "permission denied" in res.stderr:
-                raise SprintRunnerError("FAILED_PERMISSION_DENIED", f"Agent {agent} permission denied:\n{res.stderr}")
-            raise SprintRunnerError("FAILED_AGENT_EXECUTION", f"Agent {agent} exited with code {res.returncode}:\n{res.stderr}")
-
-        # Fail-fast parsing
-        if agent == "antigravity":
-            self.parse_antigravity_stream_json(res.stdout, res.stderr)
-        elif agent == "claude":
-            self.parse_claude_json(res.stdout, res.stderr)
+        context = AgentContext(
+            runner=self,
+            phase=phase,
+            worktree=wt_dir,
+            prompt=prompt_file.read_text(encoding="utf-8").strip(),
+            options=phase.get("cmd_options", {}),
+            stdout_file=self.run_dir / f"{phase['name']}_{agent_name}_stdout.log",
+            stderr_file=self.run_dir / f"{phase['name']}_{agent_name}_stderr.log",
+            timeout_seconds=self.limits.get("timeout_seconds", 300),
+        )
+        return adapter.execute(context)
 
     def validate_changed_files(self, worktree_path):
-        res = self.run_cmd(["git", "status", "--porcelain"], cwd=worktree_path)
+        # Expand untracked directories so the limit counts files, not directory entries.
+        res = self.run_cmd(
+            ["git", "status", "--porcelain", "--untracked-files=all"],
+            cwd=worktree_path,
+        )
         lines = [line for line in res.stdout.strip().split("\n") if line.strip()]
         max_limit = self.limits.get("max_changed_files", 15)
         
@@ -451,7 +240,7 @@ class HermesSprintRunner:
 
     def validate_python_syntax(self, worktree_path):
         self.logger.info(f"Validating Python syntax in {worktree_path}")
-        py_files = list(worktree_path.glob("*.py"))
+        py_files = list(worktree_path.rglob("*.py"))
         for py_file in py_files:
             try:
                 py_compile.compile(str(py_file), doraise=True)
@@ -474,10 +263,10 @@ class HermesSprintRunner:
         if not prompt_file.exists():
             raise SprintRunnerError("FAILED_MISSING_PROMPT", f"Prompt file not found: {prompt_file}")
 
-        # Phase Synchronization for Claude
-        if agent == "claude":
+        # Every phase after the first starts from the latest integration state.
+        if self.run_summary["phases"]:
             target_branch = self.spec.get("target_branch", "s02/integration")
-            self.sync_claude_worktree(wt_dir, target_branch)
+            self.sync_phase_worktree(wt_dir, target_branch)
 
         # Agent execution
         if not self.skip_agent_exec and not self.dry_run:
@@ -593,8 +382,8 @@ class HermesSprintRunner:
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Hermes Sprint Workflow Runner (Sprint 02)")
-    parser.add_argument("--spec", default="sprints/lab-s02.json", help="Path to sprint JSON specification")
+    parser = argparse.ArgumentParser(description="Hermes Sprint Workflow Runner")
+    parser.add_argument("--spec", default="sprints/lab-s03.json", help="Path to sprint JSON specification")
     parser.add_argument("--dry-run", action="store_true", help="Simulate run without modifying git state")
     parser.add_argument("--skip-agent-execution", action="store_true", help="Skip invoking external agent CLI")
     parser.add_argument("--verbose", "-v", action="store_true", help="Enable verbose debug logging")

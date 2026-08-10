@@ -11,8 +11,8 @@ class CodexAdapter(AgentAdapter):
             command.extend(["--cd", str(worktree)])
         if options.get("model"):
             command.extend(["--model", str(options["model"])])
-        if options.get("sandbox"):
-            command.extend(["--sandbox", str(options["sandbox"])])
+        # Worker specs cannot weaken the workspace boundary.
+        command.extend(["--sandbox", "workspace-write"])
         if options.get("ephemeral", True):
             command.append("--ephemeral")
         command.append(prompt)

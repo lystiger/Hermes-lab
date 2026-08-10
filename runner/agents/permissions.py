@@ -4,9 +4,12 @@ from pathlib import Path
 
 
 @contextmanager
-def scoped_antigravity_permissions(wt_dir, canonical_repo):
+def scoped_antigravity_permissions(wt_dir, canonical_repo, settings_path=None):
     """Install narrowly scoped Antigravity permissions and restore them exactly."""
-    settings_path = Path("/home/lystiger/.gemini/antigravity-cli/settings.json")
+    settings_path = Path(
+        settings_path
+        or Path.home() / ".gemini" / "antigravity-cli" / "settings.json"
+    )
     original_content = None
     existed = settings_path.exists()
 

@@ -39,6 +39,7 @@ class HermesSprintRunner:
         skip_agent_exec=False,
         verbose=False,
         agent_registry=None,
+        export_report=False,
     ):
         self.spec_path = Path(spec_path).resolve()
         self.dry_run = dry_run
@@ -52,6 +53,14 @@ class HermesSprintRunner:
         self.worktree_root = Path(self.spec.get("worktree_root", f"/home/lystiger/hermes-worktrees/{self.sprint_id}")).resolve()
         self.runs_root = Path(self.spec.get("runs_root", "/home/lystiger/hermes-runs")).resolve()
         self.limits = self.spec.get("limits", {"max_changed_files": 15, "timeout_seconds": 300})
+        if export_report is True:
+            self.report_path = (
+                self.canonical_repo / "reports" / self.sprint_id / "run-summary.json"
+            )
+        elif export_report:
+            self.report_path = Path(export_report).resolve()
+        else:
+            self.report_path = None
         
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         self.run_dir = self.runs_root / f"{timestamp}_{self.sprint_id}"
@@ -97,7 +106,7 @@ class HermesSprintRunner:
         timeout = timeout or self.limits.get("timeout_seconds", 300)
         self.logger.debug(f"Executing command: {' '.join(cmd) if isinstance(cmd, list) else cmd} (cwd: {cwd})")
         
-        if self.dry_run and any(k in cmd for k in ["commit", "merge", "push", "add"]):
+        if self.dry_run and any(k in cmd for k in ["commit", "merge", "push", "add", "reset"]):
             self.logger.info(f"[DRY-RUN] Would run: {cmd}")
             return subprocess.CompletedProcess(cmd, 0, stdout="[dry-run]", stderr="")
 
@@ -170,6 +179,17 @@ class HermesSprintRunner:
                 self.run_cmd(["git", "worktree", "add", str(path), branch], cwd=self.canonical_repo)
             else:
                 self.run_cmd(["git", "worktree", "add", "-b", branch, str(path), base_branch], cwd=self.canonical_repo)
+
+        # Clean, correctly assigned sprint branches are controller-owned and may
+        # contain commits from an earlier run. Resetting them makes reruns start
+        # from the configured state while dirty worktrees still fail above.
+        self.logger.info(
+            "Resetting worktree %s (%s) to configured start %s",
+            path.name,
+            branch,
+            base_branch,
+        )
+        self.run_cmd(["git", "reset", "--hard", base_branch], cwd=path)
 
     def sync_phase_worktree(self, worktree, target_branch):
         self.logger.info(
@@ -361,6 +381,36 @@ class HermesSprintRunner:
         self.logger.info(f"Integration Commit: {self.run_summary['integration_commit']}")
         self.logger.info("==========================================\n")
 
+    def export_sanitized_report(self, report_path=None):
+        """Write deterministic run evidence without prompts, logs, or errors."""
+        destination_value = report_path or self.report_path
+        if destination_value is None:
+            raise ValueError("A report path is required for sanitized export")
+        destination = Path(destination_value).resolve()
+        test_results = self.run_summary.get("test_results") or {}
+        sanitized = {
+            "sprint_id": self.sprint_id,
+            "status": self.run_summary.get("status"),
+            "phases": [
+                {
+                    "phase": phase.get("phase"),
+                    "agent": phase.get("agent"),
+                    "status": phase.get("status"),
+                    "changed_files_count": phase.get("changed_files_count"),
+                }
+                for phase in self.run_summary.get("phases", [])
+            ],
+            "test_status": test_results.get("status"),
+            "integration_commit": self.run_summary.get("integration_commit"),
+        }
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        destination.write_text(
+            json.dumps(sanitized, indent=2, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+        self.logger.info("Sanitized run report written to %s", destination)
+        return destination
+
     def execute(self):
         try:
             self.prepare_environment()
@@ -377,6 +427,8 @@ class HermesSprintRunner:
             with open(self.summary_file, "w", encoding="utf-8") as f:
                 json.dump(self.run_summary, f, indent=2)
             self.logger.info(f"Run summary written to {self.summary_file}")
+            if self.report_path is not None:
+                self.export_sanitized_report()
 
         return self.run_summary["status"] == "READY_FOR_REVIEW"
 
@@ -387,6 +439,17 @@ def main():
     parser.add_argument("--dry-run", action="store_true", help="Simulate run without modifying git state")
     parser.add_argument("--skip-agent-execution", action="store_true", help="Skip invoking external agent CLI")
     parser.add_argument("--verbose", "-v", action="store_true", help="Enable verbose debug logging")
+    parser.add_argument(
+        "--export-report",
+        nargs="?",
+        const=True,
+        default=False,
+        metavar="PATH",
+        help=(
+            "Export sanitized evidence; defaults to "
+            "reports/<sprint-id>/run-summary.json"
+        ),
+    )
 
     args = parser.parse_args()
     
@@ -394,7 +457,8 @@ def main():
         spec_path=args.spec,
         dry_run=args.dry_run,
         skip_agent_exec=args.skip_agent_execution,
-        verbose=args.verbose
+        verbose=args.verbose,
+        export_report=args.export_report,
     )
     
     success = runner.execute()

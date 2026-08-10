@@ -40,6 +40,7 @@ The runner supports Antigravity, Claude, and Codex through a common registry. Ad
 ## Workflow Sequence
 
 1. **Environment & Safety Check**: Verifies the canonical repository is clean, validates registered agents, and creates or validates configured worktrees.
+   Clean integration and phase worktrees are reset to their configured starting refs on every run, so prior sprint commits cannot affect a rerun. Dirty or wrongly assigned worktrees fail before reset.
 2. **Agent Dispatch**: Resolves the phase agent through the registry. The adapter invokes its CLI and validates its result while writing phase stdout/stderr logs.
 3. **Controller Validation**: Recursively compiles Python, enforces the changed-file limit, and requires the configured non-empty handoff.
 4. **Controller Integration**: The controller alone stages, commits, and merges the phase. Each later phase is synchronized to the latest integration branch first.
@@ -68,7 +69,15 @@ The runner supports Antigravity, Claude, and Codex through a common registry. Ad
 ## Security & Governance Boundaries
 
 - **Controller Git Ownership**: All `git add`, `git commit`, and `git merge` commands are strictly executed by the controller script. Agents edit files only.
+- **Worker Git Boundaries**: Antigravity denies writes to worktree and canonical Git metadata; Claude receives CLI-level denials for Git mutation commands while retaining read-only inspection; Codex is forced into its assigned `workspace-write` sandbox.
+- **Isolated Permission Tests**: Antigravity settings paths are injectable, and tests use temporary settings files. Production defaults to `~/.gemini/antigravity-cli/settings.json`.
 - **No Remote Operations**: The runner does NOT push to `origin`, merge to `main`, or deploy to external environments.
+
+## Sanitized Run Evidence
+
+Use `--export-report` to write deterministic, reviewable evidence to `reports/<sprint-id>/run-summary.json`, or provide an explicit path. The export contains only sprint status, safe phase fields, test status, and the integration commit. It excludes prompts, model output, test output, errors, tokens, timestamps, and absolute paths.
+
+The export happens after sprint execution, so it cannot affect worker changed-file validation or the integration commit. Exporting into the canonical repository intentionally leaves that report as an uncommitted file; commit, move, or remove it before the next run because canonical dirty-repository protection remains enforced.
 
 ## Usage
 
@@ -78,6 +87,12 @@ python3 runner/run-hermes-sprint.py
 
 # Re-run the Sprint 02 workflow explicitly
 python3 runner/run-hermes-sprint.py --spec sprints/lab-s02.json
+
+# Export safe evidence at the default deterministic path
+python3 runner/run-hermes-sprint.py --export-report
+
+# Export safe evidence to a chosen path
+python3 runner/run-hermes-sprint.py --export-report /tmp/lab-s03-summary.json
 ```
 
 ### Dry-Run / Validation Options

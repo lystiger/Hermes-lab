@@ -174,43 +174,61 @@ class TestHermesSprintRunnerValidation(unittest.TestCase):
 
     # 7. Scoped Antigravity Permissions Tests
     def test_scoped_permissions_installed_and_restored_on_success(self):
-        wt_dir = Path("/home/lystiger/hermes-worktrees/hermes-lab-s02/antigravity")
-        canonical_repo = Path("/home/lystiger/hermes-lab")
-        settings_path = Path("/home/lystiger/.gemini/antigravity-cli/settings.json")
+        with tempfile.TemporaryDirectory() as temporary_dir:
+            root = Path(temporary_dir)
+            wt_dir = root / "worktree"
+            canonical_repo = root / "repo"
+            settings_path = root / "config" / "settings.json"
+            initial_content = '{"theme": "dark"}\n'
+            settings_path.parent.mkdir(parents=True)
+            settings_path.write_text(initial_content, encoding="utf-8")
 
-        initial_content = settings_path.read_text(encoding="utf-8") if settings_path.exists() else None
+            with scoped_antigravity_permissions(
+                wt_dir, canonical_repo, settings_path=settings_path
+            ):
+                current_settings = json.loads(settings_path.read_text(encoding="utf-8"))
+                self.assertIn(str(wt_dir.resolve()), current_settings.get("trustedWorkspaces", []))
+                allow_rules = current_settings.get("permissions", {}).get("allow", [])
+                self.assertIn(f"read_file({wt_dir.resolve()})", allow_rules)
+                self.assertIn(f"write_file({wt_dir.resolve()})", allow_rules)
+                self.assertIn(f"read_file({canonical_repo.resolve()}/.git)", allow_rules)
+                deny_rules = current_settings.get("permissions", {}).get("deny", [])
+                self.assertIn(f"write_file({wt_dir.resolve()}/.git)", deny_rules)
+                self.assertIn(f"write_file({canonical_repo.resolve()}/.git)", deny_rules)
 
-        with scoped_antigravity_permissions(wt_dir, canonical_repo):
-            self.assertTrue(settings_path.exists())
-            current_settings = json.loads(settings_path.read_text(encoding="utf-8"))
-            
-            self.assertIn(str(wt_dir.resolve()), current_settings.get("trustedWorkspaces", []))
-
-            allow_rules = current_settings.get("permissions", {}).get("allow", [])
-            self.assertIn(f"read_file({wt_dir.resolve()})", allow_rules)
-            self.assertIn(f"write_file({wt_dir.resolve()})", allow_rules)
-            self.assertIn(f"read_file({canonical_repo.resolve()}/.git)", allow_rules)
-
-            deny_rules = current_settings.get("permissions", {}).get("deny", [])
-            self.assertIn(f"write_file({wt_dir.resolve()}/.git)", deny_rules)
-            self.assertIn(f"write_file({canonical_repo.resolve()}/.git)", deny_rules)
-
-        after_content = settings_path.read_text(encoding="utf-8") if settings_path.exists() else None
-        self.assertEqual(initial_content, after_content)
+            self.assertEqual(settings_path.read_text(encoding="utf-8"), initial_content)
 
     def test_scoped_permissions_restored_on_exception(self):
-        wt_dir = Path("/home/lystiger/hermes-worktrees/hermes-lab-s02/antigravity")
-        canonical_repo = Path("/home/lystiger/hermes-lab")
-        settings_path = Path("/home/lystiger/.gemini/antigravity-cli/settings.json")
+        with tempfile.TemporaryDirectory() as temporary_dir:
+            root = Path(temporary_dir)
+            settings_path = root / "config" / "settings.json"
+            settings_path.parent.mkdir(parents=True)
+            settings_path.write_text("not-json", encoding="utf-8")
+            with self.assertRaises(RuntimeError):
+                with scoped_antigravity_permissions(
+                    root / "worktree", root / "repo", settings_path=settings_path
+                ):
+                    raise RuntimeError("Simulated failure inside AGY context")
+            self.assertEqual(settings_path.read_text(encoding="utf-8"), "not-json")
 
-        initial_content = settings_path.read_text(encoding="utf-8") if settings_path.exists() else None
+    def test_scoped_permissions_removes_initially_missing_file(self):
+        with tempfile.TemporaryDirectory() as temporary_dir:
+            root = Path(temporary_dir)
+            settings_path = root / "config" / "settings.json"
+            with scoped_antigravity_permissions(
+                root / "worktree", root / "repo", settings_path=settings_path
+            ):
+                self.assertTrue(settings_path.exists())
+            self.assertFalse(settings_path.exists())
 
-        with self.assertRaises(RuntimeError):
-            with scoped_antigravity_permissions(wt_dir, canonical_repo):
-                raise RuntimeError("Simulated failure inside AGY context")
-
-        after_content = settings_path.read_text(encoding="utf-8") if settings_path.exists() else None
-        self.assertEqual(initial_content, after_content)
+    def test_scoped_permissions_default_uses_home_directory(self):
+        with tempfile.TemporaryDirectory() as temporary_dir:
+            root = Path(temporary_dir)
+            settings_path = root / ".gemini" / "antigravity-cli" / "settings.json"
+            with patch("agents.permissions.Path.home", return_value=root):
+                with scoped_antigravity_permissions(root / "worktree", root / "repo"):
+                    self.assertTrue(settings_path.exists())
+            self.assertFalse(settings_path.exists())
 
 
 class TestAgentRegistryAndCommands(unittest.TestCase):
@@ -238,17 +256,21 @@ class TestAgentRegistryAndCommands(unittest.TestCase):
             "do work",
             {"model": "sonnet", "max_turns": 12, "permission_mode": "dontAsk", "output_format": "json"},
         )
-        self.assertEqual(
-            command,
-            [
-                "claude", "-p", "do work", "--model", "sonnet", "--max-turns", "12",
-                "--permission-mode", "dontAsk", "--output-format", "json",
-            ],
-        )
+        self.assertEqual(command[:12], [
+            "claude", "-p", "do work", "--model", "sonnet", "--max-turns", "12",
+            "--permission-mode", "dontAsk", "--output-format", "json", "--disallowed-tools",
+        ])
+        denials = command[12].split(",")
+        self.assertIn("Bash(git commit)", denials)
+        self.assertIn("Bash(git commit *)", denials)
+        self.assertIn("Bash(git push *)", denials)
+        self.assertIn("Bash(git reset *)", denials)
+        self.assertNotIn("Bash(git status *)", denials)
+        self.assertNotIn("Bash(git branch --show-current)", denials)
 
     def test_codex_command_is_non_interactive_and_scoped(self):
         worktree = Path("/tmp/worker")
-        command = CodexAdapter().build_command("do work", {"sandbox": "workspace-write"}, worktree)
+        command = CodexAdapter().build_command("do work", {"sandbox": "danger-full-access"}, worktree)
         self.assertEqual(
             command,
             [
@@ -340,15 +362,17 @@ class TestAgentExecution(unittest.TestCase):
         self.assertEqual(ctx.exception.code, "FAILED_CLAUDE_ERROR")
 
     def test_antigravity_permissions_restore_after_timeout(self):
-        settings_path = Path("/home/lystiger/.gemini/antigravity-cli/settings.json")
-        initial_content = settings_path.read_text(encoding="utf-8") if settings_path.exists() else None
         with tempfile.TemporaryDirectory() as temporary_dir:
+            settings_path = Path(temporary_dir) / "config" / "settings.json"
+            settings_path.parent.mkdir(parents=True)
+            settings_path.write_text('{"existing": true}', encoding="utf-8")
             timeout = SprintRunnerError("FAILED_TIMEOUT", "timed out")
             context = self.make_context(temporary_dir, error=timeout, name="antigravity")
             with self.assertRaises(SprintRunnerError):
-                AntigravityAdapter().execute(context)
-        after_content = settings_path.read_text(encoding="utf-8") if settings_path.exists() else None
-        self.assertEqual(initial_content, after_content)
+                AntigravityAdapter(settings_path=settings_path).execute(context)
+            self.assertEqual(
+                settings_path.read_text(encoding="utf-8"), '{"existing": true}'
+            )
 
     def test_malformed_agent_outputs_are_rejected(self):
         with self.assertRaises(SprintRunnerError) as claude_ctx:
@@ -360,6 +384,61 @@ class TestAgentExecution(unittest.TestCase):
 
 
 class TestControllerDispatch(unittest.TestCase):
+    def test_existing_worktree_is_reset_on_every_initialization(self):
+        runner = HermesSprintRunner(
+            spec_path=Path(__file__).resolve().parent.parent / "sprints" / "lab-s02.json",
+            dry_run=False,
+            skip_agent_exec=True,
+        )
+        with tempfile.TemporaryDirectory() as temporary_dir:
+            worktree = Path(temporary_dir)
+
+            def command_result(command, **kwargs):
+                if command == ["git", "rev-parse", "--is-inside-work-tree"]:
+                    return subprocess.CompletedProcess(command, 0, "true\n", "")
+                if command == ["git", "branch", "--show-current"]:
+                    return subprocess.CompletedProcess(command, 0, "s03/worker\n", "")
+                if command == ["git", "status", "--porcelain"]:
+                    return subprocess.CompletedProcess(command, 0, "", "")
+                return subprocess.CompletedProcess(command, 0, "", "")
+
+            runner.run_cmd = MagicMock(side_effect=command_result)
+            runner._ensure_worktree(worktree, "s03/worker", "s03/integration")
+            runner._ensure_worktree(worktree, "s03/worker", "s03/integration")
+            resets = [
+                call
+                for call in runner.run_cmd.call_args_list
+                if call.args[0] == ["git", "reset", "--hard", "s03/integration"]
+            ]
+            self.assertEqual(len(resets), 2)
+
+    def test_prepare_environment_assigns_deterministic_start_refs(self):
+        runner = HermesSprintRunner(
+            spec_path=Path(__file__).resolve().parent.parent / "sprints" / "lab-s03.json",
+            dry_run=False,
+            skip_agent_exec=True,
+        )
+        runner.run_cmd = MagicMock(
+            return_value=subprocess.CompletedProcess(["git", "status"], 0, "", "")
+        )
+        runner._ensure_worktree = MagicMock()
+        with tempfile.TemporaryDirectory() as temporary_dir:
+            runner.worktree_root = Path(temporary_dir) / "worktrees"
+            runner.prepare_environment()
+            calls = runner._ensure_worktree.call_args_list
+            self.assertEqual(
+                calls[0].args,
+                (runner.worktree_root / "integration", "s03/integration", "main"),
+            )
+            self.assertEqual(
+                calls[1].args,
+                (runner.worktree_root / "claude", "s03/claude", "s03/integration"),
+            )
+            self.assertEqual(
+                calls[2].args,
+                (runner.worktree_root / "codex", "s03/codex", "s03/integration"),
+            )
+
     def test_execute_agent_dispatches_through_registry(self):
         adapter = MagicMock()
         registry = MagicMock()
@@ -442,6 +521,90 @@ class TestControllerDispatch(unittest.TestCase):
         with self.assertRaises(SprintRunnerError) as ctx:
             runner.finalize()
         self.assertEqual(ctx.exception.code, "FAILED_TESTS")
+
+    def test_later_phase_syncs_from_latest_integration(self):
+        runner = HermesSprintRunner(
+            spec_path=Path(__file__).resolve().parent.parent / "sprints" / "lab-s03.json",
+            dry_run=False,
+            skip_agent_exec=True,
+        )
+        runner.run_summary["phases"] = [{"phase": "first", "status": "SUCCESS"}]
+        runner.sync_phase_worktree = MagicMock()
+        runner.validate_python_syntax = MagicMock()
+        runner.validate_changed_files = MagicMock(return_value=[" M changed.py"])
+        runner.validate_handoff_file = MagicMock()
+
+        def command_result(command, **kwargs):
+            stdout = "abc123\n" if command[:3] == ["git", "rev-parse", "HEAD"] else ""
+            return subprocess.CompletedProcess(command, 0, stdout, "")
+
+        runner.run_cmd = MagicMock(side_effect=command_result)
+        phase = runner.spec["phases"][1]
+        runner.execute_phase(phase)
+        runner.sync_phase_worktree.assert_called_once_with(
+            runner.worktree_root / "codex", "s03/integration"
+        )
+
+    def test_sanitized_report_excludes_raw_and_machine_specific_data(self):
+        runner = HermesSprintRunner(
+            spec_path=Path(__file__).resolve().parent.parent / "sprints" / "lab-s03.json",
+            dry_run=True,
+            skip_agent_exec=True,
+        )
+        runner.run_summary.update(
+            {
+                "status": "READY_FOR_REVIEW",
+                "integration_commit": "abc123",
+                "test_results": {"status": "PASSED", "output": "SECRET TEST OUTPUT"},
+                "errors": [{"message": "/home/private token=SECRET"}],
+                "phases": [
+                    {
+                        "phase": "verification",
+                        "agent": "codex",
+                        "status": "SUCCESS",
+                        "changed_files_count": 4,
+                        "commit_sha": "worker-secret-sha",
+                        "stdout": "SECRET MODEL OUTPUT",
+                    }
+                ],
+            }
+        )
+        with tempfile.TemporaryDirectory() as temporary_dir:
+            report_path = Path(temporary_dir) / "reports" / "run-summary.json"
+            runner.export_sanitized_report(report_path)
+            report_text = report_path.read_text(encoding="utf-8")
+            report = json.loads(report_text)
+        self.assertEqual(
+            report,
+            {
+                "integration_commit": "abc123",
+                "phases": [
+                    {
+                        "agent": "codex",
+                        "changed_files_count": 4,
+                        "phase": "verification",
+                        "status": "SUCCESS",
+                    }
+                ],
+                "sprint_id": "lab-s03",
+                "status": "READY_FOR_REVIEW",
+                "test_status": "PASSED",
+            },
+        )
+        self.assertNotIn("SECRET", report_text)
+        self.assertNotIn("/home/", report_text)
+
+    def test_default_report_path_is_deterministic_and_opt_in(self):
+        runner = HermesSprintRunner(
+            spec_path=Path(__file__).resolve().parent.parent / "sprints" / "lab-s03.json",
+            dry_run=True,
+            skip_agent_exec=True,
+            export_report=True,
+        )
+        self.assertEqual(
+            runner.report_path,
+            runner.canonical_repo / "reports" / "lab-s03" / "run-summary.json",
+        )
 
 
 if __name__ == "__main__":

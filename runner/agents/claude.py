@@ -4,10 +4,62 @@ from .base import AgentAdapter
 from .errors import SprintRunnerError
 
 
+_CLAUDE_MUTATING_GIT_SUBCOMMANDS = (
+    "add",
+    "am",
+    "checkout",
+    "cherry-pick",
+    "clean",
+    "commit",
+    "fetch",
+    "merge",
+    "notes",
+    "pull",
+    "push",
+    "rebase",
+    "replace",
+    "reset",
+    "revert",
+    "rm",
+    "stash",
+    "switch",
+    "symbolic-ref",
+    "tag",
+    "update-ref",
+    "worktree",
+)
+
+CLAUDE_GIT_MUTATION_DENIALS = tuple(
+    pattern
+    for subcommand in _CLAUDE_MUTATING_GIT_SUBCOMMANDS
+    for pattern in (f"Bash(git {subcommand})", f"Bash(git {subcommand} *)")
+) + (
+    "Bash(git branch --copy *)",
+    "Bash(git branch --delete *)",
+    "Bash(git branch --move *)",
+    "Bash(git branch -C *)",
+    "Bash(git branch -D *)",
+    "Bash(git branch -M *)",
+    "Bash(git branch -c *)",
+    "Bash(git branch -d *)",
+    "Bash(git branch -m *)",
+    "Bash(git remote add *)",
+    "Bash(git remote remove *)",
+    "Bash(git remote rename *)",
+    "Bash(git remote set-url *)",
+)
+
+
 class ClaudeAdapter(AgentAdapter):
     name = "claude"
 
     def build_command(self, prompt, options, worktree=None):
+        extra_denials = options.get("disallowed_tools", [])
+        if isinstance(extra_denials, str):
+            extra_denials = [extra_denials]
+        disallowed_tools = tuple(
+            dict.fromkeys((*CLAUDE_GIT_MUTATION_DENIALS, *extra_denials))
+        )
         return [
             "claude",
             "-p",
@@ -20,6 +72,8 @@ class ClaudeAdapter(AgentAdapter):
             options.get("permission_mode", "dontAsk"),
             "--output-format",
             options.get("output_format", "json"),
+            "--disallowed-tools",
+            ",".join(disallowed_tools),
         ]
 
     def validate_result(self, result, context):

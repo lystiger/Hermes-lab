@@ -8,6 +8,9 @@ from .permissions import scoped_antigravity_permissions
 class AntigravityAdapter(AgentAdapter):
     name = "antigravity"
 
+    def __init__(self, settings_path=None):
+        self.settings_path = settings_path
+
     def build_command(self, prompt, options, worktree=None):
         command = [
             "agy",
@@ -22,7 +25,9 @@ class AntigravityAdapter(AgentAdapter):
 
     def execute(self, context):
         with scoped_antigravity_permissions(
-            context.worktree, context.runner.canonical_repo
+            context.worktree,
+            context.runner.canonical_repo,
+            settings_path=self.settings_path,
         ):
             return super().execute(context)
 

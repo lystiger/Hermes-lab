@@ -14,6 +14,7 @@ class AntigravityAdapter(AgentAdapter):
     def build_command(self, prompt, options, worktree=None):
         command = [
             "agy",
+            "--new-project",
             "-p",
             prompt,
             "--output-format",

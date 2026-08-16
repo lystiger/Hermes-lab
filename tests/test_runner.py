@@ -255,7 +255,10 @@ class TestAgentRegistryAndCommands(unittest.TestCase):
         command = AntigravityAdapter().build_command(
             "do work", {"output_format": "stream-json", "dangerously_skip_permissions": False}
         )
-        self.assertEqual(command, ["agy", "-p", "do work", "--output-format", "stream-json"])
+        self.assertEqual(
+            command,
+            ["agy", "--new-project", "-p", "do work", "--output-format", "stream-json"],
+        )
 
     def test_claude_command(self):
         command = ClaudeAdapter().build_command(

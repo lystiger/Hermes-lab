@@ -24,12 +24,16 @@ The runner supports Antigravity, Claude, and Codex through a common registry. Ad
 │   ├── s04-codex.md          # Herdr verification prompt
 │   ├── s05-agy.md            # Operational API scaffold prompt
 │   ├── s05-claude.md         # Runtime hardening prompt
-│   └── s05-codex.md          # Independent API verification prompt
+│   ├── s05-codex.md          # Independent API verification prompt
+│   ├── s06-agy.md            # Session contract scaffold prompt
+│   ├── s06-claude.md         # Session backend implementation prompt
+│   └── s06-codex.md          # Session lifecycle verification prompt
 └── sprints/
     ├── lab-s02.json          # Backwards-compatible Sprint 02 specification
     ├── lab-s03.json          # Claude implementation + Codex verification
     ├── lab-s04.json          # Staged subprocess + Herdr backend workflow
-    └── lab-s05.json          # Three-agent subprocess + Herdr workflow
+    ├── lab-s05.json          # Three-agent subprocess + Herdr workflow
+    └── lab-s06.json          # Codex-first session backend delivery
 ```
 
 ## Worktree & Execution Architecture
@@ -116,6 +120,9 @@ python3 runner/run-hermes-sprint.py --spec sprints/lab-s04.json
 
 # Run Sprint 05's three-agent operational API workflow
 python3 runner/run-hermes-sprint.py --spec sprints/lab-s05.json
+
+# Run Sprint 06's Codex-first session backend delivery
+python3 runner/run-hermes-sprint.py --spec sprints/lab-s06.json
 
 # Deliberately select Herdr globally for specs without phase overrides
 python3 runner/run-hermes-sprint.py --spec <spec.json> --backend herdr

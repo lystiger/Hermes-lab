@@ -537,6 +537,35 @@ class TestControllerDispatch(unittest.TestCase):
         for phase in sprint["phases"]:
             self.assertTrue((repository / phase["prompt_file"]).is_file())
 
+    def test_sprint06_configures_session_backend_delivery(self):
+        repository = Path(__file__).resolve().parent.parent
+        sprint = json.loads(
+            (repository / "sprints" / "lab-s06.json").read_text(encoding="utf-8")
+        )
+
+        self.assertEqual(
+            sprint["base_ref"], "565c862aef1ee5fca20adebc2883580e70030257"
+        )
+        self.assertEqual(sprint["limits"]["timeout_seconds"], 900)
+        self.assertEqual(
+            [(phase["agent"], phase["execution_backend"]) for phase in sprint["phases"]],
+            [
+                ("antigravity", "herdr"),
+                ("claude", "subprocess"),
+                ("codex", "herdr"),
+            ],
+        )
+        self.assertEqual(
+            len({phase["branch"] for phase in sprint["phases"]}),
+            len(sprint["phases"]),
+        )
+        self.assertNotIn(
+            "herdr-session",
+            {phase["execution_backend"] for phase in sprint["phases"]},
+        )
+        for phase in sprint["phases"]:
+            self.assertTrue((repository / phase["prompt_file"]).is_file())
+
     def test_execute_agent_dispatches_through_registry(self):
         adapter = MagicMock()
         registry = MagicMock()

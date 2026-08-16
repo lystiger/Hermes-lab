@@ -1,0 +1,61 @@
+{
+  "sprint_id": "lab-s06",
+  "name": "Codex-First Sessionful Herdr Backend",
+  "canonical_repo": "/home/lystiger/hermes-lab",
+  "base_ref": "565c862aef1ee5fca20adebc2883580e70030257",
+  "target_branch": "s06/integration",
+  "worktree_root": "/home/lystiger/hermes-worktrees/hermes-lab-s06",
+  "runs_root": "/home/lystiger/hermes-runs",
+  "execution_backend": "subprocess",
+  "keep_herdr_workspace": true,
+  "limits": {
+    "max_changed_files": 20,
+    "timeout_seconds": 900
+  },
+  "phases": [
+    {
+      "name": "session_contract_scaffold",
+      "agent": "antigravity",
+      "execution_backend": "herdr",
+      "worktree_dir": "antigravity",
+      "branch": "s06/antigravity",
+      "prompt_file": "prompts/s06-agy.md",
+      "expected_handoff": "HANDOFF_AGY.md",
+      "commit_message": "test(s06): scaffold session backend contract",
+      "cmd_options": {
+        "output_format": "stream-json",
+        "dangerously_skip_permissions": false
+      }
+    },
+    {
+      "name": "session_backend_implementation",
+      "agent": "claude",
+      "execution_backend": "subprocess",
+      "worktree_dir": "claude",
+      "branch": "s06/claude",
+      "prompt_file": "prompts/s06-claude.md",
+      "expected_handoff": "HANDOFF_CLAUDE.md",
+      "commit_message": "feat(s06): add Codex session backend",
+      "cmd_options": {
+        "model": "sonnet",
+        "max_turns": 50,
+        "permission_mode": "dontAsk",
+        "output_format": "json"
+      }
+    },
+    {
+      "name": "session_backend_verification",
+      "agent": "codex",
+      "execution_backend": "herdr",
+      "worktree_dir": "codex",
+      "branch": "s06/codex",
+      "prompt_file": "prompts/s06-codex.md",
+      "expected_handoff": "HANDOFF_CODEX.md",
+      "commit_message": "test(s06): verify Codex session backend",
+      "cmd_options": {
+        "sandbox": "workspace-write",
+        "ephemeral": true
+      }
+    }
+  ]
+}

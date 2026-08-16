@@ -258,11 +258,12 @@ class TestAgentRegistryAndCommands(unittest.TestCase):
             "do work",
             {"model": "sonnet", "max_turns": 12, "permission_mode": "dontAsk", "output_format": "json"},
         )
-        self.assertEqual(command[:12], [
+        self.assertEqual(command[:14], [
             "claude", "-p", "do work", "--model", "sonnet", "--max-turns", "12",
-            "--permission-mode", "dontAsk", "--output-format", "json", "--disallowedTools",
+            "--permission-mode", "dontAsk", "--output-format", "json",
+            "--allowedTools", "Bash,Edit,Write", "--disallowedTools",
         ])
-        denials = command[12].split(",")
+        denials = command[14].split(",")
         self.assertIn("Bash(git commit)", denials)
         self.assertIn("Bash(git commit:*)", denials)
         self.assertIn("Bash(git push:*)", denials)

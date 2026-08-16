@@ -54,6 +54,9 @@ class ClaudeAdapter(AgentAdapter):
     name = "claude"
 
     def build_command(self, prompt, options, worktree=None):
+        allowed_tools = options.get("allowed_tools", ["Bash", "Edit", "Write"])
+        if isinstance(allowed_tools, str):
+            allowed_tools = [allowed_tools]
         extra_denials = options.get("disallowed_tools", [])
         if isinstance(extra_denials, str):
             extra_denials = [extra_denials]
@@ -72,6 +75,8 @@ class ClaudeAdapter(AgentAdapter):
             options.get("permission_mode", "dontAsk"),
             "--output-format",
             options.get("output_format", "json"),
+            "--allowedTools",
+            ",".join(dict.fromkeys(allowed_tools)),
             "--disallowedTools",
             ",".join(disallowed_tools),
         ]

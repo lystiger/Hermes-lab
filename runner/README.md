@@ -45,6 +45,7 @@ The runner supports Antigravity, Claude, and Codex through a common registry. Ad
 
 1. **Environment & Safety Check**: Verifies the canonical repository is clean, validates registered agents, and creates or validates configured worktrees.
    Clean integration and phase worktrees are reset to their configured starting refs on every run, so prior sprint commits cannot affect a rerun. Dirty or wrongly assigned worktrees fail before reset.
+   Sprint specifications may pin an immutable `base_ref`; legacy `base_branch` remains supported. Sprint 04 pins its Sprint 03.1 baseline so reruns do not start from a `main` branch that already contains Sprint 04.
 2. **Agent Dispatch**: Resolves the phase agent through the registry. The adapter invokes its CLI and validates its result while writing phase stdout/stderr logs.
    The selected execution backend hosts that unchanged one-shot CLI. `subprocess` is the compatibility reference; `herdr` uses a runner-owned persistent workspace and pane.
 3. **Controller Validation**: Recursively compiles Python, enforces the changed-file limit, and requires the configured non-empty handoff.

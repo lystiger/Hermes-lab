@@ -2,7 +2,7 @@
   "sprint_id": "lab-s04",
   "name": "Execution Backend Abstraction + Herdr Runtime",
   "canonical_repo": "/home/lystiger/hermes-lab",
-  "base_branch": "main",
+  "base_ref": "6452c44ea72bb4886f08d4753bc8cf06f9e6c45b",
   "target_branch": "s04/integration",
   "worktree_root": "/home/lystiger/hermes-worktrees/hermes-lab-s04",
   "runs_root": "/home/lystiger/hermes-runs",

@@ -146,12 +146,12 @@ class HermesSprintRunner:
             )
 
         self.worktree_root.mkdir(parents=True, exist_ok=True)
-        base_branch = self.spec.get("base_branch", "main")
+        base_ref = self.spec.get("base_ref") or self.spec.get("base_branch", "main")
         target_branch = self.spec.get("target_branch", "s02/integration")
 
         # 1. Setup integration worktree
         integration_dir = self.worktree_root / "integration"
-        self._ensure_worktree(integration_dir, target_branch, base_branch)
+        self._ensure_worktree(integration_dir, target_branch, base_ref)
 
         # 2. Setup agent worktrees
         for phase in self.spec.get("phases", []):

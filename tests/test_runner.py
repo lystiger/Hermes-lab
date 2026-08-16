@@ -470,6 +470,30 @@ class TestControllerDispatch(unittest.TestCase):
                 (runner.worktree_root / "codex", "s03/codex", "s03/integration"),
             )
 
+    def test_prepare_environment_prefers_pinned_base_ref(self):
+        runner = HermesSprintRunner(
+            spec_path=Path(__file__).resolve().parent.parent / "sprints" / "lab-s04.json",
+            dry_run=False,
+            skip_agent_exec=True,
+        )
+        runner.spec["base_ref"] = "pinned-s03-baseline"
+        runner.run_cmd = MagicMock(
+            return_value=subprocess.CompletedProcess(["git", "status"], 0, "", "")
+        )
+        runner._ensure_worktree = MagicMock()
+        with tempfile.TemporaryDirectory() as temporary_dir:
+            runner.worktree_root = Path(temporary_dir) / "worktrees"
+            runner.prepare_environment()
+
+        self.assertEqual(
+            runner._ensure_worktree.call_args_list[0].args,
+            (
+                runner.worktree_root / "integration",
+                "s04/integration",
+                "pinned-s03-baseline",
+            ),
+        )
+
     def test_execute_agent_dispatches_through_registry(self):
         adapter = MagicMock()
         registry = MagicMock()

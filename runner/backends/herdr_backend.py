@@ -130,7 +130,7 @@ class HerdrBackend(ExecutionBackend):
                 f"Worker executable was not found: {worker_executable}",
             )
         self._run_json(
-            ["status", "server"], failure_code="FAILED_HERDR_UNAVAILABLE"
+            ["api", "snapshot"], failure_code="FAILED_HERDR_UNAVAILABLE"
         )
 
     def _ensure_workspace(self, cwd):

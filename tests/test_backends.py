@@ -165,6 +165,8 @@ class TestHerdrBackend(BackendTestCase):
             with self.assertRaises(SprintRunnerError) as ctx:
                 backend.preflight("worker")
             self.assertEqual(ctx.exception.code, "FAILED_HERDR_UNAVAILABLE")
+            command = backend._run_process.call_args.args[0]
+            self.assertEqual(command, ["herdr", "api", "snapshot"])
 
     def test_malformed_json_is_protocol_failure(self):
         with tempfile.TemporaryDirectory() as temporary_dir:
@@ -242,7 +244,7 @@ class TestHerdrBackend(BackendTestCase):
         pane = {"result": {"pane": {"pane_id": "runtime-worker"}}}
 
         def fake_herdr(command, **kwargs):
-            if command[1:3] == ["status", "server"]:
+            if command[1:3] == ["api", "snapshot"]:
                 return completed(command, stdout="{}")
             if command[1:3] == ["workspace", "create"]:
                 return completed(command, stdout=json.dumps(workspace))
@@ -318,7 +320,7 @@ class TestHerdrBackend(BackendTestCase):
         pane = {"result": {"pane": {"pane_id": "worker"}}}
 
         def fake_herdr(command, **kwargs):
-            if command[1:3] == ["status", "server"]:
+            if command[1:3] == ["api", "snapshot"]:
                 return completed(command, stdout="{}")
             if command[1:3] == ["workspace", "create"]:
                 return completed(command, stdout=json.dumps(workspace))
@@ -416,7 +418,7 @@ class TestHerdrBackend(BackendTestCase):
 class TestHerdrSmoke(BackendTestCase):
     def test_harmless_shell_command(self):
         status = subprocess.run(
-            ["herdr", "status", "server"], capture_output=True, text=True, timeout=5
+            ["herdr", "api", "snapshot"], capture_output=True, text=True, timeout=5
         )
         if status.returncode != 0:
             self.skipTest("Herdr server is unavailable")

@@ -1,10 +1,26 @@
+import asyncio
 import threading
 import time
 
-from fastapi.testclient import TestClient
+import httpx
+
 from main import app
 
-client = TestClient(app)
+
+class ASGITestClient:
+    @staticmethod
+    def get(path):
+        async def perform_request():
+            transport = httpx.ASGITransport(app=app)
+            async with httpx.AsyncClient(
+                transport=transport, base_url="http://testserver"
+            ) as async_client:
+                return await async_client.get(path)
+
+        return asyncio.run(perform_request())
+
+
+client = ASGITestClient()
 
 
 def test_health():

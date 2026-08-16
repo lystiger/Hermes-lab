@@ -9,7 +9,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 
 RUNNER_PATH = Path(__file__).resolve().parent.parent / "runner" / "run-hermes-sprint.py"
@@ -45,6 +45,13 @@ class BackendTestCase(unittest.TestCase):
 
 
 class TestBackendRegistryAndSelection(BackendTestCase):
+    def setUp(self):
+        self.logging_patch = patch.object(
+            HermesSprintRunner, "_setup_logging", return_value=MagicMock()
+        )
+        self.logging_patch.start()
+        self.addCleanup(self.logging_patch.stop)
+
     def test_known_and_unknown_backends(self):
         with tempfile.TemporaryDirectory() as temporary_dir:
             kwargs = {"run_dir": temporary_dir, "sprint_id": "test"}

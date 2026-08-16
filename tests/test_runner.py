@@ -29,6 +29,11 @@ from backends.subprocess_backend import SubprocessBackend
 
 class TestHermesSprintRunnerValidation(unittest.TestCase):
     def setUp(self):
+        self.logging_patch = patch.object(
+            HermesSprintRunner, "_setup_logging", return_value=MagicMock()
+        )
+        self.logging_patch.start()
+        self.addCleanup(self.logging_patch.stop)
         self.spec_path = Path("/home/lystiger/hermes-lab/sprints/lab-s02.json")
         self.runner = HermesSprintRunner(spec_path=self.spec_path, dry_run=True, skip_agent_exec=True)
 
@@ -422,6 +427,13 @@ class TestAgentExecution(unittest.TestCase):
 
 
 class TestControllerDispatch(unittest.TestCase):
+    def setUp(self):
+        self.logging_patch = patch.object(
+            HermesSprintRunner, "_setup_logging", return_value=MagicMock()
+        )
+        self.logging_patch.start()
+        self.addCleanup(self.logging_patch.stop)
+
     def test_existing_worktree_is_reset_on_every_initialization(self):
         runner = HermesSprintRunner(
             spec_path=Path(__file__).resolve().parent.parent / "sprints" / "lab-s02.json",

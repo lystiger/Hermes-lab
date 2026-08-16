@@ -257,7 +257,7 @@ class TestHerdrBackend(BackendTestCase):
                     shlex.split(command[-1]), capture_output=True, text=True, timeout=5
                 )
                 self.assertEqual(wrapper_result.returncode, 0, wrapper_result.stderr)
-                return completed(command, stdout="{}")
+                return completed(command, stdout="")
             if command[1:3] == ["pane", "wait-output"]:
                 return completed(command, stdout="{}")
             self.fail(f"Unexpected Herdr command: {command}")

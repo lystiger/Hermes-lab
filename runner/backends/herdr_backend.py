@@ -55,6 +55,7 @@ class HerdrBackend(ExecutionBackend):
             self._run_json(
                 ["pane", "run", pane_id, f"bash {shlex.quote(str(wrapper_path))}"],
                 failure_code="FAILED_HERDR_COMMAND",
+                allow_empty_output=True,
             )
             try:
                 self._run_json(
@@ -244,7 +245,9 @@ exit 0
             )
         return value
 
-    def _run_json(self, args, failure_code, process_timeout=30):
+    def _run_json(
+        self, args, failure_code, process_timeout=30, allow_empty_output=False
+    ):
         command = [self.herdr_executable, *args]
         self._record_operation("herdr_call", target=args[0] if args else None)
         try:
@@ -266,6 +269,8 @@ exit 0
         if result.returncode != 0:
             detail = (result.stderr or result.stdout or "unknown Herdr error").strip()
             raise SprintRunnerError(failure_code, f"Herdr command failed: {detail}")
+        if allow_empty_output and not result.stdout.strip():
+            return {}
         try:
             payload = json.loads(result.stdout)
         except (TypeError, json.JSONDecodeError) as exc:

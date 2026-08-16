@@ -48,6 +48,10 @@ def scoped_antigravity_permissions(wt_dir, canonical_repo, settings_path=None):
             f"write_file({wt_path}/**)",
             f"read_file({repo_path}/.git)",
             f"read_file({repo_path}/.git/**)",
+            "command(pwd)",
+            "command(ls -la)",
+            "command(pwd && ls -la)",
+            "command(python3 -m pytest -q)",
         ]
         deny_rules = [
             f"write_file({worktree_git})",

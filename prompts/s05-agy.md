@@ -15,3 +15,7 @@ below.
 Do not implement persistence, Prometheus output, authentication, or new
 dependencies. Do not commit, merge, rebase, push, edit Git metadata, or operate
 outside this assigned worktree. The controller owns all Git operations.
+
+Headless command permissions are intentionally narrow. When terminal execution
+is needed, use only `pwd`, `ls -la`, or `python3 -m pytest -q`; do not combine
+commands or add shell operators.

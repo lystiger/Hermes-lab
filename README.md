@@ -22,3 +22,4 @@ Sprint 04 uses the equivalent `integration`, `claude`, and `codex` layout under 
 - **Sprint 02**: Worktrees initialized under `~/hermes-worktrees/hermes-lab-s02/`.
 - **Sprint 03**: Agent adapters and first-class Codex worker support.
 - **Sprint 04**: Execution backend abstraction with subprocess compatibility and one-shot Herdr hosting.
+- **Sprint 05**: Reproducible three-agent delivery with Antigravity scaffolding, Claude hardening, and Codex verification.

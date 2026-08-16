@@ -494,6 +494,30 @@ class TestControllerDispatch(unittest.TestCase):
             ),
         )
 
+    def test_sprint05_configures_three_agent_pipeline(self):
+        repository = Path(__file__).resolve().parent.parent
+        sprint = json.loads(
+            (repository / "sprints" / "lab-s05.json").read_text(encoding="utf-8")
+        )
+
+        self.assertEqual(
+            sprint["base_ref"], "ae984e1a8cda766143a8c3e01dfeeef549d59ac2"
+        )
+        self.assertEqual(
+            [(phase["agent"], phase["execution_backend"]) for phase in sprint["phases"]],
+            [
+                ("antigravity", "herdr"),
+                ("claude", "subprocess"),
+                ("codex", "herdr"),
+            ],
+        )
+        self.assertEqual(
+            len({phase["branch"] for phase in sprint["phases"]}),
+            len(sprint["phases"]),
+        )
+        for phase in sprint["phases"]:
+            self.assertTrue((repository / phase["prompt_file"]).is_file())
+
     def test_execute_agent_dispatches_through_registry(self):
         adapter = MagicMock()
         registry = MagicMock()

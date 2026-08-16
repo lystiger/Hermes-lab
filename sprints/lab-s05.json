@@ -1,0 +1,61 @@
+{
+  "sprint_id": "lab-s05",
+  "name": "Three-Agent Operational API Delivery",
+  "canonical_repo": "/home/lystiger/hermes-lab",
+  "base_ref": "ae984e1a8cda766143a8c3e01dfeeef549d59ac2",
+  "target_branch": "s05/integration",
+  "worktree_root": "/home/lystiger/hermes-worktrees/hermes-lab-s05",
+  "runs_root": "/home/lystiger/hermes-runs",
+  "execution_backend": "subprocess",
+  "keep_herdr_workspace": true,
+  "limits": {
+    "max_changed_files": 20,
+    "timeout_seconds": 600
+  },
+  "phases": [
+    {
+      "name": "operational_api_scaffold",
+      "agent": "antigravity",
+      "execution_backend": "herdr",
+      "worktree_dir": "antigravity",
+      "branch": "s05/antigravity",
+      "prompt_file": "prompts/s05-agy.md",
+      "expected_handoff": "HANDOFF_AGY.md",
+      "commit_message": "scaffold(s05): add operational API endpoints",
+      "cmd_options": {
+        "output_format": "stream-json",
+        "dangerously_skip_permissions": false
+      }
+    },
+    {
+      "name": "operational_api_hardening",
+      "agent": "claude",
+      "execution_backend": "subprocess",
+      "worktree_dir": "claude",
+      "branch": "s05/claude",
+      "prompt_file": "prompts/s05-claude.md",
+      "expected_handoff": "HANDOFF_CLAUDE.md",
+      "commit_message": "feat(s05): harden operational API metrics",
+      "cmd_options": {
+        "model": "sonnet",
+        "max_turns": 40,
+        "permission_mode": "dontAsk",
+        "output_format": "json"
+      }
+    },
+    {
+      "name": "operational_api_verification",
+      "agent": "codex",
+      "execution_backend": "herdr",
+      "worktree_dir": "codex",
+      "branch": "s05/codex",
+      "prompt_file": "prompts/s05-codex.md",
+      "expected_handoff": "HANDOFF_CODEX.md",
+      "commit_message": "test(s05): verify operational API delivery",
+      "cmd_options": {
+        "sandbox": "workspace-write",
+        "ephemeral": true
+      }
+    }
+  ]
+}

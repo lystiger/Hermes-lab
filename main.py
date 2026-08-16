@@ -19,22 +19,22 @@ async def count_requests(request: Request, call_next):
 
 
 @app.get("/health")
-def health_check():
+async def health_check():
     return {"status": "ok"}
 
 
 @app.get("/ready")
-def ready():
+async def ready():
     return {"status": "ready"}
 
 
 @app.get("/version")
-def version():
+async def version():
     return {"version": "0.1.0"}
 
 
 @app.get("/info")
-def info():
+async def info():
     return {
         "name": "Hermes Lab",
         "version": "0.1.0",
@@ -43,7 +43,7 @@ def info():
 
 
 @app.get("/metrics")
-def metrics():
+async def metrics():
     with _request_count_lock:
         requests_handled = _request_count
     uptime_seconds = max(0, int(time.monotonic() - _start_monotonic))

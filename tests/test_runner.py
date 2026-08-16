@@ -547,6 +547,7 @@ class TestControllerDispatch(unittest.TestCase):
             sprint["base_ref"], "565c862aef1ee5fca20adebc2883580e70030257"
         )
         self.assertEqual(sprint["limits"]["timeout_seconds"], 900)
+        self.assertEqual(sprint["phases"][1]["cmd_options"]["max_turns"], 70)
         self.assertEqual(
             [(phase["agent"], phase["execution_backend"]) for phase in sprint["phases"]],
             [

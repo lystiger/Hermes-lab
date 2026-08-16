@@ -38,7 +38,7 @@
       "commit_message": "feat(s06): add Codex session backend",
       "cmd_options": {
         "model": "sonnet",
-        "max_turns": 50,
+        "max_turns": 70,
         "permission_mode": "dontAsk",
         "output_format": "json"
       }

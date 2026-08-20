@@ -35,6 +35,8 @@ from backends.registry import default_backend_registry
 
 
 class HermesSprintRunner:
+    PHASE_ROLES = {"builder", "hardener", "verifier"}
+
     def __init__(
         self,
         spec_path,
@@ -75,6 +77,7 @@ class HermesSprintRunner:
         )
         self.limits = self.spec.get("limits", {"max_changed_files": 15, "timeout_seconds": 300})
         self.verification_steps = self._load_verification_spec()
+        self._validate_phase_roles()
         if export_report is True:
             self.report_path = (
                 self.control_root / "reports" / self.sprint_id / "run-summary.json"
@@ -189,6 +192,21 @@ class HermesSprintRunner:
             self._resolve_verification_cwd(step, integration_dir)
             normalized.append(step)
         return normalized
+
+    def _validate_phase_roles(self):
+        for phase in self.spec.get("phases", []):
+            self.resolve_phase_role(phase)
+
+    def resolve_phase_role(self, phase):
+        if "role" not in phase:
+            return "legacy"
+        role = phase["role"]
+        if not isinstance(role, str) or role not in self.PHASE_ROLES:
+            raise SprintRunnerError(
+                "FAILED_UNKNOWN_ROLE",
+                f"Unknown phase role: {role}",
+            )
+        return role
 
     @staticmethod
     def _invalid_verification(message):
@@ -392,16 +410,20 @@ class HermesSprintRunner:
         )
         return adapter.execute(context)
 
-    def validate_changed_files(self, worktree_path):
-        # Expand untracked directories so the limit counts files, not directory entries.
+    def inspect_changed_files(self, worktree_path):
+        """Return target source changes without imposing role semantics."""
         res = self.run_cmd(
             ["git", "status", "--porcelain", "--untracked-files=all"],
             cwd=worktree_path,
         )
         lines = [line for line in res.stdout.strip().split("\n") if line.strip()]
+        self.logger.info("Changed target files count in %s: %s", worktree_path.name, len(lines))
+        return lines
+
+    def validate_changed_files(self, worktree_path):
+        """Legacy required-change validation retained for compatibility callers."""
+        lines = self.inspect_changed_files(worktree_path)
         max_limit = self.limits.get("max_changed_files", 15)
-        
-        self.logger.info(f"Changed files count in {worktree_path.name}: {len(lines)} (Limit: {max_limit})")
         if len(lines) == 0:
             raise SprintRunnerError(
                 "FAILED_NO_CHANGES",
@@ -415,13 +437,78 @@ class HermesSprintRunner:
         return lines
 
     def validate_handoff_file(self, worktree_path, expected_handoff):
-        handoff_path = worktree_path / expected_handoff
+        worktree_path = worktree_path.resolve()
+        handoff_path = (worktree_path / expected_handoff).resolve()
+        try:
+            handoff_path.relative_to(worktree_path)
+        except ValueError as error:
+            raise SprintRunnerError(
+                "FAILED_INVALID_HANDOFF",
+                f"Handoff path escapes worktree: {expected_handoff}",
+            ) from error
         self.logger.info(f"Checking expected handoff file: {handoff_path}")
-        if not handoff_path.exists() or handoff_path.stat().st_size == 0:
+        if not handoff_path.is_file() or handoff_path.stat().st_size == 0:
             raise SprintRunnerError(
                 "FAILED_MISSING_HANDOFF",
                 f"Required handoff file '{expected_handoff}' is missing or empty in {worktree_path}."
             )
+        return handoff_path
+
+    @staticmethod
+    def _safe_filename_component(value):
+        return "".join(
+            character if character.isalnum() or character in "-_" else "_"
+            for character in value
+        ) or "unknown"
+
+    def capture_handoff(
+        self,
+        phase_index,
+        role,
+        agent,
+        worktree_path,
+        expected_handoff,
+    ):
+        handoff_path = self.validate_handoff_file(worktree_path, expected_handoff)
+        destination = self.run_dir / "handoffs" / (
+            f"{phase_index:02d}_{self._safe_filename_component(role)}_"
+            f"{self._safe_filename_component(agent)}.md"
+        )
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        destination.write_text(
+            handoff_path.read_text(encoding="utf-8"),
+            encoding="utf-8",
+        )
+        return handoff_path
+
+    def _prepare_handoff_path(self, worktree_path, expected_handoff):
+        worktree_path = worktree_path.resolve()
+        handoff_path = (worktree_path / expected_handoff).resolve()
+        try:
+            handoff_path.relative_to(worktree_path)
+        except ValueError as error:
+            raise SprintRunnerError(
+                "FAILED_INVALID_HANDOFF",
+                f"Handoff path escapes worktree: {expected_handoff}",
+            ) from error
+        original_content = handoff_path.read_bytes() if handoff_path.is_file() else None
+        if handoff_path.exists() and not handoff_path.is_file():
+            raise SprintRunnerError(
+                "FAILED_INVALID_HANDOFF",
+                f"Handoff path is not a file: {expected_handoff}",
+            )
+        if handoff_path.is_file():
+            handoff_path.unlink()
+        return handoff_path, original_content
+
+    @staticmethod
+    def _restore_handoff_path(handoff_path, original_content):
+        if original_content is None:
+            if handoff_path.exists():
+                handoff_path.unlink()
+            return
+        handoff_path.parent.mkdir(parents=True, exist_ok=True)
+        handoff_path.write_bytes(original_content)
 
     def validate_python_syntax(self, worktree_path):
         self.logger.info(f"Validating Python syntax in {worktree_path}")
@@ -435,9 +522,10 @@ class HermesSprintRunner:
                     f"Python syntax error in {py_file.name}: {e}"
                 )
 
-    def execute_phase(self, phase):
+    def execute_phase(self, phase, phase_index=1):
         phase_name = phase["name"]
         agent = phase["agent"]
+        role = self.resolve_phase_role(phase)
         wt_dir = self.worktree_root / phase["worktree_dir"]
         prompt_file = self.resolve_prompt_file(phase)
         expected_handoff = phase["expected_handoff"]
@@ -455,39 +543,72 @@ class HermesSprintRunner:
             target_branch = self.spec.get("target_branch", "s02/integration")
             self.sync_phase_worktree(wt_dir, target_branch)
 
-        # Agent execution
-        if not self.skip_agent_exec and not self.dry_run:
-            execution_result = self.execute_agent(phase, wt_dir)
-        else:
-            execution_result = None
-            self.logger.info(f"Skipping agent execution CLI (skip_agent_exec={self.skip_agent_exec}, dry_run={self.dry_run})")
+        handoff_path, original_handoff = self._prepare_handoff_path(
+            wt_dir,
+            expected_handoff,
+        )
+        try:
+            if not self.skip_agent_exec and not self.dry_run:
+                execution_result = self.execute_agent(phase, wt_dir)
+            else:
+                execution_result = None
+                self.logger.info(f"Skipping agent execution CLI (skip_agent_exec={self.skip_agent_exec}, dry_run={self.dry_run})")
 
-        # Controller validation checks
+            self.capture_handoff(
+                phase_index,
+                role,
+                agent,
+                wt_dir,
+                expected_handoff,
+            )
+        finally:
+            self._restore_handoff_path(handoff_path, original_handoff)
+
+        changed_files = self.inspect_changed_files(wt_dir)
+        max_limit = self.limits.get("max_changed_files", 15)
+        if role == "verifier" and changed_files:
+            raise SprintRunnerError(
+                "FAILED_FORBIDDEN_CHANGES",
+                f"Verifier phase '{phase_name}' modified {len(changed_files)} target files.",
+            )
+        if role != "verifier" and len(changed_files) > max_limit:
+            raise SprintRunnerError(
+                "FAILED_EXCESSIVE_FILES",
+                f"Worktree {wt_dir.name} changed {len(changed_files)} files, exceeding limit of {max_limit}.",
+            )
+        if role in {"builder", "legacy"} and not changed_files:
+            raise SprintRunnerError(
+                "FAILED_NO_CHANGES",
+                f"Worktree {wt_dir.name} produced NO file changes.",
+            )
+
         self.validate_python_syntax(wt_dir)
-        changed_files = self.validate_changed_files(wt_dir)  # Fails fast on NO_CHANGES or EXCESSIVE_FILES
-        self.validate_handoff_file(wt_dir, expected_handoff)
 
-        # Controller stages and commits
-        self.logger.info(f"Controller staging changes in {wt_dir.name}")
-        self.run_cmd(["git", "add", "."], cwd=wt_dir)
-        self.run_cmd(["git", "commit", "-m", commit_msg], cwd=wt_dir)
-        
-        sha_res = self.run_cmd(["git", "rev-parse", "HEAD"], cwd=wt_dir)
-        commit_sha = sha_res.stdout.strip()
-        self.logger.info(f"Committed phase changes: {commit_sha[:7]} - {commit_msg}")
+        should_integrate = bool(changed_files) and role != "verifier"
+        commit_sha = None
+        if should_integrate:
+            self.logger.info(f"Controller staging changes in {wt_dir.name}")
+            self.run_cmd(["git", "add", "."], cwd=wt_dir)
+            self.run_cmd(["git", "commit", "-m", commit_msg], cwd=wt_dir)
 
-        # Merge commit into integration worktree
-        integration_dir = self.worktree_root / "integration"
-        self.logger.info(f"Controller merging commit {commit_sha[:7]} into integration worktree")
-        self.run_cmd(["git", "merge", "--no-ff", "-m", f"merge({self.sprint_id}): merge {agent} phase ({commit_sha[:7]})", commit_sha], cwd=integration_dir)
+            sha_res = self.run_cmd(["git", "rev-parse", "HEAD"], cwd=wt_dir)
+            commit_sha = sha_res.stdout.strip()
+            self.logger.info(f"Committed phase changes: {commit_sha[:7]} - {commit_msg}")
+
+            integration_dir = self.worktree_root / "integration"
+            self.logger.info(f"Controller merging commit {commit_sha[:7]} into integration worktree")
+            self.run_cmd(["git", "merge", "--no-ff", "-m", f"merge({self.sprint_id}): merge {agent} phase ({commit_sha[:7]})", commit_sha], cwd=integration_dir)
 
         phase_result = {
             "phase": phase_name,
+            "role": role,
             "agent": agent,
             "backend": backend_name,
             "status": "SUCCESS",
             "commit_sha": commit_sha,
             "changed_files_count": len(changed_files),
+            "integrated": should_integrate,
+            "handoff": "captured",
             "runtime_metadata": (
                 dict(execution_result.runtime_metadata) if execution_result else {}
             ),
@@ -646,6 +767,21 @@ class HermesSprintRunner:
                     "status": phase.get("status"),
                     "changed_files_count": phase.get("changed_files_count"),
                     **(
+                        {"role": phase.get("role")}
+                        if phase.get("role")
+                        else {}
+                    ),
+                    **(
+                        {"integrated": phase.get("integrated")}
+                        if "integrated" in phase
+                        else {}
+                    ),
+                    **(
+                        {"handoff": phase.get("handoff")}
+                        if phase.get("handoff")
+                        else {}
+                    ),
+                    **(
                         {"backend": phase.get("backend")}
                         if phase.get("backend")
                         else {}
@@ -678,8 +814,8 @@ class HermesSprintRunner:
     def execute(self):
         try:
             self.prepare_environment()
-            for phase in self.spec.get("phases", []):
-                self.execute_phase(phase)
+            for phase_index, phase in enumerate(self.spec.get("phases", []), start=1):
+                self.execute_phase(phase, phase_index=phase_index)
             if self.verification_steps:
                 self.run_verification()
             else:

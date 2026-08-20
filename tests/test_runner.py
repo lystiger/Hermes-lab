@@ -631,8 +631,8 @@ class TestControllerDispatch(unittest.TestCase):
             skip_agent_exec=True,
         )
         runner.validate_python_syntax = MagicMock()
-        runner.validate_changed_files = MagicMock(return_value=[" M changed.py"])
-        runner.validate_handoff_file = MagicMock()
+        runner.inspect_changed_files = MagicMock(return_value=[" M changed.py"])
+        runner.capture_handoff = MagicMock()
 
         def command_result(command, **kwargs):
             stdout = "abc123\n" if command[:3] == ["git", "rev-parse", "HEAD"] else ""
@@ -642,8 +642,8 @@ class TestControllerDispatch(unittest.TestCase):
         phase = runner.spec["phases"][0]
         runner.execute_phase(phase)
         runner.validate_python_syntax.assert_called_once()
-        runner.validate_changed_files.assert_called_once()
-        runner.validate_handoff_file.assert_called_once()
+        runner.inspect_changed_files.assert_called_once()
+        runner.capture_handoff.assert_called_once()
         commands = [call.args[0] for call in runner.run_cmd.call_args_list]
         self.assertIn(["git", "add", "."], commands)
         self.assertTrue(any(command[:2] == ["git", "commit"] for command in commands))
@@ -669,8 +669,8 @@ class TestControllerDispatch(unittest.TestCase):
         runner.run_summary["phases"] = [{"phase": "first", "status": "SUCCESS"}]
         runner.sync_phase_worktree = MagicMock()
         runner.validate_python_syntax = MagicMock()
-        runner.validate_changed_files = MagicMock(return_value=[" M changed.py"])
-        runner.validate_handoff_file = MagicMock()
+        runner.inspect_changed_files = MagicMock(return_value=[" M changed.py"])
+        runner.capture_handoff = MagicMock()
 
         def command_result(command, **kwargs):
             stdout = "abc123\n" if command[:3] == ["git", "rev-parse", "HEAD"] else ""
@@ -1000,6 +1000,254 @@ class TestGenericVerification(unittest.TestCase):
             self.assertNotIn("token-value", report_text)
 
 
+class TestPhaseRoles(unittest.TestCase):
+    def setUp(self):
+        self.logging_patch = patch.object(
+            HermesSprintRunner, "_setup_logging", return_value=MagicMock()
+        )
+        self.logging_patch.start()
+        self.addCleanup(self.logging_patch.stop)
+
+    def make_phase_runner(self, root, role, changed_files, include_role=True):
+        runner = HermesSprintRunner(
+            spec_path=runner_path.parent.parent / "sprints" / "lab-s02.json",
+            skip_agent_exec=True,
+        )
+        runner.worktree_root = root / "Worktrees With Spaces"
+        phase = dict(runner.spec["phases"][0])
+        phase.update(
+            {
+                "name": "role phase",
+                "agent": "codex",
+                "worktree_dir": "worker",
+                "expected_handoff": "HANDOFF.md",
+            }
+        )
+        if include_role:
+            phase["role"] = role
+        else:
+            phase.pop("role", None)
+        runner._prepare_handoff_path = MagicMock(
+            return_value=(runner.worktree_root / "worker" / "HANDOFF.md", None)
+        )
+        runner._restore_handoff_path = MagicMock()
+        runner.capture_handoff = MagicMock()
+        runner.inspect_changed_files = MagicMock(return_value=changed_files)
+        runner.validate_python_syntax = MagicMock()
+
+        def command_result(command, **kwargs):
+            stdout = "abc123\n" if command[:3] == ["git", "rev-parse", "HEAD"] else ""
+            return subprocess.CompletedProcess(command, 0, stdout, "")
+
+        runner.run_cmd = MagicMock(side_effect=command_result)
+        return runner, phase
+
+    def git_commands(self, runner):
+        return [call.args[0] for call in runner.run_cmd.call_args_list]
+
+    def test_builder_requires_changes_then_commits_and_integrates(self):
+        with tempfile.TemporaryDirectory() as temporary_dir:
+            root = Path(temporary_dir)
+            runner, phase = self.make_phase_runner(
+                root,
+                "builder",
+                [" M product.py"],
+            )
+
+            runner.execute_phase(phase, phase_index=1)
+
+            commands = self.git_commands(runner)
+            self.assertIn(["git", "add", "."], commands)
+            self.assertTrue(any(command[:2] == ["git", "commit"] for command in commands))
+            self.assertTrue(any(command[:2] == ["git", "merge"] for command in commands))
+            self.assertEqual(
+                runner.run_summary["phases"][0]["role"],
+                "builder",
+            )
+            self.assertTrue(runner.run_summary["phases"][0]["integrated"])
+
+            no_change_runner, no_change_phase = self.make_phase_runner(
+                root,
+                "builder",
+                [],
+            )
+            with self.assertRaises(SprintRunnerError) as context:
+                no_change_runner.execute_phase(no_change_phase)
+            self.assertEqual(context.exception.code, "FAILED_NO_CHANGES")
+
+    def test_hardener_integrates_only_when_changes_exist(self):
+        with tempfile.TemporaryDirectory() as temporary_dir:
+            root = Path(temporary_dir)
+            changed_runner, changed_phase = self.make_phase_runner(
+                root,
+                "hardener",
+                [" M product.py"],
+            )
+            unchanged_runner, unchanged_phase = self.make_phase_runner(
+                root,
+                "hardener",
+                [],
+            )
+
+            changed_runner.execute_phase(changed_phase)
+            unchanged_runner.execute_phase(unchanged_phase)
+
+            changed_commands = self.git_commands(changed_runner)
+            self.assertTrue(
+                any(command[:2] == ["git", "commit"] for command in changed_commands)
+            )
+            self.assertTrue(
+                any(command[:2] == ["git", "merge"] for command in changed_commands)
+            )
+            unchanged_commands = self.git_commands(unchanged_runner)
+            self.assertFalse(
+                any(command[:2] == ["git", "commit"] for command in unchanged_commands)
+            )
+            self.assertFalse(
+                any(command[:2] == ["git", "merge"] for command in unchanged_commands)
+            )
+            result = unchanged_runner.run_summary["phases"][0]
+            self.assertEqual(result["changed_files_count"], 0)
+            self.assertFalse(result["integrated"])
+
+    def test_verifier_forbids_changes_and_never_integrates(self):
+        with tempfile.TemporaryDirectory() as temporary_dir:
+            root = Path(temporary_dir)
+            clean_runner, clean_phase = self.make_phase_runner(
+                root,
+                "verifier",
+                [],
+            )
+            changed_runner, changed_phase = self.make_phase_runner(
+                root,
+                "verifier",
+                [" M product.py"],
+            )
+
+            clean_runner.execute_phase(clean_phase)
+            with self.assertRaises(SprintRunnerError) as context:
+                changed_runner.execute_phase(changed_phase)
+
+            self.assertEqual(context.exception.code, "FAILED_FORBIDDEN_CHANGES")
+            clean_commands = self.git_commands(clean_runner)
+            self.assertFalse(
+                any(command[:2] == ["git", "commit"] for command in clean_commands)
+            )
+            self.assertFalse(
+                any(command[:2] == ["git", "merge"] for command in clean_commands)
+            )
+            self.assertFalse(clean_runner.run_summary["phases"][0]["integrated"])
+
+    def test_legacy_phase_still_requires_changes_and_integrates(self):
+        with tempfile.TemporaryDirectory() as temporary_dir:
+            root = Path(temporary_dir)
+            runner, phase = self.make_phase_runner(
+                root,
+                "legacy",
+                [" M product.py"],
+                include_role=False,
+            )
+            runner.execute_phase(phase)
+            self.assertEqual(runner.run_summary["phases"][0]["role"], "legacy")
+            self.assertTrue(runner.run_summary["phases"][0]["integrated"])
+
+            no_change_runner, no_change_phase = self.make_phase_runner(
+                root,
+                "legacy",
+                [],
+                include_role=False,
+            )
+            with self.assertRaises(SprintRunnerError) as context:
+                no_change_runner.execute_phase(no_change_phase)
+            self.assertEqual(context.exception.code, "FAILED_NO_CHANGES")
+
+    def test_unknown_role_fails_during_spec_loading(self):
+        with tempfile.TemporaryDirectory() as temporary_dir:
+            root = Path(temporary_dir)
+            spec_path = root / "unknown-role.json"
+            spec_path.write_text(
+                json.dumps(
+                    {
+                        "runs_root": str(root / "runs"),
+                        "phases": [
+                            {
+                                "name": "unknown",
+                                "role": "wizard",
+                                "agent": "codex",
+                            }
+                        ],
+                    }
+                ),
+                encoding="utf-8",
+            )
+            with self.assertRaises(SprintRunnerError) as context:
+                HermesSprintRunner(spec_path)
+            self.assertEqual(context.exception.code, "FAILED_UNKNOWN_ROLE")
+
+    def test_handoff_is_captured_then_removed_from_target_changes(self):
+        with tempfile.TemporaryDirectory() as temporary_dir:
+            root = Path(temporary_dir)
+            runner = HermesSprintRunner(
+                spec_path=runner_path.parent.parent / "sprints" / "lab-s02.json",
+            )
+            runner.run_dir = root / "Runs With Spaces" / "run"
+            worktree = root / "Target Worktree With Spaces"
+            worktree.mkdir()
+
+            handoff_path, original = runner._prepare_handoff_path(
+                worktree,
+                "HANDOFF.md",
+            )
+            handoff_path.write_text("private worker evidence\n", encoding="utf-8")
+            runner.capture_handoff(
+                1,
+                "builder",
+                "codex",
+                worktree,
+                "HANDOFF.md",
+            )
+            runner._restore_handoff_path(handoff_path, original)
+
+            evidence = runner.run_dir / "handoffs" / "01_builder_codex.md"
+            self.assertEqual(
+                evidence.read_text(encoding="utf-8"),
+                "private worker evidence\n",
+            )
+            self.assertFalse(handoff_path.exists())
+
+    def test_sanitized_phase_metadata_excludes_handoff_content(self):
+        with tempfile.TemporaryDirectory() as temporary_dir:
+            root = Path(temporary_dir)
+            runner = HermesSprintRunner(
+                spec_path=runner_path.parent.parent / "sprints" / "lab-s02.json",
+            )
+            runner.run_summary.update(
+                {
+                    "status": "READY_FOR_REVIEW",
+                    "phases": [
+                        {
+                            "phase": "review",
+                            "role": "verifier",
+                            "agent": "codex",
+                            "status": "SUCCESS",
+                            "changed_files_count": 0,
+                            "integrated": False,
+                            "handoff": "captured",
+                            "handoff_content": "PRIVATE EVIDENCE",
+                        }
+                    ],
+                }
+            )
+            report_path = root / "report.json"
+            runner.export_sanitized_report(report_path)
+            report_text = report_path.read_text(encoding="utf-8")
+            report = json.loads(report_text)
+            self.assertEqual(report["phases"][0]["role"], "verifier")
+            self.assertFalse(report["phases"][0]["integrated"])
+            self.assertEqual(report["phases"][0]["handoff"], "captured")
+            self.assertNotIn("PRIVATE EVIDENCE", report_text)
+
+
 class TestExternalRepositorySupport(unittest.TestCase):
     def setUp(self):
         self.logging_patch = patch.object(
@@ -1223,6 +1471,7 @@ class TestExternalRepositorySupport(unittest.TestCase):
             self.init_repository(target_repo, "requirements.txt", "pytest\n")
             phase = {
                 "name": "delivery",
+                "role": "builder",
                 "agent": "writer",
                 "worktree_dir": "writer",
                 "branch": "hermes/e2e-writer",
@@ -1250,6 +1499,14 @@ class TestExternalRepositorySupport(unittest.TestCase):
             self.assertEqual(runner.run_summary["status"], "READY_FOR_REVIEW")
             self.assertEqual(runner.run_summary["test_results"]["status"], "PASSED")
             integration = runner.worktree_root / "integration"
+            self.assertFalse((integration / "HANDOFF.md").exists())
+            self.assertTrue(
+                (
+                    runner.run_dir
+                    / "handoffs"
+                    / "01_builder_writer.md"
+                ).is_file()
+            )
             self.assertEqual(
                 subprocess.run(
                     ["git", "branch", "--show-current"],

@@ -48,6 +48,7 @@ The runner supports Antigravity, Claude, and Codex through a common registry. Ad
   - `run_summary.json` - Structured JSON execution summary
   - `runner.log` - Full timestamped controller log output
   - `<phase>_<agent>_stdout.log` / `<phase>_<agent>_stderr.log` - Agent process output logs
+  - `handoffs/<index>_<role>_<agent>.md` - Runner-owned phase handoff evidence
   - `venv/` - Isolated temporary Python virtual environment created per run
 
 ## Workflow Sequence
@@ -83,7 +84,10 @@ The runner supports Antigravity, Claude, and Codex through a common registry. Ad
 - `FAILED_HERDR_COMMAND`: Workspace, pane, or control execution failed.
 - `FAILED_NO_CHANGES`: Agent phase produced zero file changes.
 - `FAILED_MISSING_HANDOFF`: Required handoff file missing or empty.
+- `FAILED_INVALID_HANDOFF`: Configured handoff path is unsafe or not a file.
 - `FAILED_EXCESSIVE_FILES`: Worktree modified more than `limits.max_changed_files` files.
+- `FAILED_UNKNOWN_ROLE`: Phase declares an unsupported role.
+- `FAILED_FORBIDDEN_CHANGES`: Verifier modified target source.
 - `FAILED_SYNTAX_ERROR`: Python syntax error detected.
 - `FAILED_INVALID_VERIFICATION_SPEC`: Generic verification configuration is malformed or escapes the integration worktree.
 - `FAILED_VERIFICATION`: A required generic verification step failed.
@@ -169,6 +173,40 @@ Non-Python / Frontend example (including Playwright E2E):
 ```
 
 This contract is platform-neutral: use executables and paths available to the active Linux, WSL, or native Windows environment. Empty or absent `verification` keeps legacy Python verification for historical sprint specs.
+
+## Phase Roles
+
+Phase behavior comes from `role`, independently from worker identity in `agent`:
+
+- `builder`: target changes required; successful changes are committed and merged.
+- `hardener`: target changes optional; changes are committed and merged only when present.
+- `verifier`: target changes forbidden; no commit or merge occurs.
+
+This keeps workers replaceable. A future agent may perform any role without changing controller semantics.
+
+```json
+{
+  "phases": [
+    {
+      "name": "implementation",
+      "role": "builder",
+      "agent": "antigravity"
+    },
+    {
+      "name": "hardening",
+      "role": "hardener",
+      "agent": "claude"
+    },
+    {
+      "name": "verification",
+      "role": "verifier",
+      "agent": "codex"
+    }
+  ]
+}
+```
+
+Role-less historical phases retain legacy behavior: at least one change is required, then committed and merged. Every phase still writes its configured worktree handoff. Hermes captures that content under the run directory, restores or removes the worktree copy, and only then counts, stages, or rejects target changes. Handoff contents never enter summaries or sanitized reports.
 
 ## Execution Backends
 

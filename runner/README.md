@@ -68,6 +68,7 @@ The runner supports Antigravity, Claude, and Codex through a common registry. Ad
 ## Fail-Fast Guardrails
 
 - `FAILED_TARGET_REPO_MISSING`: Configured target repository does not exist.
+- `FAILED_TARGET_REPO_NOT_GIT`: Configured target is not a Git working tree.
 - `FAILED_DIRTY_REPO`: Target repository working tree has uncommitted changes.
 - `FAILED_TIMEOUT`: Execution duration exceeded configured timeout.
 - `FAILED_PERMISSION_DENIED`: Tool event or process encountered permission denial.

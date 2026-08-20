@@ -469,11 +469,15 @@ class TestControllerDispatch(unittest.TestCase):
             dry_run=False,
             skip_agent_exec=True,
         )
-        runner.run_cmd = MagicMock(
-            return_value=subprocess.CompletedProcess(["git", "status"], 0, "", "")
-        )
+        def command_result(command, **kwargs):
+            stdout = "true\n" if command == ["git", "rev-parse", "--is-inside-work-tree"] else ""
+            return subprocess.CompletedProcess(command, 0, stdout, "")
+
+        runner.run_cmd = MagicMock(side_effect=command_result)
         runner._ensure_worktree = MagicMock()
         with tempfile.TemporaryDirectory() as temporary_dir:
+            runner.target_repo = Path(temporary_dir) / "target"
+            runner.target_repo.mkdir()
             runner.worktree_root = Path(temporary_dir) / "worktrees"
             runner.prepare_environment()
             calls = runner._ensure_worktree.call_args_list
@@ -497,11 +501,15 @@ class TestControllerDispatch(unittest.TestCase):
             skip_agent_exec=True,
         )
         runner.spec["base_ref"] = "pinned-s03-baseline"
-        runner.run_cmd = MagicMock(
-            return_value=subprocess.CompletedProcess(["git", "status"], 0, "", "")
-        )
+        def command_result(command, **kwargs):
+            stdout = "true\n" if command == ["git", "rev-parse", "--is-inside-work-tree"] else ""
+            return subprocess.CompletedProcess(command, 0, stdout, "")
+
+        runner.run_cmd = MagicMock(side_effect=command_result)
         runner._ensure_worktree = MagicMock()
         with tempfile.TemporaryDirectory() as temporary_dir:
+            runner.target_repo = Path(temporary_dir) / "target"
+            runner.target_repo.mkdir()
             runner.worktree_root = Path(temporary_dir) / "worktrees"
             runner.prepare_environment()
 
@@ -761,20 +769,21 @@ class TestExternalRepositorySupport(unittest.TestCase):
             capture_output=True,
             text=True,
         )
+        subprocess.run(
+            ["git", "config", "user.name", "Hermes Test"],
+            cwd=repository,
+            check=True,
+        )
+        subprocess.run(
+            ["git", "config", "user.email", "hermes@example.invalid"],
+            cwd=repository,
+            check=True,
+        )
         (repository / filename).parent.mkdir(parents=True, exist_ok=True)
         (repository / filename).write_text(content, encoding="utf-8")
         subprocess.run(["git", "add", "."], cwd=repository, check=True)
         subprocess.run(
-            [
-                "git",
-                "-c",
-                "user.name=Hermes Test",
-                "-c",
-                "user.email=hermes@example.invalid",
-                "commit",
-                "-m",
-                "initial",
-            ],
+            ["git", "commit", "-m", "initial"],
             cwd=repository,
             check=True,
             capture_output=True,
@@ -890,6 +899,23 @@ class TestExternalRepositorySupport(unittest.TestCase):
             runner = HermesSprintRunner(spec_path)
             self.assertEqual(runner.target_repo, target_repo.resolve())
 
+    def test_existing_non_git_target_has_explicit_validation_error(self):
+        with tempfile.TemporaryDirectory() as temporary_dir:
+            root = Path(temporary_dir)
+            target_repo = root / "not a repository"
+            target_repo.mkdir()
+            spec_path = self.write_spec(
+                root / "specs" / "non-git.json",
+                target_repo=str(target_repo),
+                worktree_root=str(root / "worktrees"),
+                runs_root=str(root / "runs"),
+            )
+            runner = HermesSprintRunner(spec_path)
+            with self.assertRaises(SprintRunnerError) as context:
+                runner.prepare_environment()
+            self.assertEqual(context.exception.code, "FAILED_TARGET_REPO_NOT_GIT")
+            self.assertIn(str(target_repo), context.exception.message)
+
     def test_relative_paths_resolve_from_spec_directory_not_current_directory(self):
         with tempfile.TemporaryDirectory() as temporary_dir:
             root = Path(temporary_dir)
@@ -919,6 +945,73 @@ class TestExternalRepositorySupport(unittest.TestCase):
             HermesSprintRunner._venv_python(venv, platform_name="nt"),
             PureWindowsPath("C:/Users/user/Hermes Runs/venv/Scripts/python.exe"),
         )
+
+    @unittest.skipUnless(
+        os.environ.get("HERMES_FULL_E2E") == "1",
+        "Set HERMES_FULL_E2E=1 to run isolated Git/venv pipeline",
+    )
+    def test_full_external_repository_pipeline(self):
+        class WritingAdapter:
+            def execute(self, context):
+                (context.worktree / "feature.py").write_text(
+                    "VALUE = 42\n",
+                    encoding="utf-8",
+                )
+                (context.worktree / "test_feature.py").write_text(
+                    "from feature import VALUE\n\n\ndef test_value():\n    assert VALUE == 42\n",
+                    encoding="utf-8",
+                )
+                (context.worktree / "HANDOFF.md").write_text(
+                    "External repository pipeline complete.\n",
+                    encoding="utf-8",
+                )
+                return SimpleNamespace(runtime_metadata={})
+
+        with tempfile.TemporaryDirectory() as temporary_dir:
+            root = Path(temporary_dir)
+            control_repo = root / "Hermes Control"
+            target_repo = root / "External Product"
+            self.init_repository(control_repo, "prompts/e2e.md", "Build feature.\n")
+            self.init_repository(target_repo, "requirements.txt", "pytest\n")
+            phase = {
+                "name": "delivery",
+                "agent": "writer",
+                "worktree_dir": "writer",
+                "branch": "hermes/e2e-writer",
+                "prompt_file": "prompts/e2e.md",
+                "expected_handoff": "HANDOFF.md",
+                "commit_message": "test: external delivery",
+            }
+            spec_path = self.write_spec(
+                control_repo / "sprints" / "e2e.json",
+                control_root=str(control_repo),
+                target_repo=str(target_repo),
+                target_branch="hermes/e2e-integration",
+                worktree_root=str(root / "Hermes Worktrees"),
+                runs_root=str(root / "Hermes Runs"),
+                phases=[phase],
+                limits={"max_changed_files": 5, "timeout_seconds": 120},
+            )
+            runner = HermesSprintRunner(
+                spec_path,
+                agent_registry=AgentRegistry({"writer": WritingAdapter}),
+            )
+            runner.run_dir.mkdir(parents=True, exist_ok=True)
+
+            self.assertTrue(runner.execute(), runner.run_summary)
+            self.assertEqual(runner.run_summary["status"], "READY_FOR_REVIEW")
+            self.assertEqual(runner.run_summary["test_results"]["status"], "PASSED")
+            integration = runner.worktree_root / "integration"
+            self.assertEqual(
+                subprocess.run(
+                    ["git", "branch", "--show-current"],
+                    cwd=integration,
+                    check=True,
+                    capture_output=True,
+                    text=True,
+                ).stdout.strip(),
+                "hermes/e2e-integration",
+            )
 
 
 if __name__ == "__main__":

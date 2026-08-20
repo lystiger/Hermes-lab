@@ -168,6 +168,25 @@ class HermesSprintRunner:
                 "FAILED_TARGET_REPO_MISSING",
                 f"Target repo does not exist at {self.target_repo}",
             )
+        if not self.target_repo.is_dir():
+            raise SprintRunnerError(
+                "FAILED_TARGET_REPO_NOT_GIT",
+                f"Target repo is not a Git working tree: {self.target_repo}",
+            )
+
+        repository_check = self.run_cmd(
+            ["git", "rev-parse", "--is-inside-work-tree"],
+            cwd=self.target_repo,
+            check=False,
+        )
+        if (
+            repository_check.returncode != 0
+            or repository_check.stdout.strip() != "true"
+        ):
+            raise SprintRunnerError(
+                "FAILED_TARGET_REPO_NOT_GIT",
+                f"Target repo is not a Git working tree: {self.target_repo}",
+            )
 
         # Target repository safety: MUST fail if dirty.
         res = self.run_cmd(["git", "status", "--porcelain"], cwd=self.target_repo)

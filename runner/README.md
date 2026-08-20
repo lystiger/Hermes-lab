@@ -60,10 +60,9 @@ The runner supports Antigravity, Claude, and Codex through a common registry. Ad
 3. **Controller Validation**: Recursively compiles Python, enforces the changed-file limit, and requires the configured non-empty handoff.
 4. **Controller Integration**: The controller alone stages, commits, and merges the phase. Each later phase is synchronized to the latest integration branch first.
 5. **Verification & Testing**:
-   - Controller creates isolated venv in `~/hermes-runs/<run_id>/venv`.
-   - Installs dependencies from `integration/requirements.txt`.
-   - Runs the complete `pytest` suite against the integration worktree.
-   - Final state transitions to `READY_FOR_REVIEW` ONLY if all phases and tests succeed without `NO_CHANGES` or failures.
+   - Specs with `verification` run each declared argv command sequentially against the integration worktree.
+   - Specs without `verification` retain the legacy isolated venv, `requirements.txt`, and pytest workflow.
+   - Final state transitions to `READY_FOR_REVIEW` ONLY if all phases and configured verification succeed without `NO_CHANGES` or failures.
 
 ## Fail-Fast Guardrails
 
@@ -86,6 +85,8 @@ The runner supports Antigravity, Claude, and Codex through a common registry. Ad
 - `FAILED_MISSING_HANDOFF`: Required handoff file missing or empty.
 - `FAILED_EXCESSIVE_FILES`: Worktree modified more than `limits.max_changed_files` files.
 - `FAILED_SYNTAX_ERROR`: Python syntax error detected.
+- `FAILED_INVALID_VERIFICATION_SPEC`: Generic verification configuration is malformed or escapes the integration worktree.
+- `FAILED_VERIFICATION`: A required generic verification step failed.
 - `FAILED_TESTS`: Pytest suite failed in virtual environment.
 
 ## Security & Governance Boundaries
@@ -120,6 +121,51 @@ Use `target_repo` to run Hermes against another local Git repository:
 Hermes derives `control_root` from the runner location unless explicitly configured. Relative `control_root`, `target_repo`, `worktree_root`, and `runs_root` values resolve from the sprint specification directory. Relative phase `prompt_file` values resolve from `control_root`. Legacy `canonical_repo` remains supported as a fallback target when `target_repo` is absent.
 
 Use paths native to the Python environment: Linux paths on Linux, WSL-visible paths under WSL, and Windows paths under native Windows. No cross-kernel path conversion occurs.
+
+## Generic Verification
+
+Target projects may declare final verification as an ordered top-level array. Every step requires a unique non-empty `name` and a non-empty `command` array containing only strings. Commands execute directly as argv without shell interpretation.
+
+`cwd` is optional and defaults to the integration worktree root. When present, it must be a relative path contained inside that worktree. `timeout_seconds` is optional, must be positive, and overrides the runner timeout for that step. Steps stop on first failure. Per-step stdout and stderr logs stay under the Hermes run directory.
+
+Python/uv example:
+
+```json
+{
+  "verification": [
+    {
+      "name": "sync",
+      "cwd": "backend",
+      "command": ["uv", "sync", "--all-groups"]
+    },
+    {
+      "name": "tests",
+      "cwd": "backend",
+      "command": ["uv", "run", "pytest"],
+      "timeout_seconds": 600
+    }
+  ]
+}
+```
+
+Non-Python example:
+
+```json
+{
+  "verification": [
+    {
+      "name": "install",
+      "command": ["npm", "ci"]
+    },
+    {
+      "name": "test",
+      "command": ["npm", "test"]
+    }
+  ]
+}
+```
+
+This contract is platform-neutral: use executables and paths available to the active Linux, WSL, or native Windows environment. Empty or absent `verification` keeps legacy Python verification for historical sprint specs.
 
 ## Execution Backends
 

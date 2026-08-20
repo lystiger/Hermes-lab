@@ -3,6 +3,7 @@ import inspect
 import os
 import shutil
 import subprocess
+import sys
 import tempfile
 import unittest
 import importlib.util
@@ -750,6 +751,253 @@ class TestControllerDispatch(unittest.TestCase):
             runner.report_path,
             runner.control_root / "reports" / "lab-s03" / "run-summary.json",
         )
+
+
+class TestGenericVerification(unittest.TestCase):
+    ABSENT = object()
+
+    def setUp(self):
+        self.logging_patch = patch.object(
+            HermesSprintRunner, "_setup_logging", return_value=MagicMock()
+        )
+        self.logging_patch.start()
+        self.addCleanup(self.logging_patch.stop)
+
+    def make_runner(self, root, verification=ABSENT):
+        root.mkdir(parents=True, exist_ok=True)
+        specification = {
+            "sprint_id": "generic-verification",
+            "worktree_root": str(root / "Worktrees With Spaces"),
+            "runs_root": str(root / "Runs With Spaces"),
+            "phases": [],
+        }
+        if verification is not self.ABSENT:
+            specification["verification"] = verification
+        spec_path = root / "specification.json"
+        spec_path.write_text(json.dumps(specification), encoding="utf-8")
+        runner = HermesSprintRunner(spec_path)
+        runner.run_dir.mkdir(parents=True, exist_ok=True)
+        return runner
+
+    def test_generic_verification_runs_in_order_with_scoped_working_directories(self):
+        with tempfile.TemporaryDirectory() as temporary_dir:
+            root = Path(temporary_dir)
+            verification = [
+                {
+                    "name": "first check",
+                    "command": [
+                        sys.executable,
+                        "-c",
+                        "from pathlib import Path; Path('order.txt').write_text('first')",
+                    ],
+                },
+                {
+                    "name": "backend check",
+                    "cwd": "backend",
+                    "command": [
+                        sys.executable,
+                        "-c",
+                        "from pathlib import Path; p=Path('../order.txt'); p.write_text(p.read_text() + ',second'); Path('cwd.txt').write_text('backend')",
+                    ],
+                    "timeout_seconds": 30,
+                },
+                {
+                    "name": "final check",
+                    "command": [
+                        sys.executable,
+                        "-c",
+                        "from pathlib import Path; assert Path('order.txt').read_text() == 'first,second'",
+                    ],
+                },
+            ]
+            runner = self.make_runner(root, verification)
+            integration = runner.worktree_root / "integration"
+            (integration / "backend").mkdir(parents=True)
+            self.assertEqual(runner.verification_steps[0]["timeout_seconds"], 300)
+            self.assertEqual(runner.verification_steps[1]["timeout_seconds"], 30)
+
+            runner.run_verification()
+
+            self.assertEqual(runner.run_summary["verification_status"], "PASSED")
+            self.assertEqual(
+                runner.run_summary["verification_results"],
+                [
+                    {"name": "first check", "status": "PASSED"},
+                    {"name": "backend check", "status": "PASSED"},
+                    {"name": "final check", "status": "PASSED"},
+                ],
+            )
+            self.assertEqual((integration / "order.txt").read_text(), "first,second")
+            self.assertEqual(
+                (integration / "backend" / "cwd.txt").read_text(), "backend"
+            )
+            self.assertTrue(
+                (runner.run_dir / "verification_01_first_check_stdout.log").is_file()
+            )
+            self.assertTrue(
+                (runner.run_dir / "verification_02_backend_check_stderr.log").is_file()
+            )
+
+    def test_generic_verification_fails_fast_and_skips_later_steps(self):
+        with tempfile.TemporaryDirectory() as temporary_dir:
+            root = Path(temporary_dir)
+            runner = self.make_runner(
+                root,
+                [
+                    {
+                        "name": "pass",
+                        "command": [sys.executable, "-c", "print('pass')"],
+                    },
+                    {
+                        "name": "fail",
+                        "command": [sys.executable, "-c", "raise SystemExit(7)"],
+                    },
+                    {
+                        "name": "never",
+                        "command": [
+                            sys.executable,
+                            "-c",
+                            "from pathlib import Path; Path('never.txt').write_text('ran')",
+                        ],
+                    },
+                ],
+            )
+            integration = runner.worktree_root / "integration"
+            integration.mkdir(parents=True)
+
+            with self.assertRaises(SprintRunnerError) as context:
+                runner.run_verification()
+
+            self.assertEqual(context.exception.code, "FAILED_VERIFICATION")
+            self.assertEqual(runner.run_summary["verification_status"], "FAILED")
+            self.assertEqual(
+                runner.run_summary["verification_results"],
+                [
+                    {"name": "pass", "status": "PASSED"},
+                    {"name": "fail", "status": "FAILED"},
+                ],
+            )
+            self.assertFalse((integration / "never.txt").exists())
+
+    def test_invalid_verification_contracts_are_rejected_centrally(self):
+        with tempfile.TemporaryDirectory() as temporary_dir:
+            root = Path(temporary_dir)
+            invalid_specs = [
+                "pytest",
+                ["not an object"],
+                [{"name": "", "command": ["tool"]}],
+                [{"name": "check", "command": "tool --check"}],
+                [{"name": "check", "command": []}],
+                [{"name": "check", "command": ["tool", 1]}],
+                [{"name": "check", "command": ["tool"], "timeout_seconds": 0}],
+                [{"name": "check", "command": ["tool"], "timeout_seconds": -1}],
+                [{"name": "check", "command": ["tool"], "timeout_seconds": "5"}],
+                [{"name": "check", "command": ["tool"], "timeout_seconds": True}],
+                [
+                    {"name": "same", "command": ["tool"]},
+                    {"name": "same", "command": ["tool"]},
+                ],
+                [{"name": "check", "command": ["tool"], "cwd": "../outside"}],
+                [{"name": "check", "command": ["tool"], "cwd": str(root)}],
+                [{"name": "check", "command": ["tool"], "cwd": "C:\\outside"}],
+                [
+                    {
+                        "name": "check",
+                        "command": ["tool"],
+                        "cwd": "\\\\server\\share",
+                    }
+                ],
+            ]
+            for index, verification in enumerate(invalid_specs):
+                with self.subTest(index=index):
+                    case_root = root / str(index)
+                    case_root.mkdir()
+                    with self.assertRaises(SprintRunnerError) as context:
+                        self.make_runner(case_root, verification)
+                    self.assertEqual(
+                        context.exception.code,
+                        "FAILED_INVALID_VERIFICATION_SPEC",
+                    )
+
+    def test_execute_selects_generic_or_legacy_verification_without_overlap(self):
+        with tempfile.TemporaryDirectory() as temporary_dir:
+            root = Path(temporary_dir)
+            generic = self.make_runner(
+                root / "generic",
+                [{"name": "check", "command": ["tool"]}],
+            )
+            legacy = self.make_runner(root / "legacy")
+            for runner in (generic, legacy):
+                runner.prepare_environment = MagicMock()
+                runner.run_verification = MagicMock()
+                runner.run_tests_in_venv = MagicMock()
+                runner.finalize = MagicMock()
+
+            generic.execute()
+            legacy.execute()
+
+            generic.run_verification.assert_called_once_with()
+            generic.run_tests_in_venv.assert_not_called()
+            legacy.run_tests_in_venv.assert_called_once_with()
+            legacy.run_verification.assert_not_called()
+
+    def test_finalize_accepts_only_the_configured_verification_mode(self):
+        with tempfile.TemporaryDirectory() as temporary_dir:
+            root = Path(temporary_dir)
+            generic = self.make_runner(
+                root,
+                [{"name": "check", "command": ["tool"]}],
+            )
+            generic.run_cmd = MagicMock(
+                return_value=subprocess.CompletedProcess(
+                    ["git", "rev-parse", "HEAD"], 0, "abc123\n", ""
+                )
+            )
+            generic.run_summary["verification_status"] = "PASSED"
+            generic.finalize()
+            self.assertEqual(generic.run_summary["status"], "READY_FOR_REVIEW")
+
+            generic.run_summary["verification_status"] = "FAILED"
+            with self.assertRaises(SprintRunnerError) as context:
+                generic.finalize()
+            self.assertEqual(context.exception.code, "FAILED_VERIFICATION")
+
+    def test_sanitized_report_contains_only_safe_generic_verification_evidence(self):
+        with tempfile.TemporaryDirectory() as temporary_dir:
+            root = Path(temporary_dir)
+            runner = self.make_runner(
+                root,
+                [{"name": "lint", "command": ["secret-tool", "token-value"]}],
+            )
+            runner.run_summary.update(
+                {
+                    "status": "READY_FOR_REVIEW",
+                    "verification_status": "PASSED",
+                    "verification_results": [
+                        {
+                            "name": "lint",
+                            "status": "PASSED",
+                            "stdout": "SECRET OUTPUT",
+                            "cwd": str(root),
+                        }
+                    ],
+                    "integration_commit": "abc123",
+                }
+            )
+            report_path = root / "report.json"
+
+            runner.export_sanitized_report(report_path)
+            report_text = report_path.read_text(encoding="utf-8")
+            report = json.loads(report_text)
+
+            self.assertEqual(report["verification_status"], "PASSED")
+            self.assertEqual(
+                report["verification"],
+                [{"name": "lint", "status": "PASSED"}],
+            )
+            self.assertNotIn("SECRET", report_text)
+            self.assertNotIn(str(root), report_text)
+            self.assertNotIn("token-value", report_text)
 
 
 class TestExternalRepositorySupport(unittest.TestCase):

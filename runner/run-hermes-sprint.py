@@ -20,7 +20,7 @@ import subprocess
 import py_compile
 import logging
 import os
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 from datetime import datetime
 
 SCRIPT_DIR = Path(__file__).resolve().parent
@@ -74,6 +74,7 @@ class HermesSprintRunner:
             default=default_storage_root / "hermes-runs",
         )
         self.limits = self.spec.get("limits", {"max_changed_files": 15, "timeout_seconds": 300})
+        self.verification_steps = self._load_verification_spec()
         if export_report is True:
             self.report_path = (
                 self.control_root / "reports" / self.sprint_id / "run-summary.json"
@@ -96,6 +97,8 @@ class HermesSprintRunner:
             "status": "INITIALIZING",
             "phases": [],
             "test_results": None,
+            "verification_status": None,
+            "verification_results": [],
             "integration_commit": None,
             "errors": []
         }
@@ -118,6 +121,89 @@ class HermesSprintRunner:
         if not prompt_file.is_absolute():
             prompt_file = self.control_root / prompt_file
         return prompt_file.resolve()
+
+    def _load_verification_spec(self):
+        verification = self.spec.get("verification", [])
+        if not isinstance(verification, list):
+            self._invalid_verification("'verification' must be a JSON array")
+
+        names = set()
+        normalized = []
+        integration_dir = self.worktree_root / "integration"
+        for index, raw_step in enumerate(verification, start=1):
+            if not isinstance(raw_step, dict):
+                self._invalid_verification(
+                    f"verification step {index} must be a JSON object"
+                )
+
+            name = raw_step.get("name")
+            if not isinstance(name, str) or not name.strip():
+                self._invalid_verification(
+                    f"verification step {index} requires a non-empty name"
+                )
+            if name in names:
+                self._invalid_verification(
+                    f"duplicate verification step name: {name}"
+                )
+            names.add(name)
+
+            command = raw_step.get("command")
+            if (
+                not isinstance(command, list)
+                or not command
+                or any(not isinstance(argument, str) for argument in command)
+            ):
+                self._invalid_verification(
+                    f"verification step '{name}' command must be a non-empty array of strings"
+                )
+
+            cwd = raw_step.get("cwd", ".")
+            if not isinstance(cwd, str) or not cwd.strip():
+                self._invalid_verification(
+                    f"verification step '{name}' cwd must be a non-empty relative path"
+                )
+            if Path(cwd).is_absolute() or PureWindowsPath(cwd).anchor:
+                self._invalid_verification(
+                    f"verification step '{name}' cwd must be relative to the integration worktree"
+                )
+
+            timeout = raw_step.get(
+                "timeout_seconds",
+                self.limits.get("timeout_seconds", 300),
+            )
+            if (
+                isinstance(timeout, bool)
+                or not isinstance(timeout, (int, float))
+                or timeout <= 0
+            ):
+                self._invalid_verification(
+                    f"verification step '{name}' timeout_seconds must be positive"
+                )
+
+            step = {
+                "name": name,
+                "command": list(command),
+                "cwd": cwd,
+                "timeout_seconds": timeout,
+            }
+            self._resolve_verification_cwd(step, integration_dir)
+            normalized.append(step)
+        return normalized
+
+    @staticmethod
+    def _invalid_verification(message):
+        raise SprintRunnerError("FAILED_INVALID_VERIFICATION_SPEC", message)
+
+    def _resolve_verification_cwd(self, step, integration_dir):
+        integration_dir = integration_dir.resolve()
+        candidate = (integration_dir / step["cwd"]).resolve()
+        try:
+            candidate.relative_to(integration_dir)
+        except ValueError:
+            self._invalid_verification(
+                f"verification step '{step['name']}' cwd escapes the integration worktree"
+            )
+        return candidate
 
     def _setup_logging(self):
         self.run_dir.mkdir(parents=True, exist_ok=True)
@@ -442,6 +528,67 @@ class HermesSprintRunner:
             }
             raise SprintRunnerError("FAILED_TESTS", f"Pytest suite failed in integration worktree: {e}")
 
+    def run_verification(self):
+        """Run spec-defined final verification sequentially without a shell."""
+        self.logger.info("\n=== Running Generic Verification Pipeline ===")
+        integration_dir = self.worktree_root / "integration"
+        self.run_summary["verification_status"] = "RUNNING"
+
+        for index, step in enumerate(self.verification_steps, start=1):
+            name = step["name"]
+            cwd = self._resolve_verification_cwd(step, integration_dir)
+            result_record = {"name": name, "status": "FAILED"}
+            safe_name = "".join(
+                character if character.isalnum() or character in "-_" else "_"
+                for character in name
+            ) or "step"
+            stdout_file = self.run_dir / (
+                f"verification_{index:02d}_{safe_name}_stdout.log"
+            )
+            stderr_file = self.run_dir / (
+                f"verification_{index:02d}_{safe_name}_stderr.log"
+            )
+
+            if not cwd.is_dir():
+                self.run_summary["verification_results"].append(result_record)
+                self.run_summary["verification_status"] = "FAILED"
+                self._invalid_verification(
+                    f"verification step '{name}' cwd does not exist or is not a directory"
+                )
+
+            self.logger.info("Running verification step %s: %s", index, name)
+            try:
+                result = self.run_cmd(
+                    step["command"],
+                    cwd=cwd,
+                    timeout=step["timeout_seconds"],
+                    check=False,
+                )
+            except (OSError, SprintRunnerError) as error:
+                stdout_file.write_text("", encoding="utf-8")
+                stderr_file.write_text(str(error), encoding="utf-8")
+                self.run_summary["verification_results"].append(result_record)
+                self.run_summary["verification_status"] = "FAILED"
+                raise SprintRunnerError(
+                    "FAILED_VERIFICATION",
+                    f"Verification step '{name}' could not complete: {error}",
+                ) from error
+
+            stdout_file.write_text(result.stdout or "", encoding="utf-8")
+            stderr_file.write_text(result.stderr or "", encoding="utf-8")
+            if result.returncode != 0:
+                self.run_summary["verification_results"].append(result_record)
+                self.run_summary["verification_status"] = "FAILED"
+                raise SprintRunnerError(
+                    "FAILED_VERIFICATION",
+                    f"Verification step '{name}' failed with exit code {result.returncode}",
+                )
+
+            result_record["status"] = "PASSED"
+            self.run_summary["verification_results"].append(result_record)
+
+        self.run_summary["verification_status"] = "PASSED"
+
     @staticmethod
     def _venv_python(venv_dir, platform_name=None):
         platform_name = platform_name or os.name
@@ -458,7 +605,13 @@ class HermesSprintRunner:
                     f"Phase '{p['phase']}' did not reach SUCCESS status (was {p['status']})."
                 )
 
-        if not self.run_summary.get("test_results") or self.run_summary["test_results"].get("status") != "PASSED":
+        if self.verification_steps:
+            if self.run_summary.get("verification_status") != "PASSED":
+                raise SprintRunnerError(
+                    "FAILED_VERIFICATION",
+                    "Generic verification failed or did not run.",
+                )
+        elif not self.run_summary.get("test_results") or self.run_summary["test_results"].get("status") != "PASSED":
             raise SprintRunnerError(
                 "FAILED_TESTS",
                 "Pytest validation failed or did not run."
@@ -503,6 +656,17 @@ class HermesSprintRunner:
             "test_status": test_results.get("status"),
             "integration_commit": self.run_summary.get("integration_commit"),
         }
+        if self.verification_steps:
+            sanitized["verification_status"] = self.run_summary.get(
+                "verification_status"
+            )
+            sanitized["verification"] = [
+                {
+                    "name": result.get("name"),
+                    "status": result.get("status"),
+                }
+                for result in self.run_summary.get("verification_results", [])
+            ]
         destination.parent.mkdir(parents=True, exist_ok=True)
         destination.write_text(
             json.dumps(sanitized, indent=2, sort_keys=True) + "\n",
@@ -516,7 +680,10 @@ class HermesSprintRunner:
             self.prepare_environment()
             for phase in self.spec.get("phases", []):
                 self.execute_phase(phase)
-            self.run_tests_in_venv()
+            if self.verification_steps:
+                self.run_verification()
+            else:
+                self.run_tests_in_venv()
             self.finalize()
         except SprintRunnerError as e:
             self.run_summary["status"] = e.code

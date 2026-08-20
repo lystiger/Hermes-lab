@@ -148,18 +148,21 @@ Python/uv example:
 }
 ```
 
-Non-Python example:
+Non-Python / Frontend example (including Playwright E2E):
 
 ```json
 {
   "verification": [
     {
       "name": "install",
+      "cwd": "frontend",
       "command": ["npm", "ci"]
     },
     {
-      "name": "test",
-      "command": ["npm", "test"]
+      "name": "e2e-playwright",
+      "cwd": "frontend",
+      "command": ["npx", "playwright", "test"],
+      "timeout_seconds": 600
     }
   ]
 }

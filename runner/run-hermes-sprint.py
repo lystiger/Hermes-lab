@@ -36,6 +36,7 @@ from backends.registry import default_backend_registry
 
 class HermesSprintRunner:
     PHASE_ROLES = {"builder", "hardener", "verifier"}
+    DEFAULT_CONTEXT_MAX_BYTES = 256 * 1024
 
     def __init__(
         self,
@@ -76,6 +77,11 @@ class HermesSprintRunner:
             default=default_storage_root / "hermes-runs",
         )
         self.limits = self.spec.get("limits", {"max_changed_files": 15, "timeout_seconds": 300})
+        self.context_root = None
+        self.context_files = []
+        self.context_bundle = ""
+        self.context_bytes = 0
+        self._load_context_bundle()
         self.verification_steps = self._load_verification_spec()
         self._validate_phase_roles()
         if export_report is True:
@@ -105,6 +111,11 @@ class HermesSprintRunner:
             "integration_commit": None,
             "errors": []
         }
+        if self.context_files:
+            self.run_summary["context"] = {
+                "files_count": len(self.context_files),
+                "bytes": self.context_bytes,
+            }
 
     def _load_spec(self):
         if not self.spec_path.exists():
@@ -124,6 +135,122 @@ class HermesSprintRunner:
         if not prompt_file.is_absolute():
             prompt_file = self.control_root / prompt_file
         return prompt_file.resolve()
+
+    def _load_context_bundle(self):
+        if "context" not in self.spec:
+            return
+        context = self.spec["context"]
+        if not isinstance(context, dict):
+            self._invalid_context("'context' must be a JSON object")
+
+        root_value = context.get("root")
+        if not isinstance(root_value, str) or not root_value.strip():
+            self._invalid_context("context.root must be a non-empty path string")
+        root_path = Path(root_value)
+        if not root_path.is_absolute():
+            if PureWindowsPath(root_value).anchor:
+                self._invalid_context(
+                    "context.root must use a path native to the current platform"
+                )
+            root_path = self.spec_path.parent / root_path
+        root_path = root_path.resolve()
+        if not root_path.is_dir():
+            self._invalid_context(
+                f"context.root does not exist or is not a directory: {root_value}"
+            )
+
+        files = context.get("files")
+        if (
+            not isinstance(files, list)
+            or not files
+            or any(not isinstance(item, str) or not item.strip() for item in files)
+        ):
+            self._invalid_context(
+                "context.files must be a non-empty array of non-empty strings"
+            )
+
+        max_bytes = context.get("max_bytes", self.DEFAULT_CONTEXT_MAX_BYTES)
+        if (
+            isinstance(max_bytes, bool)
+            or not isinstance(max_bytes, int)
+            or max_bytes <= 0
+        ):
+            self._invalid_context("context.max_bytes must be a positive integer")
+
+        loaded_files = []
+        seen_paths = set()
+        total_bytes = 0
+        for file_value in files:
+            native_path = Path(file_value)
+            windows_path = PureWindowsPath(file_value)
+            if (
+                native_path.is_absolute()
+                or windows_path.anchor
+                or ".." in windows_path.parts
+            ):
+                self._invalid_context(
+                    f"context file must be relative and contained: {file_value}"
+                )
+
+            resolved_path = (root_path / native_path).resolve()
+            try:
+                resolved_path.relative_to(root_path)
+            except ValueError as error:
+                raise SprintRunnerError(
+                    "FAILED_INVALID_CONTEXT_SPEC",
+                    f"Context file escapes context.root: {file_value}",
+                ) from error
+            if resolved_path in seen_paths:
+                self._invalid_context(
+                    f"duplicate normalized context file: {file_value}"
+                )
+            seen_paths.add(resolved_path)
+
+            if not resolved_path.exists():
+                raise SprintRunnerError(
+                    "FAILED_CONTEXT_FILE_MISSING",
+                    f"Context file does not exist: {file_value}",
+                )
+            if not resolved_path.is_file():
+                raise SprintRunnerError(
+                    "FAILED_CONTEXT_FILE_INVALID",
+                    f"Context entry is not a regular file: {file_value}",
+                )
+            try:
+                content = resolved_path.read_text(encoding="utf-8")
+            except (OSError, UnicodeError) as error:
+                raise SprintRunnerError(
+                    "FAILED_CONTEXT_READ",
+                    f"Unable to read UTF-8 context file: {file_value}",
+                ) from error
+
+            total_bytes += len(content.encode("utf-8"))
+            if total_bytes > max_bytes:
+                raise SprintRunnerError(
+                    "FAILED_CONTEXT_TOO_LARGE",
+                    f"Context bundle exceeds max_bytes while loading: {file_value}",
+                )
+            logical_name = resolved_path.relative_to(root_path).as_posix()
+            loaded_files.append((logical_name, content))
+
+        sections = ["--- HERMES CONTEXT BUNDLE ---"]
+        for logical_name, content in loaded_files:
+            sections.append(f"[context: {logical_name}]\n{content}")
+        sections.append("--- END HERMES CONTEXT BUNDLE ---")
+
+        self.context_root = root_path
+        self.context_files = loaded_files
+        self.context_bytes = total_bytes
+        self.context_bundle = "\n\n".join(sections)
+
+    @staticmethod
+    def _invalid_context(message):
+        raise SprintRunnerError("FAILED_INVALID_CONTEXT_SPEC", message)
+
+    def build_effective_prompt(self, base_prompt):
+        if not self.context_bundle:
+            return base_prompt
+        return f"{base_prompt}\n\n{self.context_bundle}"
 
     def _load_verification_spec(self):
         verification = self.spec.get("verification", [])
@@ -401,7 +528,9 @@ class HermesSprintRunner:
             runner=self,
             phase=phase,
             worktree=wt_dir,
-            prompt=prompt_file.read_text(encoding="utf-8").strip(),
+            prompt=self.build_effective_prompt(
+                prompt_file.read_text(encoding="utf-8").strip()
+            ),
             options=phase.get("cmd_options", {}),
             stdout_file=self.run_dir / f"{phase['name']}_{agent_name}_stdout.log",
             stderr_file=self.run_dir / f"{phase['name']}_{agent_name}_stderr.log",
@@ -803,6 +932,11 @@ class HermesSprintRunner:
                 }
                 for result in self.run_summary.get("verification_results", [])
             ]
+        if self.context_files:
+            sanitized["context"] = {
+                "files_count": len(self.context_files),
+                "bytes": self.context_bytes,
+            }
         destination.parent.mkdir(parents=True, exist_ok=True)
         destination.write_text(
             json.dumps(sanitized, indent=2, sort_keys=True) + "\n",

@@ -753,6 +753,242 @@ class TestControllerDispatch(unittest.TestCase):
         )
 
 
+class TestContextBundles(unittest.TestCase):
+    ABSENT = object()
+
+    def setUp(self):
+        self.logging_patch = patch.object(
+            HermesSprintRunner, "_setup_logging", return_value=MagicMock()
+        )
+        self.logging_patch.start()
+        self.addCleanup(self.logging_patch.stop)
+
+    def make_runner(self, root, context=ABSENT, phases=None):
+        control_root = root / "Hermes Control"
+        spec_path = control_root / "specs" / "context.json"
+        spec_path.parent.mkdir(parents=True, exist_ok=True)
+        specification = {
+            "sprint_id": "context-test",
+            "control_root": str(control_root),
+            "runs_root": str(root / "Hermes Runs"),
+            "phases": phases or [],
+        }
+        if context is not self.ABSENT:
+            specification["context"] = context
+        spec_path.write_text(json.dumps(specification), encoding="utf-8")
+        return HermesSprintRunner(spec_path)
+
+    def test_no_context_preserves_base_prompt_exactly(self):
+        with tempfile.TemporaryDirectory() as temporary_dir:
+            runner = self.make_runner(Path(temporary_dir))
+            base_prompt = "Base prompt\nwith exact spacing."
+            self.assertEqual(runner.build_effective_prompt(base_prompt), base_prompt)
+            self.assertNotIn("context", runner.run_summary)
+
+    def test_context_loads_read_only_in_declared_order_and_reaches_all_phases(self):
+        with tempfile.TemporaryDirectory() as temporary_dir:
+            root = Path(temporary_dir)
+            context_root = root / "Lys Stack"
+            architecture = context_root / "project docs" / "architecture.md"
+            constraints = context_root / "project docs" / "constraints.md"
+            architecture.parent.mkdir(parents=True)
+            architecture.write_text("ARCHITECTURE PRIVATE\n", encoding="utf-8")
+            constraints.write_text("CONSTRAINTS PRIVATE\n", encoding="utf-8")
+            snapshots = {
+                path: (path.read_bytes(), path.stat().st_mtime_ns)
+                for path in (architecture, constraints)
+            }
+            phases = [
+                {
+                    "name": "build",
+                    "role": "builder",
+                    "agent": "codex",
+                    "prompt_file": "prompts/base.md",
+                },
+                {
+                    "name": "verify",
+                    "role": "verifier",
+                    "agent": "codex",
+                    "prompt_file": "prompts/base.md",
+                },
+            ]
+            runner = self.make_runner(
+                root,
+                {
+                    "root": "../../Lys Stack",
+                    "files": [
+                        "project docs/architecture.md",
+                        "project docs/constraints.md",
+                    ],
+                },
+                phases=phases,
+            )
+            prompt_path = runner.control_root / "prompts" / "base.md"
+            prompt_path.parent.mkdir(parents=True)
+            prompt_path.write_text("BASE PHASE PROMPT\n", encoding="utf-8")
+            adapter = MagicMock()
+            registry = MagicMock()
+            registry.get.return_value = adapter
+            runner.agent_registry = registry
+
+            effective = runner.build_effective_prompt("BASE PHASE PROMPT")
+            runner.execute_agent(phases[0], root / "worker one")
+            runner.execute_agent(phases[1], root / "worker two")
+
+            self.assertLess(effective.index("BASE PHASE PROMPT"), effective.index("ARCHITECTURE PRIVATE"))
+            self.assertLess(effective.index("ARCHITECTURE PRIVATE"), effective.index("CONSTRAINTS PRIVATE"))
+            self.assertIn(
+                "[context: project docs/architecture.md]",
+                effective,
+            )
+            self.assertIn("--- HERMES CONTEXT BUNDLE ---", effective)
+            self.assertIn("--- END HERMES CONTEXT BUNDLE ---", effective)
+            self.assertNotIn(str(context_root), effective)
+            prompts = [call.args[0].prompt for call in adapter.execute.call_args_list]
+            self.assertEqual(prompts, [effective, effective])
+            self.assertEqual(runner.run_summary["context"]["files_count"], 2)
+            for path, (content, modified_time) in snapshots.items():
+                self.assertEqual(path.read_bytes(), content)
+                self.assertEqual(path.stat().st_mtime_ns, modified_time)
+            self.assertEqual(
+                sorted(path.relative_to(context_root).as_posix() for path in context_root.rglob("*")),
+                [
+                    "project docs",
+                    "project docs/architecture.md",
+                    "project docs/constraints.md",
+                ],
+            )
+
+    def test_invalid_context_contracts_and_escapes_fail_during_loading(self):
+        with tempfile.TemporaryDirectory() as temporary_dir:
+            root = Path(temporary_dir)
+            context_root = root / "context"
+            context_root.mkdir()
+            (context_root / "valid.md").write_text("valid", encoding="utf-8")
+            invalid_contexts = [
+                "context",
+                {},
+                {"root": str(context_root), "files": []},
+                {"root": str(context_root), "files": [""]},
+                {"root": str(context_root), "files": ["../outside.md"]},
+                {"root": str(context_root), "files": ["..\\outside.md"]},
+                {"root": str(context_root), "files": [str(root / "outside.md")]},
+                {"root": str(context_root), "files": ["C:\\private\\secret.md"]},
+                {"root": str(context_root), "files": ["valid.md"], "max_bytes": 0},
+                {"root": str(context_root), "files": ["valid.md"], "max_bytes": True},
+                {"root": str(context_root), "files": ["valid.md"], "max_bytes": "10"},
+            ]
+            for index, context_spec in enumerate(invalid_contexts):
+                with self.subTest(index=index):
+                    case_root = root / "cases" / str(index)
+                    with self.assertRaises(SprintRunnerError) as context:
+                        self.make_runner(case_root, context_spec)
+                    self.assertEqual(
+                        context.exception.code,
+                        "FAILED_INVALID_CONTEXT_SPEC",
+                    )
+
+    def test_context_rejects_missing_directory_invalid_utf8_and_duplicates(self):
+        with tempfile.TemporaryDirectory() as temporary_dir:
+            root = Path(temporary_dir)
+            context_root = root / "context"
+            context_root.mkdir()
+            (context_root / "folder").mkdir()
+            (context_root / "invalid.md").write_bytes(b"\xff\xfe")
+            (context_root / "valid.md").write_text("valid", encoding="utf-8")
+            cases = [
+                (
+                    {"root": str(context_root), "files": ["missing.md"]},
+                    "FAILED_CONTEXT_FILE_MISSING",
+                ),
+                (
+                    {"root": str(context_root), "files": ["folder"]},
+                    "FAILED_CONTEXT_FILE_INVALID",
+                ),
+                (
+                    {"root": str(context_root), "files": ["invalid.md"]},
+                    "FAILED_CONTEXT_READ",
+                ),
+                (
+                    {
+                        "root": str(context_root),
+                        "files": ["valid.md", "./valid.md"],
+                    },
+                    "FAILED_INVALID_CONTEXT_SPEC",
+                ),
+                (
+                    {"root": str(root / "missing root"), "files": ["valid.md"]},
+                    "FAILED_INVALID_CONTEXT_SPEC",
+                ),
+                (
+                    {"root": str(context_root / "valid.md"), "files": ["valid.md"]},
+                    "FAILED_INVALID_CONTEXT_SPEC",
+                ),
+            ]
+            for index, (context_spec, expected_code) in enumerate(cases):
+                with self.subTest(index=index):
+                    case_root = root / "cases" / str(index)
+                    with self.assertRaises(SprintRunnerError) as context:
+                        self.make_runner(case_root, context_spec)
+                    self.assertEqual(context.exception.code, expected_code)
+
+    def test_context_size_limit_counts_utf8_bytes_without_truncation(self):
+        with tempfile.TemporaryDirectory() as temporary_dir:
+            root = Path(temporary_dir)
+            context_root = root / "context"
+            context_root.mkdir()
+            (context_root / "unicode.md").write_text("é", encoding="utf-8")
+
+            exact = self.make_runner(
+                root / "exact",
+                {
+                    "root": str(context_root),
+                    "files": ["unicode.md"],
+                    "max_bytes": 2,
+                },
+            )
+            self.assertEqual(exact.context_bytes, 2)
+            self.assertIn("é", exact.context_bundle)
+
+            with self.assertRaises(SprintRunnerError) as context:
+                self.make_runner(
+                    root / "over",
+                    {
+                        "root": str(context_root),
+                        "files": ["unicode.md"],
+                        "max_bytes": 1,
+                    },
+                )
+            self.assertEqual(context.exception.code, "FAILED_CONTEXT_TOO_LARGE")
+
+    def test_sanitized_report_exposes_counts_but_no_context_secrets_or_paths(self):
+        with tempfile.TemporaryDirectory() as temporary_dir:
+            root = Path(temporary_dir)
+            context_root = root / "Private Context"
+            context_root.mkdir()
+            (context_root / "secret.md").write_text(
+                "CUSTOMER SECRET",
+                encoding="utf-8",
+            )
+            runner = self.make_runner(
+                root,
+                {"root": str(context_root), "files": ["secret.md"]},
+            )
+            report_path = root / "report.json"
+
+            runner.export_sanitized_report(report_path)
+            report_text = report_path.read_text(encoding="utf-8")
+            report = json.loads(report_text)
+
+            self.assertEqual(
+                report["context"],
+                {"files_count": 1, "bytes": len("CUSTOMER SECRET")},
+            )
+            self.assertNotIn("CUSTOMER SECRET", report_text)
+            self.assertNotIn(str(context_root), report_text)
+            self.assertNotIn("secret.md", report_text)
+
+
 class TestGenericVerification(unittest.TestCase):
     ABSENT = object()
 

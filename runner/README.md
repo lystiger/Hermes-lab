@@ -89,6 +89,11 @@ The runner supports Antigravity, Claude, and Codex through a common registry. Ad
 - `FAILED_UNKNOWN_ROLE`: Phase declares an unsupported role.
 - `FAILED_FORBIDDEN_CHANGES`: Verifier modified target source.
 - `FAILED_SYNTAX_ERROR`: Python syntax error detected.
+- `FAILED_INVALID_CONTEXT_SPEC`: Context configuration, root, path, duplicate, or size setting is invalid.
+- `FAILED_CONTEXT_FILE_MISSING`: A configured context file does not exist.
+- `FAILED_CONTEXT_FILE_INVALID`: A configured context entry is not a regular file.
+- `FAILED_CONTEXT_READ`: A configured context file cannot be read as UTF-8.
+- `FAILED_CONTEXT_TOO_LARGE`: Context contents exceed the configured byte limit.
 - `FAILED_INVALID_VERIFICATION_SPEC`: Generic verification configuration is malformed or escapes the integration worktree.
 - `FAILED_VERIFICATION`: A required generic verification step failed.
 - `FAILED_TESTS`: Pytest suite failed in virtual environment.
@@ -125,6 +130,30 @@ Use `target_repo` to run Hermes against another local Git repository:
 Hermes derives `control_root` from the runner location unless explicitly configured. Relative `control_root`, `target_repo`, `worktree_root`, and `runs_root` values resolve from the sprint specification directory. Relative phase `prompt_file` values resolve from `control_root`. Legacy `canonical_repo` remains supported as a fallback target when `target_repo` is absent.
 
 Use paths native to the Python environment: Linux paths on Linux, WSL-visible paths under WSL, and Windows paths under native Windows. No cross-kernel path conversion occurs.
+
+## Read-Only Context Bundles
+
+An optional `context` block loads explicit UTF-8 text files from a directory independent of both `control_root` and `target_repo`:
+
+```json
+{
+  "context": {
+    "root": "../Policy Repository",
+    "max_bytes": 262144,
+    "files": [
+      "projects/example/architecture.md",
+      "projects/example/constraints.md",
+      "operating_system/active_task.md"
+    ]
+  }
+}
+```
+
+Relative `context.root` values resolve from the sprint specification directory. Every `context.files` entry must be a unique, non-empty relative path contained by that root. Files must exist, be regular UTF-8 text files, and remain within the root after symlink resolution. Absolute paths and traversal are rejected.
+
+Hermes only reads configured files. It never gives workers filesystem access to the context root and never writes, deletes, renames, or commits context files. Contents are appended to every phase's base prompt in declared order using logical relative identifiers. Specs without `context` receive their original prompt unchanged.
+
+Total file-content size defaults to 256 KiB. `context.max_bytes` may set another positive integer limit; Hermes fails instead of truncating when exceeded. Run summaries and sanitized reports expose only file count and UTF-8 byte count, never context contents, filenames, or absolute paths.
 
 ## Generic Verification
 

@@ -243,6 +243,12 @@ Backend selection precedence is phase override, CLI override, sprint specificati
 
 The Herdr backend checks the Herdr executable, server reachability, and worker executable. It creates one runner-owned workspace, parses workspace and pane IDs from JSON, and runs each existing one-shot agent CLI through a generated Bash argv-array wrapper. Prompts remain data even when they contain quotes, newlines, shell operators, substitutions, Unicode, or Markdown. Stdout, stderr, exit status, and a nonce completion marker preserve the adapter result contract.
 
+Herdr's worker wrapper is currently a POSIX/Bash execution path. Native Windows
+CI validates the controller, subprocess backend, repository portability, and
+context/verification behavior, but does not execute Herdr Bash wrappers with
+native Windows paths. Use the `subprocess` backend on native Windows; Herdr is
+supported from Linux/WSL until a Windows-native wrapper is implemented.
+
 Worker panes remain available for inspection by default. Set `keep_herdr_workspace` to `false` only when runner-owned workspace cleanup is desired. The backend never stops the Herdr server or closes pre-existing workspaces.
 
 ## Usage

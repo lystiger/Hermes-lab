@@ -241,6 +241,10 @@ class TestHerdrBackend(BackendTestCase):
                 backend._create_worker_pane(self.make_request(temporary_dir))
             self.assertEqual(pane_ctx.exception.code, "FAILED_HERDR_COMMAND")
 
+    @unittest.skipIf(
+        os.name == "nt",
+        "Herdr worker wrappers are Bash/POSIX-only on native Windows",
+    )
     def test_execute_round_trip_uses_returned_ids_and_captures_result(self):
         workspace = {
             "result": {
@@ -358,6 +362,10 @@ class TestHerdrBackend(BackendTestCase):
             self.assertIn("pane_interrupt", calls)
             self.assertNotIn("workspace_close", calls)
 
+    @unittest.skipIf(
+        os.name == "nt",
+        "Herdr worker wrappers are Bash/POSIX-only on native Windows",
+    )
     def test_wrapper_preserves_adversarial_arguments_without_injection(self):
         payloads = [
             "simple prompt",
@@ -419,7 +427,9 @@ class TestHerdrBackend(BackendTestCase):
 
 
 @unittest.skipUnless(
-    os.environ.get("HERDR_ENV") == "1" and shutil.which("herdr"),
+    os.name != "nt"
+    and os.environ.get("HERDR_ENV") == "1"
+    and shutil.which("herdr"),
     "Herdr smoke test requires a managed Herdr pane",
 )
 class TestHerdrSmoke(BackendTestCase):

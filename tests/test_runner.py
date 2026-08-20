@@ -135,51 +135,72 @@ class TestHermesSprintRunnerValidation(unittest.TestCase):
 
     # 6. Worktree Validation Unit Tests
     def test_worktree_validation_invalid_worktree(self):
-        with patch.object(self.runner, "run_cmd") as mock_cmd:
-            mock_res = MagicMock()
-            mock_res.returncode = 1
-            mock_res.stdout = ""
-            mock_cmd.return_value = mock_res
-            
-            with self.assertRaises(SprintRunnerError) as ctx:
-                self.runner._ensure_worktree(Path("/home/lystiger/hermes-worktrees/hermes-lab-s02/antigravity"), "s02/antigravity", "s02/integration")
-            self.assertEqual(ctx.exception.code, "FAILED_INVALID_WORKTREE")
+        with tempfile.TemporaryDirectory() as temporary_dir:
+            worktree = Path(temporary_dir) / "invalid worktree"
+            worktree.mkdir()
+            with patch.object(self.runner, "run_cmd") as mock_cmd:
+                mock_res = MagicMock()
+                mock_res.returncode = 1
+                mock_res.stdout = ""
+                mock_cmd.return_value = mock_res
+
+                with self.assertRaises(SprintRunnerError) as ctx:
+                    self.runner._ensure_worktree(
+                        worktree,
+                        "s02/antigravity",
+                        "s02/integration",
+                    )
+                self.assertEqual(ctx.exception.code, "FAILED_INVALID_WORKTREE")
 
     def test_worktree_validation_wrong_branch(self):
-        with patch.object(self.runner, "run_cmd") as mock_cmd:
-            res1 = MagicMock()
-            res1.returncode = 0
-            res1.stdout = "true\n"
-            
-            res2 = MagicMock()
-            res2.returncode = 0
-            res2.stdout = "main\n"
-            
-            mock_cmd.side_effect = [res1, res2]
-            
-            with self.assertRaises(SprintRunnerError) as ctx:
-                self.runner._ensure_worktree(Path("/home/lystiger/hermes-worktrees/hermes-lab-s02/antigravity"), "s02/antigravity", "s02/integration")
-            self.assertEqual(ctx.exception.code, "FAILED_WRONG_BRANCH")
+        with tempfile.TemporaryDirectory() as temporary_dir:
+            worktree = Path(temporary_dir) / "wrong branch worktree"
+            worktree.mkdir()
+            with patch.object(self.runner, "run_cmd") as mock_cmd:
+                res1 = MagicMock()
+                res1.returncode = 0
+                res1.stdout = "true\n"
+
+                res2 = MagicMock()
+                res2.returncode = 0
+                res2.stdout = "main\n"
+
+                mock_cmd.side_effect = [res1, res2]
+
+                with self.assertRaises(SprintRunnerError) as ctx:
+                    self.runner._ensure_worktree(
+                        worktree,
+                        "s02/antigravity",
+                        "s02/integration",
+                    )
+                self.assertEqual(ctx.exception.code, "FAILED_WRONG_BRANCH")
 
     def test_worktree_validation_dirty_worktree(self):
-        with patch.object(self.runner, "run_cmd") as mock_cmd:
-            res1 = MagicMock()
-            res1.returncode = 0
-            res1.stdout = "true\n"
-            
-            res2 = MagicMock()
-            res2.returncode = 0
-            res2.stdout = "s02/antigravity\n"
-            
-            res3 = MagicMock()
-            res3.returncode = 0
-            res3.stdout = " M main.py\n"
-            
-            mock_cmd.side_effect = [res1, res2, res3]
-            
-            with self.assertRaises(SprintRunnerError) as ctx:
-                self.runner._ensure_worktree(Path("/home/lystiger/hermes-worktrees/hermes-lab-s02/antigravity"), "s02/antigravity", "s02/integration")
-            self.assertEqual(ctx.exception.code, "FAILED_DIRTY_WORKTREE")
+        with tempfile.TemporaryDirectory() as temporary_dir:
+            worktree = Path(temporary_dir) / "dirty worktree"
+            worktree.mkdir()
+            with patch.object(self.runner, "run_cmd") as mock_cmd:
+                res1 = MagicMock()
+                res1.returncode = 0
+                res1.stdout = "true\n"
+
+                res2 = MagicMock()
+                res2.returncode = 0
+                res2.stdout = "s02/antigravity\n"
+
+                res3 = MagicMock()
+                res3.returncode = 0
+                res3.stdout = " M main.py\n"
+
+                mock_cmd.side_effect = [res1, res2, res3]
+
+                with self.assertRaises(SprintRunnerError) as ctx:
+                    self.runner._ensure_worktree(
+                        worktree,
+                        "s02/antigravity",
+                        "s02/integration",
+                    )
+                self.assertEqual(ctx.exception.code, "FAILED_DIRTY_WORKTREE")
 
     # 7. Scoped Antigravity Permissions Tests
     def test_scoped_permissions_installed_and_restored_on_success(self):
@@ -206,8 +227,14 @@ class TestHermesSprintRunnerValidation(unittest.TestCase):
                 self.assertIn("command(pwd && ls -la)", allow_rules)
                 self.assertIn("command(python3 -m pytest -q)", allow_rules)
                 deny_rules = current_settings.get("permissions", {}).get("deny", [])
-                self.assertIn(f"write_file({wt_dir.resolve()}/.git)", deny_rules)
-                self.assertIn(f"write_file({canonical_repo.resolve()}/.git)", deny_rules)
+                self.assertIn(
+                    f"write_file({(wt_dir / '.git').resolve()})",
+                    deny_rules,
+                )
+                self.assertIn(
+                    f"write_file({(canonical_repo / '.git').resolve()})",
+                    deny_rules,
+                )
 
             self.assertEqual(settings_path.read_text(encoding="utf-8"), initial_content)
 
@@ -1602,7 +1629,12 @@ class TestExternalRepositorySupport(unittest.TestCase):
             self.assertEqual(runner.control_root, control_repo.resolve())
             self.assertEqual(
                 runner.report_path,
-                control_repo / "reports" / "external-example" / "run-summary.json",
+                (
+                    control_repo
+                    / "reports"
+                    / "external-example"
+                    / "run-summary.json"
+                ).resolve(),
             )
 
     def test_legacy_canonical_repo_normalizes_to_target_repo(self):
@@ -1646,7 +1678,7 @@ class TestExternalRepositorySupport(unittest.TestCase):
             with self.assertRaises(SprintRunnerError) as context:
                 runner.prepare_environment()
             self.assertEqual(context.exception.code, "FAILED_TARGET_REPO_NOT_GIT")
-            self.assertIn(str(target_repo), context.exception.message)
+            self.assertIn(str(target_repo.resolve()), context.exception.message)
 
     def test_relative_paths_resolve_from_spec_directory_not_current_directory(self):
         with tempfile.TemporaryDirectory() as temporary_dir:

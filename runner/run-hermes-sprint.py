@@ -335,6 +335,91 @@ class HermesSprintRunner:
             )
         return role
 
+    def validate_execution_plan(self):
+        """Validate phase inputs needed before any agent can run."""
+        for phase in self.spec.get("phases", []):
+            self.resolve_phase_role(phase)
+            self.agent_registry.get(phase.get("agent"))
+            self._get_backend(self.resolve_backend_name(phase))
+            prompt_value = phase.get("prompt_file")
+            if not isinstance(prompt_value, str) or not prompt_value.strip():
+                raise SprintRunnerError(
+                    "FAILED_MISSING_PROMPT",
+                    "Phase prompt_file must be a non-empty path string",
+                )
+            prompt_file = self.resolve_prompt_file(phase)
+            if not prompt_file.is_file():
+                raise SprintRunnerError(
+                    "FAILED_MISSING_PROMPT",
+                    f"Prompt file not found: {prompt_file}",
+                )
+
+    def validate_preflight_worktree_config(self):
+        """Validate refs and worktree layout without changing repository state."""
+        base_ref = self.spec.get("base_ref") or self.spec.get("base_branch", "main")
+        target_branch = self.spec.get("target_branch", "s02/integration")
+        base_result = self.run_cmd(
+            ["git", "rev-parse", "--verify", "--quiet", f"{base_ref}^{{commit}}"],
+            cwd=self.target_repo,
+            check=False,
+        )
+        if base_result.returncode != 0:
+            raise SprintRunnerError(
+                "FAILED_INVALID_WORKTREE",
+                f"Configured base ref does not resolve to a commit: {base_ref}",
+            )
+
+        branches = [("target_branch", target_branch)]
+        worktree_paths = {self.worktree_root / "integration"}
+        for index, phase in enumerate(self.spec.get("phases", []), start=1):
+            branch = phase.get("branch")
+            branches.append((f"phase {index} branch", branch))
+            worktree_value = phase.get("worktree_dir")
+            if (
+                not isinstance(worktree_value, str)
+                or not worktree_value.strip()
+                or Path(worktree_value).is_absolute()
+                or PureWindowsPath(worktree_value).anchor
+                or ".." in PureWindowsPath(worktree_value).parts
+            ):
+                raise SprintRunnerError(
+                    "FAILED_INVALID_WORKTREE",
+                    f"Phase {index} worktree_dir must be a contained relative path",
+                )
+            worktree_path = (self.worktree_root / worktree_value).resolve()
+            try:
+                worktree_path.relative_to(self.worktree_root.resolve())
+            except ValueError as error:
+                raise SprintRunnerError(
+                    "FAILED_INVALID_WORKTREE",
+                    f"Phase {index} worktree_dir escapes worktree_root",
+                ) from error
+            if worktree_path in worktree_paths:
+                raise SprintRunnerError(
+                    "FAILED_INVALID_WORKTREE",
+                    f"Duplicate worktree path configured for phase {index}: {worktree_value}",
+                )
+            worktree_paths.add(worktree_path)
+
+        seen_branches = set()
+        for label, branch in branches:
+            if not isinstance(branch, str) or not branch.strip():
+                raise SprintRunnerError(
+                    "FAILED_INVALID_WORKTREE",
+                    f"{label} must be a non-empty Git branch name",
+                )
+            branch_result = self.run_cmd(
+                ["git", "check-ref-format", "--branch", branch],
+                cwd=self.target_repo,
+                check=False,
+            )
+            if branch_result.returncode != 0 or branch in seen_branches:
+                raise SprintRunnerError(
+                    "FAILED_INVALID_WORKTREE",
+                    f"Invalid or duplicate {label}: {branch}",
+                )
+            seen_branches.add(branch)
+
     @staticmethod
     def _invalid_verification(message):
         raise SprintRunnerError("FAILED_INVALID_VERIFICATION_SPEC", message)
@@ -879,6 +964,15 @@ class HermesSprintRunner:
         self.logger.info(f"Integration Commit: {self.run_summary['integration_commit']}")
         self.logger.info("==========================================\n")
 
+    def preflight(self):
+        """Validate sprint readiness without running or integrating agent work."""
+        self.validate_execution_plan()
+        self.prepare_environment()
+        self.validate_preflight_worktree_config()
+        self.run_summary["status"] = "DRY_RUN_READY"
+        self.run_summary["end_time"] = datetime.now().isoformat()
+        self.logger.info("Dry-run preflight complete. Final Status: DRY_RUN_READY")
+
     def export_sanitized_report(self, report_path=None):
         """Write deterministic run evidence without prompts, logs, or errors."""
         destination_value = report_path or self.report_path
@@ -947,14 +1041,17 @@ class HermesSprintRunner:
 
     def execute(self):
         try:
-            self.prepare_environment()
-            for phase_index, phase in enumerate(self.spec.get("phases", []), start=1):
-                self.execute_phase(phase, phase_index=phase_index)
-            if self.verification_steps:
-                self.run_verification()
+            if self.dry_run:
+                self.preflight()
             else:
-                self.run_tests_in_venv()
-            self.finalize()
+                self.prepare_environment()
+                for phase_index, phase in enumerate(self.spec.get("phases", []), start=1):
+                    self.execute_phase(phase, phase_index=phase_index)
+                if self.verification_steps:
+                    self.run_verification()
+                else:
+                    self.run_tests_in_venv()
+                self.finalize()
         except SprintRunnerError as e:
             self.run_summary["status"] = e.code
             self.run_summary["end_time"] = datetime.now().isoformat()
@@ -977,13 +1074,17 @@ class HermesSprintRunner:
             if self.report_path is not None:
                 self.export_sanitized_report()
 
-        return self.run_summary["status"] == "READY_FOR_REVIEW"
+        return self.run_summary["status"] in {"READY_FOR_REVIEW", "DRY_RUN_READY"}
 
 
 def main():
     parser = argparse.ArgumentParser(description="Hermes Sprint Workflow Runner")
     parser.add_argument("--spec", default="sprints/lab-s04.json", help="Path to sprint JSON specification")
-    parser.add_argument("--dry-run", action="store_true", help="Simulate run without modifying git state")
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Run configuration/worktree preflight without agents or verification",
+    )
     parser.add_argument("--skip-agent-execution", action="store_true", help="Skip invoking external agent CLI")
     parser.add_argument("--verbose", "-v", action="store_true", help="Enable verbose debug logging")
     parser.add_argument(

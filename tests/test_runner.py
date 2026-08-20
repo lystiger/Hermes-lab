@@ -1637,6 +1637,180 @@ class TestExternalRepositorySupport(unittest.TestCase):
                 ).resolve(),
             )
 
+    def test_dry_run_is_preflight_without_agents_mutation_or_verification(self):
+        with tempfile.TemporaryDirectory() as temporary_dir:
+            root = Path(temporary_dir)
+            control_root = root / "Hermes Control"
+            target_repo = root / "External Product"
+            prompt_dir = control_root / "prompts"
+            context_root = root / "Project Context"
+            prompt_dir.mkdir(parents=True)
+            context_root.mkdir()
+            (prompt_dir / "phase.md").write_text("Do work.\n", encoding="utf-8")
+            (context_root / "architecture.md").write_text(
+                "Architecture context.\n",
+                encoding="utf-8",
+            )
+            self.init_repository(target_repo)
+            phases = [
+                {
+                    "name": role,
+                    "role": role,
+                    "agent": "codex",
+                    "execution_backend": "subprocess",
+                    "worktree_dir": role,
+                    "branch": f"hermes/preflight-{role}",
+                    "prompt_file": "prompts/phase.md",
+                    "expected_handoff": "HANDOFF.md",
+                    "commit_message": f"test: {role}",
+                }
+                for role in ("builder", "hardener", "verifier")
+            ]
+            spec_path = self.write_spec(
+                control_root / "sprints" / "preflight.json",
+                control_root=str(control_root),
+                target_repo=str(target_repo),
+                target_branch="hermes/preflight-integration",
+                worktree_root=str(root / "Hermes Worktrees"),
+                runs_root=str(root / "Hermes Runs"),
+                phases=phases,
+                context={
+                    "root": str(context_root),
+                    "files": ["architecture.md"],
+                },
+                verification=[
+                    {
+                        "name": "must not run",
+                        "command": ["definitely-not-a-real-command"],
+                    }
+                ],
+            )
+            runner = HermesSprintRunner(spec_path, dry_run=True)
+            runner.run_dir.mkdir(parents=True, exist_ok=True)
+            original_run_cmd = runner.run_cmd
+            runner.run_cmd = MagicMock(wraps=original_run_cmd)
+            runner.execute_agent = MagicMock()
+            runner.run_verification = MagicMock()
+            runner.run_tests_in_venv = MagicMock()
+
+            self.assertTrue(runner.execute(), runner.run_summary)
+
+            self.assertEqual(runner.run_summary["status"], "DRY_RUN_READY")
+            self.assertEqual(runner.run_summary["phases"], [])
+            runner.execute_agent.assert_not_called()
+            runner.run_verification.assert_not_called()
+            runner.run_tests_in_venv.assert_not_called()
+            commands = [call.args[0] for call in runner.run_cmd.call_args_list]
+            self.assertNotIn(["git", "add", "."], commands)
+            self.assertFalse(any(command[:2] == ["git", "commit"] for command in commands))
+            self.assertFalse(any(command[:2] == ["git", "merge"] for command in commands))
+            self.assertFalse((runner.worktree_root / "builder" / "HANDOFF.md").exists())
+            self.assertEqual(
+                subprocess.run(
+                    ["git", "branch", "--format=%(refname:short)"],
+                    cwd=target_repo,
+                    check=True,
+                    capture_output=True,
+                    text=True,
+                ).stdout.splitlines(),
+                ["main"],
+            )
+            self.assertNotEqual(runner.run_summary["status"], "READY_FOR_REVIEW")
+
+    def test_dry_run_skips_legacy_pytest_verification(self):
+        runner = HermesSprintRunner(
+            runner_path.parent.parent / "sprints" / "lab-s02.json",
+            dry_run=True,
+        )
+        runner.run_dir.mkdir(parents=True, exist_ok=True)
+        runner.preflight = MagicMock(
+            side_effect=lambda: runner.run_summary.update(status="DRY_RUN_READY")
+        )
+        runner.run_tests_in_venv = MagicMock()
+
+        self.assertTrue(runner.execute())
+
+        runner.preflight.assert_called_once_with()
+        runner.run_tests_in_venv.assert_not_called()
+
+    def test_dry_run_rejects_missing_prompt_unknown_agent_and_backend(self):
+        with tempfile.TemporaryDirectory() as temporary_dir:
+            root = Path(temporary_dir)
+            control_root = root / "control"
+            prompt = control_root / "prompts" / "valid.md"
+            prompt.parent.mkdir(parents=True)
+            prompt.write_text("Valid prompt.\n", encoding="utf-8")
+            base_phase = {
+                "name": "builder",
+                "role": "builder",
+                "agent": "codex",
+                "execution_backend": "subprocess",
+                "worktree_dir": "builder",
+                "branch": "hermes/preflight-builder",
+                "prompt_file": "prompts/valid.md",
+                "expected_handoff": "HANDOFF.md",
+                "commit_message": "test: build",
+            }
+            cases = [
+                ({"prompt_file": "prompts/missing.md"}, "FAILED_MISSING_PROMPT"),
+                ({"agent": "unknown"}, "FAILED_UNKNOWN_AGENT"),
+                ({"execution_backend": "unknown"}, "FAILED_UNKNOWN_BACKEND"),
+            ]
+            for index, (override, expected_status) in enumerate(cases):
+                with self.subTest(status=expected_status):
+                    case_root = root / str(index)
+                    phase = {**base_phase, **override}
+                    spec_path = self.write_spec(
+                        case_root / "preflight.json",
+                        control_root=str(control_root),
+                        target_repo=str(root / "unused target"),
+                        runs_root=str(case_root / "runs"),
+                        phases=[phase],
+                    )
+                    runner = HermesSprintRunner(spec_path, dry_run=True)
+                    runner.run_dir.mkdir(parents=True, exist_ok=True)
+
+                    self.assertFalse(runner.execute())
+                    self.assertEqual(runner.run_summary["status"], expected_status)
+
+    def test_dry_run_rejects_missing_and_non_git_target_repositories(self):
+        with tempfile.TemporaryDirectory() as temporary_dir:
+            root = Path(temporary_dir)
+            control_root = root / "control"
+            prompt = control_root / "prompt.md"
+            control_root.mkdir()
+            prompt.write_text("Valid prompt.\n", encoding="utf-8")
+            phase = {
+                "name": "builder",
+                "role": "builder",
+                "agent": "codex",
+                "worktree_dir": "builder",
+                "branch": "hermes/preflight-builder",
+                "prompt_file": "prompt.md",
+                "expected_handoff": "HANDOFF.md",
+                "commit_message": "test: build",
+            }
+            targets = [
+                (root / "missing", "FAILED_TARGET_REPO_MISSING"),
+                (root / "not git", "FAILED_TARGET_REPO_NOT_GIT"),
+            ]
+            targets[1][0].mkdir()
+            for index, (target_repo, expected_status) in enumerate(targets):
+                with self.subTest(status=expected_status):
+                    case_root = root / str(index)
+                    spec_path = self.write_spec(
+                        case_root / "preflight.json",
+                        control_root=str(control_root),
+                        target_repo=str(target_repo),
+                        runs_root=str(case_root / "runs"),
+                        phases=[phase],
+                    )
+                    runner = HermesSprintRunner(spec_path, dry_run=True)
+                    runner.run_dir.mkdir(parents=True, exist_ok=True)
+
+                    self.assertFalse(runner.execute())
+                    self.assertEqual(runner.run_summary["status"], expected_status)
+
     def test_legacy_canonical_repo_normalizes_to_target_repo(self):
         with tempfile.TemporaryDirectory() as temporary_dir:
             root = Path(temporary_dir)

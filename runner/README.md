@@ -53,6 +53,12 @@ The runner supports Antigravity, Claude, and Codex through a common registry. Ad
 
 ## Workflow Sequence
 
+`--dry-run` performs configuration/worktree preflight only and records
+`DRY_RUN_READY` when readiness checks pass. It does not invoke agents, require
+handoffs or source changes, commit or merge, or run project verification.
+Successful preflight does not imply implementation or tests will succeed during
+a real run.
+
 1. **Environment & Safety Check**: Verifies the target repository is clean, validates registered agents, and creates or validates target-repository worktrees.
    Clean integration and phase worktrees are reset to their configured starting refs on every run, so prior sprint commits cannot affect a rerun. Dirty or wrongly assigned worktrees fail before reset.
    Sprint specifications may pin an immutable `base_ref`; legacy `base_branch` remains supported. Sprint 04 pins its Sprint 03.1 baseline so reruns do not start from a `main` branch that already contains Sprint 04.

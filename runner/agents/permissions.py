@@ -4,7 +4,7 @@ from pathlib import Path
 
 
 @contextmanager
-def scoped_antigravity_permissions(wt_dir, canonical_repo, settings_path=None):
+def scoped_antigravity_permissions(wt_dir, target_repo, settings_path=None):
     """Install narrowly scoped Antigravity permissions and restore them exactly."""
     settings_path = Path(
         settings_path
@@ -34,9 +34,9 @@ def scoped_antigravity_permissions(wt_dir, canonical_repo, settings_path=None):
             settings["trustedWorkspaces"] = []
 
         wt_path = str(wt_dir.resolve())
-        repo_path = str(canonical_repo.resolve())
+        repo_path = str(target_repo.resolve())
         worktree_git = str((wt_dir / ".git").resolve())
-        canonical_git = str((canonical_repo / ".git").resolve())
+        target_git = str((target_repo / ".git").resolve())
 
         if wt_path not in settings["trustedWorkspaces"]:
             settings["trustedWorkspaces"].append(wt_path)
@@ -56,8 +56,8 @@ def scoped_antigravity_permissions(wt_dir, canonical_repo, settings_path=None):
         deny_rules = [
             f"write_file({worktree_git})",
             f"write_file({worktree_git}/**)",
-            f"write_file({canonical_git})",
-            f"write_file({canonical_git}/**)",
+            f"write_file({target_git})",
+            f"write_file({target_git}/**)",
         ]
         for rule in allow_rules:
             if rule not in permissions["allow"]:

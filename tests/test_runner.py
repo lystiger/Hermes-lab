@@ -1,11 +1,12 @@
 import json
 import inspect
+import os
 import shutil
 import subprocess
 import tempfile
 import unittest
 import importlib.util
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
@@ -34,7 +35,7 @@ class TestHermesSprintRunnerValidation(unittest.TestCase):
         )
         self.logging_patch.start()
         self.addCleanup(self.logging_patch.stop)
-        self.spec_path = Path("/home/lystiger/hermes-lab/sprints/lab-s02.json")
+        self.spec_path = runner_path.parent.parent / "sprints" / "lab-s02.json"
         self.runner = HermesSprintRunner(spec_path=self.spec_path, dry_run=True, skip_agent_exec=True)
 
     # 1. Nested Antigravity Tool Error Detection
@@ -317,7 +318,7 @@ class TestAgentExecution(unittest.TestCase):
         root = Path(temporary_dir)
         runner = SimpleNamespace(
             logger=MagicMock(),
-            canonical_repo=root,
+            target_repo=root,
         )
         run_process = MagicMock(side_effect=error) if error else MagicMock(return_value=result)
         return AgentContext(
@@ -739,7 +740,184 @@ class TestControllerDispatch(unittest.TestCase):
         )
         self.assertEqual(
             runner.report_path,
-            runner.canonical_repo / "reports" / "lab-s03" / "run-summary.json",
+            runner.control_root / "reports" / "lab-s03" / "run-summary.json",
+        )
+
+
+class TestExternalRepositorySupport(unittest.TestCase):
+    def setUp(self):
+        self.logging_patch = patch.object(
+            HermesSprintRunner, "_setup_logging", return_value=MagicMock()
+        )
+        self.logging_patch.start()
+        self.addCleanup(self.logging_patch.stop)
+
+    def init_repository(self, repository, filename="README.md", content="initial\n"):
+        repository.mkdir(parents=True)
+        subprocess.run(
+            ["git", "init", "-b", "main"],
+            cwd=repository,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        (repository / filename).parent.mkdir(parents=True, exist_ok=True)
+        (repository / filename).write_text(content, encoding="utf-8")
+        subprocess.run(["git", "add", "."], cwd=repository, check=True)
+        subprocess.run(
+            [
+                "git",
+                "-c",
+                "user.name=Hermes Test",
+                "-c",
+                "user.email=hermes@example.invalid",
+                "commit",
+                "-m",
+                "initial",
+            ],
+            cwd=repository,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+
+    def write_spec(self, path, **overrides):
+        specification = {
+            "sprint_id": "external-example",
+            "base_ref": "main",
+            "target_branch": "hermes/external-example",
+            "phases": [],
+            **overrides,
+        }
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(specification), encoding="utf-8")
+        return path
+
+    def test_external_repo_owns_git_worktrees_while_control_root_owns_prompt(self):
+        with tempfile.TemporaryDirectory() as temporary_dir:
+            root = Path(temporary_dir)
+            control_repo = root / "Hermes Project"
+            target_repo = root / "Uni Green Project"
+            self.init_repository(control_repo, "prompts/external.md", "external prompt\n")
+            self.init_repository(target_repo)
+            phase = {
+                "name": "worker",
+                "agent": "codex",
+                "worktree_dir": "codex worker",
+                "branch": "hermes/external-codex",
+                "prompt_file": "prompts/external.md",
+                "expected_handoff": "HANDOFF.md",
+                "commit_message": "test: external worktree",
+            }
+            spec_path = self.write_spec(
+                control_repo / "specs" / "external.json",
+                control_root=str(control_repo),
+                target_repo=str(target_repo),
+                worktree_root=str(root / "Hermes Worktrees"),
+                runs_root=str(root / "Hermes Runs"),
+                phases=[phase],
+            )
+            adapter = MagicMock()
+            registry = MagicMock()
+            registry.get.return_value = adapter
+            runner = HermesSprintRunner(
+                spec_path,
+                agent_registry=registry,
+                export_report=True,
+            )
+
+            self.assertTrue(
+                subprocess.run(
+                    ["git", "status", "--porcelain"],
+                    cwd=control_repo,
+                    check=True,
+                    capture_output=True,
+                    text=True,
+                ).stdout.strip()
+            )
+            runner.prepare_environment()
+            runner.execute_agent(phase, runner.worktree_root / "codex worker")
+
+            target_branches = subprocess.run(
+                ["git", "branch", "--format=%(refname:short)"],
+                cwd=target_repo,
+                check=True,
+                capture_output=True,
+                text=True,
+            ).stdout.splitlines()
+            control_branches = subprocess.run(
+                ["git", "branch", "--format=%(refname:short)"],
+                cwd=control_repo,
+                check=True,
+                capture_output=True,
+                text=True,
+            ).stdout.splitlines()
+            self.assertIn("hermes/external-example", target_branches)
+            self.assertIn("hermes/external-codex", target_branches)
+            self.assertEqual(control_branches, ["main"])
+            context = adapter.execute.call_args.args[0]
+            self.assertEqual(context.prompt, "external prompt")
+            self.assertEqual(runner.target_repo, target_repo.resolve())
+            self.assertEqual(runner.control_root, control_repo.resolve())
+            self.assertEqual(
+                runner.report_path,
+                control_repo / "reports" / "external-example" / "run-summary.json",
+            )
+
+    def test_legacy_canonical_repo_normalizes_to_target_repo(self):
+        with tempfile.TemporaryDirectory() as temporary_dir:
+            root = Path(temporary_dir)
+            legacy_repo = root / "legacy target"
+            spec_path = self.write_spec(
+                root / "specs" / "legacy.json",
+                canonical_repo=str(legacy_repo),
+                runs_root=str(root / "runs"),
+            )
+            runner = HermesSprintRunner(spec_path)
+            self.assertEqual(runner.target_repo, legacy_repo.resolve())
+            self.assertEqual(runner.control_root, runner_path.parent.parent)
+
+    def test_explicit_target_repo_takes_precedence_over_legacy_field(self):
+        with tempfile.TemporaryDirectory() as temporary_dir:
+            root = Path(temporary_dir)
+            target_repo = root / "new target"
+            spec_path = self.write_spec(
+                root / "specs" / "precedence.json",
+                target_repo=str(target_repo),
+                canonical_repo=str(root / "legacy target"),
+                runs_root=str(root / "runs"),
+            )
+            runner = HermesSprintRunner(spec_path)
+            self.assertEqual(runner.target_repo, target_repo.resolve())
+
+    def test_relative_paths_resolve_from_spec_directory_not_current_directory(self):
+        with tempfile.TemporaryDirectory() as temporary_dir:
+            root = Path(temporary_dir)
+            spec_dir = root / "control" / "specs"
+            spec_path = self.write_spec(
+                spec_dir / "relative.json",
+                target_repo="../../target",
+                control_root="..",
+                worktree_root="../../worktrees",
+                runs_root="../../runs",
+            )
+            original_directory = Path.cwd()
+            try:
+                os.chdir(root)
+                first = HermesSprintRunner(spec_path)
+                os.chdir(root / "control")
+                second = HermesSprintRunner(spec_path)
+            finally:
+                os.chdir(original_directory)
+            self.assertEqual(first.target_repo, second.target_repo)
+            self.assertEqual(first.target_repo, (root / "target").resolve())
+            self.assertEqual(first.control_root, (root / "control").resolve())
+
+    def test_windows_venv_path_uses_native_layout_without_posix_resolution(self):
+        venv = PureWindowsPath("C:/Users/user/Hermes Runs/venv")
+        self.assertEqual(
+            HermesSprintRunner._venv_python(venv, platform_name="nt"),
+            PureWindowsPath("C:/Users/user/Hermes Runs/venv/Scripts/python.exe"),
         )
 
 

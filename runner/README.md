@@ -36,10 +36,11 @@ The runner supports Antigravity, Claude, and Codex through a common registry. Ad
     └── lab-s06.json          # Codex-first session backend delivery
 ```
 
-## Worktree & Execution Architecture
+## Repository & Execution Architecture
 
-- **Canonical Repository**: `~/hermes-lab` (`main` branch - MUST BE CLEAN)
-- **Runtime Worktrees**: configured by each sprint specification. Sprint 03 uses `~/hermes-worktrees/hermes-lab-s03/`:
+- **Control Root**: Hermes repository containing `runner/`, `prompts/`, `sprints/`, and `reports/`.
+- **Target Repository**: configured Git repository agents change. It must be clean before execution and may be separate from Hermes.
+- **Runtime Worktrees**: configured target-repository worktrees. Sprint 03 uses `~/hermes-worktrees/hermes-lab-s03/`:
   - `integration/` (`s03/integration`) - Target integration branch receiving validated phase commits
   - `claude/` (`s03/claude`) - Adapter implementation workspace
   - `codex/` (`s03/codex`) - Independent verification workspace
@@ -51,7 +52,7 @@ The runner supports Antigravity, Claude, and Codex through a common registry. Ad
 
 ## Workflow Sequence
 
-1. **Environment & Safety Check**: Verifies the canonical repository is clean, validates registered agents, and creates or validates configured worktrees.
+1. **Environment & Safety Check**: Verifies the target repository is clean, validates registered agents, and creates or validates target-repository worktrees.
    Clean integration and phase worktrees are reset to their configured starting refs on every run, so prior sprint commits cannot affect a rerun. Dirty or wrongly assigned worktrees fail before reset.
    Sprint specifications may pin an immutable `base_ref`; legacy `base_branch` remains supported. Sprint 04 pins its Sprint 03.1 baseline so reruns do not start from a `main` branch that already contains Sprint 04.
 2. **Agent Dispatch**: Resolves the phase agent through the registry. The adapter invokes its CLI and validates its result while writing phase stdout/stderr logs.
@@ -66,7 +67,8 @@ The runner supports Antigravity, Claude, and Codex through a common registry. Ad
 
 ## Fail-Fast Guardrails
 
-- `FAILED_DIRTY_REPO`: Canonical repo working tree has uncommitted changes.
+- `FAILED_TARGET_REPO_MISSING`: Configured target repository does not exist.
+- `FAILED_DIRTY_REPO`: Target repository working tree has uncommitted changes.
 - `FAILED_TIMEOUT`: Execution duration exceeded configured timeout.
 - `FAILED_PERMISSION_DENIED`: Tool event or process encountered permission denial.
 - `FAILED_ANTIGRAVITY_TOOL_ERROR`: Antigravity tool call returned a non-null error.
@@ -88,7 +90,7 @@ The runner supports Antigravity, Claude, and Codex through a common registry. Ad
 ## Security & Governance Boundaries
 
 - **Controller Git Ownership**: All `git add`, `git commit`, and `git merge` commands are strictly executed by the controller script. Agents edit files only.
-- **Worker Git Boundaries**: Antigravity denies writes to worktree and canonical Git metadata; Claude receives CLI-level denials for Git mutation commands while retaining read-only inspection; Codex is forced into its assigned `workspace-write` sandbox.
+- **Worker Git Boundaries**: Antigravity denies writes to worktree and target-repository Git metadata; Claude receives CLI-level denials for Git mutation commands while retaining read-only inspection; Codex is forced into its assigned `workspace-write` sandbox.
 - **Isolated Permission Tests**: Antigravity settings paths are injectable, and tests use temporary settings files. Production defaults to `~/.gemini/antigravity-cli/settings.json`.
 - **No Remote Operations**: The runner does NOT push to `origin`, merge to `main`, or deploy to external environments.
 
@@ -96,7 +98,27 @@ The runner supports Antigravity, Claude, and Codex through a common registry. Ad
 
 Use `--export-report` to write deterministic, reviewable evidence to `reports/<sprint-id>/run-summary.json`, or provide an explicit path. The export contains only sprint status, safe phase fields, test status, and the integration commit. It excludes prompts, model output, test output, errors, tokens, timestamps, and absolute paths.
 
-The export happens after sprint execution, so it cannot affect worker changed-file validation or the integration commit. Exporting into the canonical repository intentionally leaves that report as an uncommitted file; commit, move, or remove it before the next run because canonical dirty-repository protection remains enforced.
+The export happens after sprint execution, so it cannot affect worker changed-file validation or the integration commit. Default reports live under the Hermes control root, never the external target repository.
+
+## External Target Repositories
+
+Use `target_repo` to run Hermes against another local Git repository:
+
+```json
+{
+  "sprint_id": "external-example",
+  "target_repo": "/path/to/product",
+  "base_ref": "main",
+  "target_branch": "hermes/external-example",
+  "worktree_root": "/path/to/hermes-worktrees/external-example",
+  "runs_root": "/path/to/hermes-runs",
+  "phases": []
+}
+```
+
+Hermes derives `control_root` from the runner location unless explicitly configured. Relative `control_root`, `target_repo`, `worktree_root`, and `runs_root` values resolve from the sprint specification directory. Relative phase `prompt_file` values resolve from `control_root`. Legacy `canonical_repo` remains supported as a fallback target when `target_repo` is absent.
+
+Use paths native to the Python environment: Linux paths on Linux, WSL-visible paths under WSL, and Windows paths under native Windows. No cross-kernel path conversion occurs.
 
 ## Execution Backends
 

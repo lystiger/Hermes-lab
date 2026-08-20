@@ -4,7 +4,7 @@ FastAPI health service application and agent experiment lab.
 
 ## Repository Structure
 
-- **Canonical Repository**: `/home/lystiger/hermes-lab` (main branch: `main`)
+This repository is Hermes' control root: it owns runner code, sprint specifications, prompts, and reports. Sprint specifications may set `target_repo` to orchestrate changes in any local Git repository; target worktrees and Git branches belong to that repository.
 
 ## Worktree Layout
 

@@ -27,7 +27,7 @@ class AntigravityAdapter(AgentAdapter):
     def execute(self, context):
         with scoped_antigravity_permissions(
             context.worktree,
-            context.runner.canonical_repo,
+            context.runner.target_repo,
             settings_path=self.settings_path,
         ):
             return super().execute(context)

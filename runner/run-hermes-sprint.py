@@ -5,9 +5,10 @@ Controller script for managing multi-agent sprint workflows, worktrees, git oper
 agent execution, fail-fast validations, and automated test validation.
 
 Governance Boundaries:
-- Canonical repo: ~/hermes-lab (must be clean)
-- Worktrees: ~/hermes-worktrees/hermes-lab-s02/
-- Runs/Logs: ~/hermes-runs/
+- Control root: Hermes repository containing runner, prompts, and reports.
+- Target repo: configured Git repository being changed (must be clean).
+- Worktrees: configured target-repository worktree root.
+- Runs/Logs: configured Hermes runtime storage.
 - Git operations are strictly controller-owned. Agents edit files only.
 - Does NOT push to remote, merge to main, or access production resources.
 """
@@ -18,6 +19,7 @@ import argparse
 import subprocess
 import py_compile
 import logging
+import os
 from pathlib import Path
 from datetime import datetime
 
@@ -54,13 +56,27 @@ class HermesSprintRunner:
         
         self.spec = self._load_spec()
         self.sprint_id = self.spec.get("sprint_id", "lab-s02")
-        self.canonical_repo = Path(self.spec.get("canonical_repo", "/home/lystiger/hermes-lab")).resolve()
-        self.worktree_root = Path(self.spec.get("worktree_root", f"/home/lystiger/hermes-worktrees/{self.sprint_id}")).resolve()
-        self.runs_root = Path(self.spec.get("runs_root", "/home/lystiger/hermes-runs")).resolve()
+        self.control_root = self._resolve_config_path(
+            self.spec.get("control_root"),
+            default=SCRIPT_DIR.parent,
+        )
+        self.target_repo = self._resolve_config_path(
+            self.spec.get("target_repo") or self.spec.get("canonical_repo"),
+            default=self.control_root,
+        )
+        default_storage_root = self.control_root.parent
+        self.worktree_root = self._resolve_config_path(
+            self.spec.get("worktree_root"),
+            default=default_storage_root / "hermes-worktrees" / self.sprint_id,
+        )
+        self.runs_root = self._resolve_config_path(
+            self.spec.get("runs_root"),
+            default=default_storage_root / "hermes-runs",
+        )
         self.limits = self.spec.get("limits", {"max_changed_files": 15, "timeout_seconds": 300})
         if export_report is True:
             self.report_path = (
-                self.canonical_repo / "reports" / self.sprint_id / "run-summary.json"
+                self.control_root / "reports" / self.sprint_id / "run-summary.json"
             )
         elif export_report:
             self.report_path = Path(export_report).resolve()
@@ -90,6 +106,19 @@ class HermesSprintRunner:
         with open(self.spec_path, "r", encoding="utf-8") as f:
             return json.load(f)
 
+    def _resolve_config_path(self, value, *, default):
+        """Resolve configured paths relative to the sprint specification directory."""
+        path = Path(value) if value is not None else Path(default)
+        if not path.is_absolute():
+            path = self.spec_path.parent / path
+        return path.resolve()
+
+    def resolve_prompt_file(self, phase):
+        prompt_file = Path(phase["prompt_file"])
+        if not prompt_file.is_absolute():
+            prompt_file = self.control_root / prompt_file
+        return prompt_file.resolve()
+
     def _setup_logging(self):
         self.run_dir.mkdir(parents=True, exist_ok=True)
         logger = logging.getLogger(f"HermesSprintRunner.{id(self)}")
@@ -108,7 +137,7 @@ class HermesSprintRunner:
         return logger
 
     def run_cmd(self, cmd, cwd=None, timeout=None, check=True):
-        cwd = cwd or self.canonical_repo
+        cwd = cwd or self.target_repo
         timeout = timeout or self.limits.get("timeout_seconds", 300)
         self.logger.debug(f"Executing command: {' '.join(cmd) if isinstance(cmd, list) else cmd} (cwd: {cwd})")
         
@@ -134,15 +163,18 @@ class HermesSprintRunner:
 
     def prepare_environment(self):
         self.logger.info("=== Preparing Sprint Worktree Environment ===")
-        if not self.canonical_repo.exists():
-            raise SprintRunnerError("FAILED_CANONICAL_REPO_MISSING", f"Canonical repo does not exist at {self.canonical_repo}")
+        if not self.target_repo.exists():
+            raise SprintRunnerError(
+                "FAILED_TARGET_REPO_MISSING",
+                f"Target repo does not exist at {self.target_repo}",
+            )
 
-        # Canonical repo safety: MUST fail if dirty
-        res = self.run_cmd(["git", "status", "--porcelain"], cwd=self.canonical_repo)
+        # Target repository safety: MUST fail if dirty.
+        res = self.run_cmd(["git", "status", "--porcelain"], cwd=self.target_repo)
         if res.stdout.strip():
             raise SprintRunnerError(
                 "FAILED_DIRTY_REPO",
-                f"Canonical repo at {self.canonical_repo} has uncommitted changes:\n{res.stdout.strip()}"
+                f"Target repo at {self.target_repo} has uncommitted changes:\n{res.stdout.strip()}"
             )
 
         self.worktree_root.mkdir(parents=True, exist_ok=True)
@@ -181,11 +213,11 @@ class HermesSprintRunner:
                 raise SprintRunnerError("FAILED_DIRTY_WORKTREE", f"Worktree at {path} has uncommitted changes:\n{res_status.stdout.strip()}")
         else:
             self.logger.info(f"Creating worktree at {path} for branch {branch} (from {base_branch})")
-            res = self.run_cmd(["git", "branch", "--list", branch], cwd=self.canonical_repo)
+            res = self.run_cmd(["git", "branch", "--list", branch], cwd=self.target_repo)
             if res.stdout.strip():
-                self.run_cmd(["git", "worktree", "add", str(path), branch], cwd=self.canonical_repo)
+                self.run_cmd(["git", "worktree", "add", str(path), branch], cwd=self.target_repo)
             else:
-                self.run_cmd(["git", "worktree", "add", "-b", branch, str(path), base_branch], cwd=self.canonical_repo)
+                self.run_cmd(["git", "worktree", "add", "-b", branch, str(path), base_branch], cwd=self.target_repo)
 
         # Clean, correctly assigned sprint branches are controller-owned and may
         # contain commits from an earlier run. Resetting them makes reruns start
@@ -241,7 +273,7 @@ class HermesSprintRunner:
         agent_name = phase["agent"]
         adapter = self.agent_registry.get(agent_name)
         backend = self._get_backend(self.resolve_backend_name(phase))
-        prompt_file = self.canonical_repo / phase["prompt_file"]
+        prompt_file = self.resolve_prompt_file(phase)
         context = AgentContext(
             runner=self,
             phase=phase,
@@ -302,7 +334,7 @@ class HermesSprintRunner:
         phase_name = phase["name"]
         agent = phase["agent"]
         wt_dir = self.worktree_root / phase["worktree_dir"]
-        prompt_file = self.canonical_repo / phase["prompt_file"]
+        prompt_file = self.resolve_prompt_file(phase)
         expected_handoff = phase["expected_handoff"]
         commit_msg = phase["commit_message"]
 
@@ -365,17 +397,19 @@ class HermesSprintRunner:
         self.logger.info(f"Creating isolated Python virtual environment at {venv_dir}")
         self.run_cmd([sys.executable, "-m", "venv", str(venv_dir)])
 
-        pip_bin = venv_dir / "bin" / "pip"
-        pytest_bin = venv_dir / "bin" / "pytest"
+        venv_python = self._venv_python(venv_dir)
 
         req_file = integration_dir / "requirements.txt"
         if req_file.exists():
             self.logger.info(f"Installing dependencies from {req_file}")
-            self.run_cmd([str(pip_bin), "install", "--no-cache-dir", "-r", str(req_file)], cwd=integration_dir)
+            self.run_cmd(
+                [str(venv_python), "-m", "pip", "install", "--no-cache-dir", "-r", str(req_file)],
+                cwd=integration_dir,
+            )
 
         self.logger.info("Executing pytest suite...")
         try:
-            test_res = self.run_cmd([str(pytest_bin), "-v"], cwd=integration_dir)
+            test_res = self.run_cmd([str(venv_python), "-m", "pytest", "-v"], cwd=integration_dir)
             self.logger.info("Pytest suite passed successfully!")
             self.run_summary["test_results"] = {
                 "status": "PASSED",
@@ -388,6 +422,13 @@ class HermesSprintRunner:
                 "error": str(e)
             }
             raise SprintRunnerError("FAILED_TESTS", f"Pytest suite failed in integration worktree: {e}")
+
+    @staticmethod
+    def _venv_python(venv_dir, platform_name=None):
+        platform_name = platform_name or os.name
+        if platform_name == "nt":
+            return venv_dir / "Scripts" / "python.exe"
+        return venv_dir / "bin" / "python"
 
     def finalize(self):
         # Validate that all phases succeeded and pytest passed before granting READY_FOR_REVIEW

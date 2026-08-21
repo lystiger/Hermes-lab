@@ -25,10 +25,12 @@ class AntigravityAdapter(AgentAdapter):
         return command
 
     def execute(self, context):
+        permissions = context.phase.get("permissions", {})
         with scoped_antigravity_permissions(
             context.worktree,
             context.runner.target_repo,
             settings_path=self.settings_path,
+            allowed_commands=permissions.get("commands", ()),
         ):
             return super().execute(context)
 

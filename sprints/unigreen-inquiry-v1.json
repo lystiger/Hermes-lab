@@ -43,6 +43,15 @@
       "prompt_file": "prompts/unigreen-inquiry-builder.md",
       "expected_handoff": "HANDOFF_AGY.md",
       "commit_message": "feat(inquiries): add public inquiry submission",
+      "permissions": {
+        "commands": [
+          "uv sync --all-groups",
+          "uv run pytest",
+          "uv run pytest -q",
+          "uv run ruff check .",
+          "uv sync --all-groups && uv run pytest"
+        ]
+      },
       "cmd_options": {"output_format": "stream-json", "dangerously_skip_permissions": false}
     },
     {

@@ -96,6 +96,7 @@ a real run.
 - `FAILED_FORBIDDEN_CHANGES`: Verifier modified target source.
 - `FAILED_SYNTAX_ERROR`: Python syntax error detected.
 - `FAILED_INVALID_CONTEXT_SPEC`: Context configuration, root, path, duplicate, or size setting is invalid.
+- `FAILED_INVALID_PHASE_PERMISSIONS`: A phase permission block or command entry is malformed.
 - `FAILED_CONTEXT_FILE_MISSING`: A configured context file does not exist.
 - `FAILED_CONTEXT_FILE_INVALID`: A configured context entry is not a regular file.
 - `FAILED_CONTEXT_READ`: A configured context file cannot be read as UTF-8.
@@ -136,6 +137,34 @@ Use `target_repo` to run Hermes against another local Git repository:
 Hermes derives `control_root` from the runner location unless explicitly configured. Relative `control_root`, `target_repo`, `worktree_root`, and `runs_root` values resolve from the sprint specification directory. Relative phase `prompt_file` values resolve from `control_root`. Legacy `canonical_repo` remains supported as a fallback target when `target_repo` is absent.
 
 Use paths native to the Python environment: Linux paths on Linux, WSL-visible paths under WSL, and Windows paths under native Windows. No cross-kernel path conversion occurs.
+
+### Antigravity command permissions
+
+Non-interactive Antigravity Print Mode cannot answer permission prompts. An
+Antigravity phase may therefore declare the exact shell command strings it is
+allowed to run while that phase executes:
+
+```json
+{
+  "name": "test",
+  "agent": "antigravity",
+  "permissions": {
+    "commands": [
+      "uv sync --all-groups",
+      "uv run pytest",
+      "uv run ruff check ."
+    ]
+  }
+}
+```
+
+Hermes temporarily converts these to Antigravity rules such as
+`command(uv run pytest)`, retains its safe defaults and mandatory `.git` write
+denials, and restores the user's settings exactly after success or failure.
+Commands are exact declarations: allowing `command A` and `command B` does not
+allow `command A && command B`; declare the compound command explicitly when it
+is required. Empty or absent `commands` keeps the safe defaults. Governed runs
+should declare the commands they need instead of skipping permissions.
 
 ## Read-Only Context Bundles
 

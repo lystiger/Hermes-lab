@@ -4,23 +4,26 @@ from pathlib import Path
 
 
 @contextmanager
-def scoped_antigravity_permissions(wt_dir, target_repo, settings_path=None):
+def scoped_antigravity_permissions(
+    wt_dir, target_repo, settings_path=None, allowed_commands=()
+):
     """Install narrowly scoped Antigravity permissions and restore them exactly."""
     settings_path = Path(
         settings_path
         or Path.home() / ".gemini" / "antigravity-cli" / "settings.json"
     )
-    original_content = None
+    original_bytes = None
     existed = settings_path.exists()
 
     if existed:
         # Never mutate settings unless an exact restoration snapshot was captured.
-        original_content = settings_path.read_text(encoding="utf-8")
+        original_bytes = settings_path.read_bytes()
 
     try:
         try:
+            original_content = original_bytes.decode("utf-8") if original_bytes else ""
             settings = json.loads(original_content) if original_content else {}
-        except (TypeError, json.JSONDecodeError):
+        except (UnicodeDecodeError, json.JSONDecodeError):
             settings = {}
 
         if not isinstance(settings.get("permissions"), dict):
@@ -53,6 +56,7 @@ def scoped_antigravity_permissions(wt_dir, target_repo, settings_path=None):
             "command(pwd && ls -la)",
             "command(python3 -m pytest -q)",
         ]
+        allow_rules.extend(f"command({command})" for command in allowed_commands)
         deny_rules = [
             f"write_file({worktree_git})",
             f"write_file({worktree_git}/**)",
@@ -71,6 +75,6 @@ def scoped_antigravity_permissions(wt_dir, target_repo, settings_path=None):
         yield
     finally:
         if existed:
-            settings_path.write_text(original_content, encoding="utf-8")
+            settings_path.write_bytes(original_bytes)
         elif not existed and settings_path.exists():
             settings_path.unlink()

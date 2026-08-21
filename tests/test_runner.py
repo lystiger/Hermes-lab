@@ -238,6 +238,51 @@ class TestHermesSprintRunnerValidation(unittest.TestCase):
 
             self.assertEqual(settings_path.read_text(encoding="utf-8"), initial_content)
 
+    def test_scoped_permissions_add_declared_commands_once(self):
+        with tempfile.TemporaryDirectory() as temporary_dir:
+            root = Path(temporary_dir)
+            settings_path = root / "config" / "settings.json"
+
+            with scoped_antigravity_permissions(
+                root / "worktree",
+                root / "repo",
+                settings_path=settings_path,
+                allowed_commands=(
+                    "uv sync --all-groups",
+                    "uv run pytest",
+                    "uv run pytest",
+                ),
+            ):
+                settings = json.loads(settings_path.read_text(encoding="utf-8"))
+                allow_rules = settings["permissions"]["allow"]
+                self.assertIn("command(uv sync --all-groups)", allow_rules)
+                self.assertEqual(allow_rules.count("command(uv run pytest)"), 1)
+                self.assertIn("command(pwd)", allow_rules)
+                self.assertIn(
+                    f"write_file({(root / 'worktree' / '.git').resolve()})",
+                    settings["permissions"]["deny"],
+                )
+
+            self.assertFalse(settings_path.exists())
+
+    def test_scoped_permissions_restore_original_bytes(self):
+        with tempfile.TemporaryDirectory() as temporary_dir:
+            root = Path(temporary_dir)
+            settings_path = root / "config" / "settings.json"
+            settings_path.parent.mkdir(parents=True)
+            original_bytes = b'{\r\n  "theme": "dark"\r\n}\r\n'
+            settings_path.write_bytes(original_bytes)
+
+            with scoped_antigravity_permissions(
+                root / "worktree",
+                root / "repo",
+                settings_path=settings_path,
+                allowed_commands=("uv run pytest",),
+            ):
+                self.assertNotEqual(settings_path.read_bytes(), original_bytes)
+
+            self.assertEqual(settings_path.read_bytes(), original_bytes)
+
     def test_scoped_permissions_restored_on_exception(self):
         with tempfile.TemporaryDirectory() as temporary_dir:
             root = Path(temporary_dir)
@@ -445,6 +490,51 @@ class TestAgentExecution(unittest.TestCase):
             self.assertEqual(
                 settings_path.read_text(encoding="utf-8"), '{"existing": true}'
             )
+
+    def test_antigravity_phase_commands_are_scoped_to_each_execution(self):
+        with tempfile.TemporaryDirectory() as temporary_dir:
+            root = Path(temporary_dir)
+            settings_path = root / "config" / "settings.json"
+            settings_path.parent.mkdir(parents=True)
+            original_bytes = b'{"existing": true}\r\n'
+            settings_path.write_bytes(original_bytes)
+            observed_allow_rules = []
+
+            def observe_permissions(_request):
+                settings = json.loads(settings_path.read_text(encoding="utf-8"))
+                observed_allow_rules.append(settings["permissions"]["allow"])
+                return SimpleNamespace(
+                    returncode=0,
+                    stdout=json.dumps({"status": "SUCCESS"}),
+                    stderr="",
+                    backend="test",
+                )
+
+            adapter = AntigravityAdapter(settings_path=settings_path)
+            for command in ("uv run pytest", "uv run ruff check ."):
+                context = self.make_context(temporary_dir, name="antigravity")
+                context = AgentContext(
+                    runner=context.runner,
+                    phase={
+                        "name": command,
+                        "agent": "antigravity",
+                        "permissions": {"commands": [command]},
+                    },
+                    worktree=context.worktree,
+                    prompt=context.prompt,
+                    options=context.options,
+                    stdout_file=context.stdout_file,
+                    stderr_file=context.stderr_file,
+                    timeout_seconds=context.timeout_seconds,
+                    backend=MagicMock(execute=MagicMock(side_effect=observe_permissions)),
+                )
+                adapter.execute(context)
+
+            self.assertIn("command(uv run pytest)", observed_allow_rules[0])
+            self.assertNotIn("command(uv run ruff check .)", observed_allow_rules[0])
+            self.assertIn("command(uv run ruff check .)", observed_allow_rules[1])
+            self.assertNotIn("command(uv run pytest)", observed_allow_rules[1])
+            self.assertEqual(settings_path.read_bytes(), original_bytes)
 
     def test_malformed_agent_outputs_are_rejected(self):
         with self.assertRaises(SprintRunnerError) as claude_ctx:
@@ -1789,6 +1879,40 @@ class TestExternalRepositorySupport(unittest.TestCase):
 
                     self.assertFalse(runner.execute())
                     self.assertEqual(runner.run_summary["status"], expected_status)
+
+    def test_malformed_phase_permissions_are_rejected_during_configuration(self):
+        with tempfile.TemporaryDirectory() as temporary_dir:
+            root = Path(temporary_dir)
+            malformed_values = [
+                None,
+                [],
+                {"commands": "uv run pytest"},
+                {"commands": [""]},
+                {"commands": ["   "]},
+                {"commands": [7]},
+            ]
+            for index, permissions in enumerate(malformed_values):
+                with self.subTest(permissions=permissions):
+                    phase = {
+                        "name": "builder",
+                        "agent": "antigravity",
+                        "worktree_dir": "builder",
+                        "branch": "hermes/builder",
+                        "prompt_file": "prompt.md",
+                        "expected_handoff": "HANDOFF.md",
+                        "commit_message": "test: build",
+                        "permissions": permissions,
+                    }
+                    spec_path = self.write_spec(
+                        root / str(index) / "sprint.json",
+                        runs_root=str(root / str(index) / "runs"),
+                        phases=[phase],
+                    )
+                    with self.assertRaises(SprintRunnerError) as ctx:
+                        HermesSprintRunner(spec_path, dry_run=True)
+                    self.assertEqual(
+                        ctx.exception.code, "FAILED_INVALID_PHASE_PERMISSIONS"
+                    )
 
     def test_dry_run_rejects_missing_and_non_git_target_repositories(self):
         with tempfile.TemporaryDirectory() as temporary_dir:

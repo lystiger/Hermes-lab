@@ -84,6 +84,7 @@ class HermesSprintRunner:
         self._load_context_bundle()
         self.verification_steps = self._load_verification_spec()
         self._validate_phase_roles()
+        self._validate_phase_permissions()
         if export_report is True:
             self.report_path = (
                 self.control_root / "reports" / self.sprint_id / "run-summary.json"
@@ -323,6 +324,32 @@ class HermesSprintRunner:
     def _validate_phase_roles(self):
         for phase in self.spec.get("phases", []):
             self.resolve_phase_role(phase)
+
+    def _validate_phase_permissions(self):
+        for index, phase in enumerate(self.spec.get("phases", []), start=1):
+            if "permissions" not in phase:
+                continue
+            permissions = phase["permissions"]
+            if not isinstance(permissions, dict):
+                self._invalid_phase_permissions(
+                    index, "permissions must be an object"
+                )
+            commands = permissions.get("commands", [])
+            if not isinstance(commands, list) or any(
+                not isinstance(command, str) or not command.strip()
+                for command in commands
+            ):
+                self._invalid_phase_permissions(
+                    index,
+                    "permissions.commands must be an array of non-empty strings",
+                )
+
+    @staticmethod
+    def _invalid_phase_permissions(index, message):
+        raise SprintRunnerError(
+            "FAILED_INVALID_PHASE_PERMISSIONS",
+            f"Phase {index} {message}",
+        )
 
     def resolve_phase_role(self, phase):
         if "role" not in phase:

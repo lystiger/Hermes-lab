@@ -1,0 +1,73 @@
+{
+  "sprint_id": "unigreen-inquiry-v1",
+  "name": "Unigreen Public Inquiry Submission",
+  "target_repo": "../../Unigreen",
+  "base_ref": "16b1b30579b788e3502874b3c54bde7a601e5404",
+  "target_branch": "hermes/unigreen-inquiry-v1/integration",
+  "worktree_root": "../../hermes-worktrees/unigreen-inquiry-v1",
+  "runs_root": "../../hermes-runs",
+  "execution_backend": "subprocess",
+  "limits": {
+    "max_changed_files": 30,
+    "timeout_seconds": 1200
+  },
+  "context": {
+    "root": "../../LysStack",
+    "max_bytes": 131072,
+    "files": [
+      "projects/unigreen/architecture.md",
+      "projects/unigreen/constraints.md",
+      "projects/unigreen/decisions.md",
+      "projects/unigreen/agents.md",
+      "projects/unigreen/roadmap.md",
+      "operating_system/active_task.md"
+    ]
+  },
+  "verification": [
+    {"name": "uv-sync", "cwd": "backend", "command": ["uv", "sync", "--all-groups"], "timeout_seconds": 600},
+    {"name": "ruff-format", "cwd": "backend", "command": ["uv", "run", "ruff", "format", "--check", "."]},
+    {"name": "ruff-lint", "cwd": "backend", "command": ["uv", "run", "ruff", "check", "."]},
+    {"name": "mypy", "cwd": "backend", "command": ["uv", "run", "mypy", "src", "tests"], "timeout_seconds": 600},
+    {"name": "pytest", "cwd": "backend", "command": ["uv", "run", "pytest"], "timeout_seconds": 900},
+    {"name": "openapi-export", "cwd": "backend", "command": ["uv", "run", "python", "scripts/export_openapi.py", "/tmp/hermes-unigreen-openapi.json"]},
+    {"name": "openapi-diff", "cwd": "backend", "command": ["diff", "-u", "../contracts/openapi.json", "/tmp/hermes-unigreen-openapi.json"]}
+  ],
+  "phases": [
+    {
+      "name": "public_inquiry_builder",
+      "role": "builder",
+      "agent": "antigravity",
+      "execution_backend": "subprocess",
+      "worktree_dir": "builder",
+      "branch": "hermes/unigreen-inquiry-v1/builder",
+      "prompt_file": "prompts/unigreen-inquiry-builder.md",
+      "expected_handoff": "HANDOFF_AGY.md",
+      "commit_message": "feat(inquiries): add public inquiry submission",
+      "cmd_options": {"output_format": "stream-json", "dangerously_skip_permissions": false}
+    },
+    {
+      "name": "public_inquiry_hardener",
+      "role": "hardener",
+      "agent": "claude",
+      "execution_backend": "subprocess",
+      "worktree_dir": "hardener",
+      "branch": "hermes/unigreen-inquiry-v1/hardener",
+      "prompt_file": "prompts/unigreen-inquiry-hardener.md",
+      "expected_handoff": "HANDOFF_CLAUDE.md",
+      "commit_message": "fix(inquiries): harden public inquiry submission",
+      "cmd_options": {"model": "sonnet", "max_turns": 70, "permission_mode": "dontAsk", "output_format": "json"}
+    },
+    {
+      "name": "public_inquiry_verifier",
+      "role": "verifier",
+      "agent": "codex",
+      "execution_backend": "subprocess",
+      "worktree_dir": "verifier",
+      "branch": "hermes/unigreen-inquiry-v1/verifier",
+      "prompt_file": "prompts/unigreen-inquiry-verifier.md",
+      "expected_handoff": "HANDOFF_CODEX.md",
+      "commit_message": "test(inquiries): verify public inquiry submission",
+      "cmd_options": {"sandbox": "workspace-write", "ephemeral": true}
+    }
+  ]
+}

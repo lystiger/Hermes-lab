@@ -652,29 +652,43 @@ class TestControllerDispatch(unittest.TestCase):
         self.assertEqual(handoff_ctx.exception.code, "FAILED_MISSING_HANDOFF")
 
     def test_execute_phase_keeps_validation_commit_and_merge_in_controller(self):
-        runner = HermesSprintRunner(
-            spec_path=Path(__file__).resolve().parent.parent / "sprints" / "lab-s02.json",
-            dry_run=False,
-            skip_agent_exec=True,
-        )
-        runner.validate_python_syntax = MagicMock()
-        runner.inspect_changed_files = MagicMock(return_value=[" M changed.py"])
-        runner.capture_handoff = MagicMock()
+        with tempfile.TemporaryDirectory() as temporary_dir:
+            runner = HermesSprintRunner(
+                spec_path=Path(__file__).resolve().parent.parent
+                / "sprints"
+                / "lab-s02.json",
+                dry_run=False,
+                skip_agent_exec=True,
+            )
+            runner.worktree_root = Path(temporary_dir)
+            runner.validate_python_syntax = MagicMock()
+            runner.inspect_changed_files = MagicMock(return_value=[" M changed.py"])
+            runner.capture_handoff = MagicMock()
 
-        def command_result(command, **kwargs):
-            stdout = "abc123\n" if command[:3] == ["git", "rev-parse", "HEAD"] else ""
-            return subprocess.CompletedProcess(command, 0, stdout, "")
+            def command_result(command, **kwargs):
+                stdout = (
+                    "abc123\n"
+                    if command[:3] == ["git", "rev-parse", "HEAD"]
+                    else ""
+                )
+                return subprocess.CompletedProcess(command, 0, stdout, "")
 
-        runner.run_cmd = MagicMock(side_effect=command_result)
-        phase = runner.spec["phases"][0]
-        runner.execute_phase(phase)
-        runner.validate_python_syntax.assert_called_once()
-        runner.inspect_changed_files.assert_called_once()
-        runner.capture_handoff.assert_called_once()
-        commands = [call.args[0] for call in runner.run_cmd.call_args_list]
-        self.assertIn(["git", "add", "."], commands)
-        self.assertTrue(any(command[:2] == ["git", "commit"] for command in commands))
-        self.assertTrue(any(command[:2] == ["git", "merge"] for command in commands))
+            runner.run_cmd = MagicMock(side_effect=command_result)
+            phase = runner.spec["phases"][0]
+            (runner.worktree_root / phase["worktree_dir"]).mkdir()
+            (runner.worktree_root / "integration").mkdir()
+            runner.execute_phase(phase)
+            runner.validate_python_syntax.assert_called_once()
+            runner.inspect_changed_files.assert_called_once()
+            runner.capture_handoff.assert_called_once()
+            commands = [call.args[0] for call in runner.run_cmd.call_args_list]
+            self.assertIn(["git", "add", "."], commands)
+            self.assertTrue(
+                any(command[:2] == ["git", "commit"] for command in commands)
+            )
+            self.assertTrue(
+                any(command[:2] == ["git", "merge"] for command in commands)
+            )
 
     def test_ready_for_review_requires_integration_tests(self):
         runner = HermesSprintRunner(
@@ -1718,20 +1732,23 @@ class TestExternalRepositorySupport(unittest.TestCase):
             self.assertNotEqual(runner.run_summary["status"], "READY_FOR_REVIEW")
 
     def test_dry_run_skips_legacy_pytest_verification(self):
-        runner = HermesSprintRunner(
-            runner_path.parent.parent / "sprints" / "lab-s02.json",
-            dry_run=True,
-        )
-        runner.run_dir.mkdir(parents=True, exist_ok=True)
-        runner.preflight = MagicMock(
-            side_effect=lambda: runner.run_summary.update(status="DRY_RUN_READY")
-        )
-        runner.run_tests_in_venv = MagicMock()
+        with tempfile.TemporaryDirectory() as temporary_dir:
+            root = Path(temporary_dir)
+            spec_path = self.write_spec(
+                root / "legacy.json",
+                runs_root=str(root / "runs"),
+            )
+            runner = HermesSprintRunner(spec_path, dry_run=True)
+            runner.run_dir.mkdir(parents=True, exist_ok=True)
+            runner.preflight = MagicMock(
+                side_effect=lambda: runner.run_summary.update(status="DRY_RUN_READY")
+            )
+            runner.run_tests_in_venv = MagicMock()
 
-        self.assertTrue(runner.execute())
+            self.assertTrue(runner.execute())
 
-        runner.preflight.assert_called_once_with()
-        runner.run_tests_in_venv.assert_not_called()
+            runner.preflight.assert_called_once_with()
+            runner.run_tests_in_venv.assert_not_called()
 
     def test_dry_run_rejects_missing_prompt_unknown_agent_and_backend(self):
         with tempfile.TemporaryDirectory() as temporary_dir:

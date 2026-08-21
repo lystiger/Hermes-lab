@@ -45,14 +45,38 @@
       "commit_message": "feat(inquiries): add public inquiry submission",
       "permissions": {
         "commands": [
+          "uv sync",
           "uv sync --all-groups",
           "uv run pytest",
           "uv run pytest -q",
+          "uv run pytest -v",
+          "uv run pytest tests/",
           "uv run ruff check .",
-          "uv sync --all-groups && uv run pytest"
+          "uv run ruff check --fix .",
+          "uv run ruff format .",
+          "uv run ruff format --check .",
+          "uv run mypy src tests",
+          "uv run mypy src",
+          "uv run mypy tests",
+          "uv run python scripts/export_openapi.py /tmp/hermes-unigreen-openapi.json",
+          "uv run python scripts/export_openapi.py contracts/openapi.json",
+          "uv run python scripts/export_openapi.py ../contracts/openapi.json",
+          "diff -u ../contracts/openapi.json /tmp/hermes-unigreen-openapi.json",
+          "diff -u contracts/openapi.json /tmp/hermes-unigreen-openapi.json",
+          "uv sync --all-groups && uv run pytest",
+          "uv sync --all-groups && uv run pytest -q",
+          "uv run ruff format --check . && uv run ruff check . && uv run mypy src tests",
+          "uv run ruff format --check . && uv run ruff check . && uv run mypy src tests && uv run pytest",
+          "uv run ruff format --check . && uv run ruff check .",
+          "uv run ruff check . && uv run mypy src tests",
+          "uv run ruff check . && uv run pytest",
+          "uv run ruff check . && uv run mypy src tests && uv run pytest",
+          "uv run alembic upgrade head",
+          "uv run alembic current",
+          "uv run alembic history"
         ]
       },
-      "cmd_options": {"output_format": "stream-json", "dangerously_skip_permissions": false}
+      "cmd_options": {"output_format": "stream-json", "print_timeout": "20m", "dangerously_skip_permissions": true}
     },
     {
       "name": "public_inquiry_hardener",

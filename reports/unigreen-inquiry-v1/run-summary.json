@@ -1,0 +1,73 @@
+{
+  "context": {
+    "bytes": 9478,
+    "files_count": 6
+  },
+  "integration_commit": "703f7e0a4066092d5d781b37d47e5addccb0d536",
+  "phases": [
+    {
+      "agent": "antigravity",
+      "backend": "subprocess",
+      "changed_files_count": 12,
+      "handoff": "captured",
+      "integrated": true,
+      "phase": "public_inquiry_builder",
+      "role": "builder",
+      "status": "SUCCESS"
+    },
+    {
+      "agent": "claude",
+      "backend": "subprocess",
+      "changed_files_count": 2,
+      "handoff": "captured",
+      "integrated": true,
+      "phase": "public_inquiry_hardener",
+      "role": "hardener",
+      "status": "SUCCESS"
+    },
+    {
+      "agent": "codex",
+      "backend": "subprocess",
+      "changed_files_count": 0,
+      "handoff": "captured",
+      "integrated": false,
+      "phase": "public_inquiry_verifier",
+      "role": "verifier",
+      "status": "SUCCESS"
+    }
+  ],
+  "sprint_id": "unigreen-inquiry-v1",
+  "status": "READY_FOR_REVIEW",
+  "test_status": null,
+  "verification": [
+    {
+      "name": "uv-sync",
+      "status": "PASSED"
+    },
+    {
+      "name": "ruff-format",
+      "status": "PASSED"
+    },
+    {
+      "name": "ruff-lint",
+      "status": "PASSED"
+    },
+    {
+      "name": "mypy",
+      "status": "PASSED"
+    },
+    {
+      "name": "pytest",
+      "status": "PASSED"
+    },
+    {
+      "name": "openapi-export",
+      "status": "PASSED"
+    },
+    {
+      "name": "openapi-diff",
+      "status": "PASSED"
+    }
+  ],
+  "verification_status": "PASSED"
+}

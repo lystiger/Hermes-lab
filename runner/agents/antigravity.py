@@ -20,6 +20,8 @@ class AntigravityAdapter(AgentAdapter):
             "--output-format",
             options.get("output_format", "stream-json"),
         ]
+        if options.get("print_timeout"):
+            command.extend(["--print-timeout", str(options["print_timeout"])])
         if options.get("dangerously_skip_permissions", False):
             command.append("--dangerously-skip-permissions")
         return command
@@ -39,13 +41,13 @@ class AntigravityAdapter(AgentAdapter):
 
     @staticmethod
     def parse_stream_json(stdout_text, stderr_text=""):
-        if "permission denied" in stderr_text.lower():
+        if AntigravityAdapter._is_permission_denial(stderr_text):
             raise SprintRunnerError(
                 "FAILED_PERMISSION_DENIED",
                 f"Antigravity permission denied in stderr:\n{stderr_text}",
             )
 
-        parsed_events = 0
+        events = []
         for line_number, line in enumerate(stdout_text.splitlines(), start=1):
             line = line.strip()
             if not line:
@@ -53,7 +55,7 @@ class AntigravityAdapter(AgentAdapter):
             try:
                 event = json.loads(line)
             except json.JSONDecodeError:
-                if "permission denied" in line.lower() or "eacces" in line.lower():
+                if AntigravityAdapter._is_permission_denial(line):
                     raise SprintRunnerError(
                         "FAILED_PERMISSION_DENIED",
                         f"Antigravity permission error on line {line_number}: {line}",
@@ -61,44 +63,94 @@ class AntigravityAdapter(AgentAdapter):
                 continue
             if not isinstance(event, dict):
                 continue
-            parsed_events += 1
+            events.append((line_number, event, line))
 
-            step = event.get("step_update")
-            if isinstance(step, dict) and step.get("step_type") == "tool":
-                tool = step.get("tool_info")
-                if isinstance(tool, dict) and tool.get("error") not in (None, False, ""):
-                    AntigravityAdapter._raise_tool_error(tool["error"], line_number)
-
-            if event.get("error") not in (None, False, ""):
-                AntigravityAdapter._raise_tool_error(event["error"], line_number)
-            if str(event.get("status", "")).upper() in {"ERROR", "FAILED"}:
-                message = event.get("message") or event.get("details") or line
-                raise SprintRunnerError(
-                    "FAILED_ANTIGRAVITY_TOOL_ERROR",
-                    f"Antigravity tool event failed: {message}",
-                )
-            if event.get("is_error") is True:
-                raise SprintRunnerError(
-                    "FAILED_ANTIGRAVITY_TOOL_ERROR",
-                    f"Antigravity tool error event: {event.get('message') or line}",
-                )
-            message = str(event.get("message", ""))
-            if "permission denied" in message.lower() or "eacces" in message.lower():
-                raise SprintRunnerError(
-                    "FAILED_PERMISSION_DENIED",
-                    f"Antigravity permission error in message: {message}",
-                )
-
-        if parsed_events == 0:
+        if not events:
             raise SprintRunnerError(
                 "FAILED_ANTIGRAVITY_INVALID_OUTPUT",
                 "Antigravity emitted no valid stream-JSON events",
             )
 
+        # Check for permission errors across all events first
+        for line_number, event, line in events:
+            message = str(event.get("message", ""))
+            error_val = str(event.get("error", ""))
+            step = event.get("step_update")
+            tool_error = ""
+            if isinstance(step, dict) and step.get("step_type") == "tool":
+                tool = step.get("tool_info")
+                if isinstance(tool, dict):
+                    tool_error = str(tool.get("error", ""))
+
+            for text in (message, error_val, tool_error):
+                if text and AntigravityAdapter._is_permission_denial(text):
+                    raise SprintRunnerError(
+                        "FAILED_PERMISSION_DENIED",
+                        f"Antigravity permission error: {text}",
+                    )
+
+        has_result_event = any(event.get("event") == "result" for _, event, _ in events)
+
+        if not has_result_event:
+            for line_number, event, line in events:
+                step = event.get("step_update")
+                if isinstance(step, dict) and step.get("step_type") == "tool":
+                    tool = step.get("tool_info")
+                    if isinstance(tool, dict) and tool.get("error") not in (None, False, ""):
+                        AntigravityAdapter._raise_tool_error(tool["error"], line_number)
+
+                if event.get("error") not in (None, False, ""):
+                    AntigravityAdapter._raise_tool_error(event["error"], line_number)
+                if str(event.get("status", "")).upper() in {"ERROR", "FAILED"}:
+                    message = event.get("message") or event.get("details") or line
+                    raise SprintRunnerError(
+                        "FAILED_ANTIGRAVITY_TOOL_ERROR",
+                        f"Antigravity tool event failed: {message}",
+                    )
+                if event.get("is_error") is True:
+                    raise SprintRunnerError(
+                        "FAILED_ANTIGRAVITY_TOOL_ERROR",
+                        f"Antigravity tool error event: {event.get('message') or line}",
+                    )
+        else:
+            for line_number, event, line in events:
+                if event.get("event") == "result":
+                    res = event.get("result", {})
+                    if not isinstance(res, dict):
+                        res = event
+                    status = str(res.get("status", "")).upper()
+                    error = str(res.get("error", ""))
+                    if error:
+                        if "declaring permissions: cortex tool write_to_file" in error:
+                            continue
+                        AntigravityAdapter._raise_tool_error(error, line_number)
+                    if status in {"ERROR", "FAILED"}:
+                        if "declaring permissions: cortex tool write_to_file" in error:
+                            continue
+                        raise SprintRunnerError(
+                            "FAILED_ANTIGRAVITY_TOOL_ERROR",
+                            f"Antigravity result error: {error or status}",
+                        )
+
+    @staticmethod
+    def _is_permission_denial(text):
+        t = str(text).lower()
+        if "declaring permissions: cortex tool write_to_file" in t:
+            return False
+        return any(
+            phrase in t
+            for phrase in (
+                "permission denied",
+                "permission check failed",
+                "user denied permission",
+                "eacces",
+            )
+        )
+
     @staticmethod
     def _raise_tool_error(error, line_number):
         message = str(error)
-        if any(term in message.lower() for term in ("permission", "denied", "eacces")):
+        if AntigravityAdapter._is_permission_denial(message):
             raise SprintRunnerError(
                 "FAILED_PERMISSION_DENIED",
                 f"Antigravity tool permission error: {message}",

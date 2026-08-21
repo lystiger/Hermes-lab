@@ -339,6 +339,30 @@ class TestAgentRegistryAndCommands(unittest.TestCase):
             ["agy", "--new-project", "-p", "do work", "--output-format", "stream-json"],
         )
 
+    def test_antigravity_command_with_print_timeout(self):
+        command = AntigravityAdapter().build_command(
+            "do work",
+            {
+                "output_format": "stream-json",
+                "print_timeout": "20m",
+                "dangerously_skip_permissions": True,
+            },
+        )
+        self.assertEqual(
+            command,
+            [
+                "agy",
+                "--new-project",
+                "-p",
+                "do work",
+                "--output-format",
+                "stream-json",
+                "--print-timeout",
+                "20m",
+                "--dangerously-skip-permissions",
+            ],
+        )
+
     def test_claude_command(self):
         command = ClaudeAdapter().build_command(
             "do work",

@@ -30,7 +30,10 @@
     {"name": "mypy", "cwd": "backend", "command": ["uv", "run", "mypy", "src", "tests"], "timeout_seconds": 600},
     {"name": "pytest", "cwd": "backend", "command": ["uv", "run", "pytest"], "timeout_seconds": 900},
     {"name": "openapi-export", "cwd": "backend", "command": ["uv", "run", "python", "scripts/export_openapi.py", "/tmp/hermes-unigreen-openapi.json"]},
-    {"name": "openapi-diff", "cwd": "backend", "command": ["diff", "-u", "../contracts/openapi.json", "/tmp/hermes-unigreen-openapi.json"]}
+    {"name": "openapi-diff", "cwd": "backend", "command": ["diff", "-u", "../contracts/openapi.json", "/tmp/hermes-unigreen-openapi.json"]},
+    {"name": "frontend-install", "cwd": "frontend", "command": ["npm", "ci"], "timeout_seconds": 600},
+    {"name": "api-types", "cwd": "frontend", "command": ["npm", "run", "api:types"]},
+    {"name": "api-types-diff", "command": ["git", "diff", "--exit-code", "frontend/lib/api/schema.d.ts"]}
   ],
   "phases": [
     {

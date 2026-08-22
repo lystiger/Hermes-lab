@@ -42,6 +42,10 @@ try:
     from artifact_registry import artifact_registry, ArtifactRef, ArtifactTrust
     from normalization import normalize_agent_id
     from persona import resolve_agent_profile, PersonaProfile, AgentProfile
+    from capabilities import CapabilityRegistry, Capability, CapabilityRef, create_default_capability_registry, DEFAULT_CAPABILITY_PROFILES
+    from delegation import DelegationRequest, DelegationDecision, TaskAssignment, LYSSTACK_DELEGATION_START, LYSSTACK_DELEGATION_END
+    from tools import ToolProfile, ToolInvocationRequest, ToolInvocationResult, ToolRegistry, default_tool_registry, LYSSTACK_TOOL_REQUEST_START, LYSSTACK_TOOL_REQUEST_END
+    from subagents import SubagentProfile, SubagentManager
     from a2a import (
         A2AOutput,
         AgentTurnResult,
@@ -143,6 +147,16 @@ class HermesSprintRunner:
         self.artifacts_file = self.run_dir / "artifacts.json"
         self._consumed_message_ids = set()
         self.job_a2a_turns = 0
+        self.capability_registry = create_default_capability_registry()
+        self.tool_registry = default_tool_registry
+        delegation_limits = self.limits.get("delegation", {}) if isinstance(self.limits.get("delegation"), dict) else {}
+        self.subagent_manager = SubagentManager(
+            allow_subagents=delegation_limits.get("allow_subagents", False),
+            max_subagents_per_job=delegation_limits.get("max_subagents_per_job", 3),
+            max_depth=delegation_limits.get("max_depth", 1),
+        )
+        self.task_assignments = {}
+        self.job_delegations = 0
         persona_spec = self.spec.get("persona")
         if isinstance(persona_spec, dict):
             self.persona_enabled = persona_spec.get("enabled", True)
@@ -1547,12 +1561,43 @@ class HermesSprintRunner:
                     # Do not acknowledge on execution failure to allow retry
                     break
 
+            # Task completion check: if target_msg or an outgoing message reported task_result
+            incoming_meta = target_msg.get("metadata") or {}
+            task_id = incoming_meta.get("taskId")
+            if target_msg.get("intent") == "task_result" and task_id:
+                if task_id in self.task_assignments:
+                    self.task_assignments[task_id].status = "completed"
+                    self.task_assignments[task_id].completedAt = datetime.now().isoformat()
+                    if default_publisher:
+                        default_publisher.publish(
+                            source_id="hermes_runner",
+                            source_kind="runtime",
+                            kind="delegation.completed",
+                            detail=f"Task {task_id} completed by {target_agent}.",
+                            job_id=self.job_id,
+                            metadata={"taskId": task_id, "completedBy": target_agent},
+                        )
+
             # Process and record outgoing structured A2A messages if present
             outgoing_msgs = getattr(turn_result, "outgoing_messages", []) or []
             for out_msg in outgoing_msgs:
                 out_conv_id = conversation_id or target_msg.get("conversationId") or out_msg.conversationId
                 out_reply_to = out_msg.replyTo or target_msg.get("id")
                 out_corr_id = out_msg.correlationId or target_msg.get("correlationId")
+
+                if out_msg.intent == "task_result" and task_id:
+                    if task_id in self.task_assignments:
+                        self.task_assignments[task_id].status = "completed"
+                        self.task_assignments[task_id].completedAt = datetime.now().isoformat()
+                        if default_publisher:
+                            default_publisher.publish(
+                                source_id="hermes_runner",
+                                source_kind="runtime",
+                                kind="delegation.completed",
+                                detail=f"Task {task_id} completed by {target_agent}.",
+                                job_id=self.job_id,
+                                metadata={"taskId": task_id, "completedBy": target_agent},
+                            )
 
                 # Validate replyTo graph consistency (reject invalid replyTo messages from scheduling)
                 if validate_reply_to:
@@ -1585,6 +1630,211 @@ class HermesSprintRunner:
                     phase_id=f"phase-{target_phase.get('name')}",
                     artifact_refs=out_msg.artifactRefs,
                     metadata=out_msg.metadata,
+                )
+
+            # Process outgoing Delegation Requests (Phase 7)
+            del_requests = getattr(turn_result, "delegation_requests", []) or []
+            max_delegations = self.limits.get("delegation", {}).get("max_delegations_per_job", 10) if isinstance(self.limits.get("delegation"), dict) else 10
+
+            for del_req in del_requests:
+                if self.job_delegations >= max_delegations:
+                    self.logger.warning("Delegation limit reached (%s/%s). Skipping delegation.", self.job_delegations, max_delegations)
+                    if default_publisher:
+                        default_publisher.publish(
+                            source_id="hermes_runner",
+                            source_kind="runtime",
+                            kind="delegation.limit_reached",
+                            detail=f"Delegation limit reached ({self.job_delegations}/{max_delegations}).",
+                            job_id=self.job_id,
+                            metadata={"delegationId": del_req.id, "count": self.job_delegations},
+                        )
+                    continue
+
+                # Set authoritative fields
+                del_req.jobId = self.job_id
+                del_req.threadId = self.thread_id
+                del_req.conversationId = conversation_id or target_msg.get("conversationId") or self.thread_id
+                del_req.parentMessageId = target_msg.get("id")
+                del_req.requester = {"id": target_agent, "kind": "agent", "displayName": target_agent.capitalize()}
+
+                if default_publisher:
+                    default_publisher.publish(
+                        source_id=target_agent,
+                        source_kind="agent",
+                        kind="delegation.requested",
+                        detail=f"Agent {target_agent} requested delegation: {del_req.task[:100]}",
+                        job_id=self.job_id,
+                        metadata={"requestId": del_req.id, "requiredCapabilities": del_req.requiredCapabilities},
+                    )
+
+                decision = self.capability_registry.select_actor(
+                    required_capabilities=del_req.requiredCapabilities,
+                    preferred_actors=del_req.preferredActors,
+                    excluded_actors=del_req.excludedActors,
+                    available_actors=list(phases_by_agent.keys()),
+                    request_id=del_req.id,
+                    publisher=default_publisher,
+                    job_id=self.job_id,
+                )
+
+                if decision.status == "selected" and decision.selectedActorId:
+                    self.job_delegations += 1
+                    selected_actor = decision.selectedActorId
+                    task_id = f"task_{del_req.id}"
+                    assignment = TaskAssignment(
+                        taskId=task_id,
+                        ownerActorId=selected_actor,
+                        task=del_req.task,
+                        status="queued",
+                        delegatedBy=target_agent,
+                        requiredCapabilities=del_req.requiredCapabilities,
+                        jobId=self.job_id,
+                        threadId=self.thread_id,
+                        conversationId=del_req.conversationId,
+                    )
+                    self.task_assignments[task_id] = assignment
+
+                    if default_publisher:
+                        default_publisher.publish(
+                            source_id="hermes_runner",
+                            source_kind="runtime",
+                            kind="delegation.selected",
+                            detail=f"Delegated task {task_id} to actor {selected_actor}",
+                            job_id=self.job_id,
+                            metadata={
+                                "taskId": task_id,
+                                "selectedActorId": selected_actor,
+                                "delegatedBy": target_agent,
+                                "requiredCapabilities": del_req.requiredCapabilities,
+                            },
+                        )
+
+                    self._record_message(
+                        from_actor={"id": target_agent, "kind": "agent", "displayName": target_agent.capitalize()},
+                        to_actors=[{"id": selected_actor, "kind": "agent", "displayName": selected_actor.capitalize()}],
+                        kind="delegation",
+                        intent="task_request",
+                        text=del_req.task,
+                        conversation_id=del_req.conversationId,
+                        reply_to=target_msg.get("id"),
+                        metadata={
+                            "taskId": task_id,
+                            "delegationRequestId": del_req.id,
+                            "requiredCapabilities": del_req.requiredCapabilities,
+                            "matchedCapabilities": decision.matchedCapabilities,
+                            "delegatedBy": target_agent,
+                        },
+                    )
+                else:
+                    # Check if subagent creation is permitted
+                    if del_req.allowSubagent and self.subagent_manager.allow_subagents:
+                        sub_profile = self.subagent_manager.create_subagent(
+                            parent_agent_id=target_agent,
+                            task=del_req.task,
+                            capabilities=del_req.requiredCapabilities,
+                            publisher=default_publisher,
+                            job_id=self.job_id,
+                        )
+                        if sub_profile:
+                            self.capability_registry.register_actor(sub_profile)
+                            phases_by_agent[sub_profile.id] = {
+                                **target_phase,
+                                "name": f"subagent_{sub_profile.id}",
+                                "agent": sub_profile.id,
+                            }
+                            self.job_delegations += 1
+                            task_id = f"task_{del_req.id}"
+                            assignment = TaskAssignment(
+                                taskId=task_id,
+                                ownerActorId=sub_profile.id,
+                                task=del_req.task,
+                                status="queued",
+                                delegatedBy=target_agent,
+                                requiredCapabilities=del_req.requiredCapabilities,
+                                jobId=self.job_id,
+                                threadId=self.thread_id,
+                                conversationId=del_req.conversationId,
+                            )
+                            self.task_assignments[task_id] = assignment
+
+                            self._record_message(
+                                from_actor={"id": target_agent, "kind": "agent", "displayName": target_agent.capitalize()},
+                                to_actors=[{"id": sub_profile.id, "kind": "agent", "displayName": sub_profile.displayName}],
+                                kind="delegation",
+                                intent="task_request",
+                                text=del_req.task,
+                                conversation_id=del_req.conversationId,
+                                reply_to=target_msg.get("id"),
+                                metadata={
+                                    "taskId": task_id,
+                                    "delegationRequestId": del_req.id,
+                                    "requiredCapabilities": del_req.requiredCapabilities,
+                                    "delegatedBy": target_agent,
+                                    "subagent": True,
+                                },
+                            )
+                        else:
+                            if default_publisher:
+                                default_publisher.publish(
+                                    source_id="hermes_runner",
+                                    source_kind="runtime",
+                                    kind="delegation.rejected",
+                                    detail=f"Subagent creation rejected for delegation {del_req.id}",
+                                    job_id=self.job_id,
+                                    metadata={"requestId": del_req.id, "reason": "subagent_creation_failed"},
+                                )
+                    else:
+                        if default_publisher:
+                            default_publisher.publish(
+                                source_id="hermes_runner",
+                                source_kind="runtime",
+                                kind="delegation.rejected",
+                                detail=f"No capable actor found for delegation: {del_req.task[:100]}",
+                                job_id=self.job_id,
+                                metadata={"requestId": del_req.id, "requiredCapabilities": del_req.requiredCapabilities},
+                            )
+
+            # Process outgoing Tool Invocations (Phase 7)
+            tool_requests = getattr(turn_result, "tool_requests", []) or []
+            for tool_req in tool_requests:
+                tool_req.jobId = self.job_id
+                tool_req.threadId = self.thread_id
+                tool_req.conversationId = conversation_id or target_msg.get("conversationId") or self.thread_id
+                tool_req.parentMessageId = target_msg.get("id")
+                tool_req.requester = {"id": target_agent, "kind": "agent", "displayName": target_agent.capitalize()}
+
+                tool_res = self.tool_registry.execute(
+                    request=tool_req,
+                    worktree_dir=target_wt,
+                    job_config=self.spec,
+                    publisher=default_publisher,
+                    job_id=self.job_id,
+                )
+
+                res_text = ""
+                if tool_res.output and isinstance(tool_res.output, dict) and "stdout" in tool_res.output:
+                    res_text = tool_res.output["stdout"]
+                elif tool_res.output:
+                    res_text = json.dumps(tool_res.output)
+                elif tool_res.error:
+                    res_text = f"Error: {tool_res.error}"
+                else:
+                    res_text = f"Status: {tool_res.status}"
+
+                self._record_message(
+                    from_actor={"id": tool_req.toolId, "kind": "tool", "displayName": tool_req.toolId},
+                    to_actors=[{"id": target_agent, "kind": "agent", "displayName": target_agent.capitalize()}],
+                    kind="tool_result",
+                    intent="tool_result",
+                    text=res_text,
+                    conversation_id=tool_req.conversationId,
+                    reply_to=target_msg.get("id"),
+                    metadata={
+                        "requestId": tool_req.id,
+                        "toolId": tool_req.toolId,
+                        "status": tool_res.status,
+                        "error": tool_res.error,
+                    },
                 )
 
             # Acknowledge consumed incoming messages after successful execution

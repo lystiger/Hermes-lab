@@ -16,6 +16,7 @@ SCHEDULABLE_INTENTS = {
     "question",
     "verification_request",
     "correction_result",
+    "task_request",
 }
 
 # Terminal or result intents: convey outcomes or answers without automatically requiring further turns
@@ -24,6 +25,8 @@ TERMINAL_INTENTS = {
     "answer",
     "verification_result",
     "status",
+    "task_result",
+    "tool_result",
 }
 
 # Forbidden keys stripped from A2A output metadata
@@ -91,6 +94,8 @@ class AgentTurnResult:
     execution_result: Any
     text: Optional[str] = None
     outgoing_messages: List[A2AOutput] = field(default_factory=list)
+    delegation_requests: List[Any] = field(default_factory=list)
+    tool_requests: List[Any] = field(default_factory=list)
     metadata: Optional[Dict[str, Any]] = None
 
     @property
@@ -142,8 +147,10 @@ class AgentTurnResult:
 
 class A2AOutputParser:
     """
-    Production parser for structured A2A agent output.
-    Extracts structured JSON payload between LYSSTACK_A2A_START and LYSSTACK_A2A_END delimiters.
+    Production parser for structured agent outputs:
+    - A2A messages: LYSSTACK_A2A_START ... LYSSTACK_A2A_END
+    - Delegation requests: LYSSTACK_DELEGATION_START ... LYSSTACK_DELEGATION_END
+    - Tool requests: LYSSTACK_TOOL_REQUEST_START ... LYSSTACK_TOOL_REQUEST_END
     """
 
     @classmethod
@@ -168,22 +175,18 @@ class A2AOutputParser:
             except Exception:
                 return AgentTurnResult(execution_result=execution_result, text="", outgoing_messages=[])
 
-        pattern = re.compile(
+        outgoing_messages: List[A2AOutput] = []
+        delegation_requests: List[Any] = []
+        tool_requests: List[Any] = []
+
+        # 1. Parse A2A Output Blocks
+        a2a_pattern = re.compile(
             rf"{re.escape(LYSSTACK_A2A_START)}\s*(.*?)\s*{re.escape(LYSSTACK_A2A_END)}",
             re.DOTALL,
         )
-        matches = pattern.findall(raw_text)
+        a2a_matches = a2a_pattern.findall(raw_text)
 
-        if not matches:
-            return AgentTurnResult(
-                execution_result=execution_result,
-                text=raw_text,
-                outgoing_messages=[],
-            )
-
-        outgoing_messages: List[A2AOutput] = []
-
-        for block in matches:
+        for block in a2a_matches:
             cleaned = block.strip()
             if not cleaned:
                 continue
@@ -226,7 +229,6 @@ class A2AOutputParser:
 
                 try:
                     msg = A2AOutput.from_dict(item)
-                    # Validate non-empty recipient list and non-empty text
                     if not msg.to:
                         logger.warning("A2A output ignored: 'to' recipient list is empty")
                         if publisher:
@@ -240,7 +242,6 @@ class A2AOutputParser:
                             )
                         continue
 
-                    # Validate max text length (50k chars)
                     if len(msg.text) > 50000:
                         msg.text = msg.text[:50000]
 
@@ -260,10 +261,80 @@ class A2AOutputParser:
                     if strict:
                         raise
 
+        # 2. Parse Delegation Blocks (Phase 7)
+        try:
+            from delegation import DelegationRequest, LYSSTACK_DELEGATION_START, LYSSTACK_DELEGATION_END
+            del_pattern = re.compile(
+                rf"{re.escape(LYSSTACK_DELEGATION_START)}\s*(.*?)\s*{re.escape(LYSSTACK_DELEGATION_END)}",
+                re.DOTALL,
+            )
+            del_matches = del_pattern.findall(raw_text)
+            for block in del_matches:
+                cleaned = block.strip()
+                if not cleaned:
+                    continue
+                try:
+                    parsed_json = json.loads(cleaned)
+                    items = parsed_json if isinstance(parsed_json, list) else [parsed_json]
+                    for item in items:
+                        if isinstance(item, dict):
+                            req = DelegationRequest.from_dict(item)
+                            if req.task and req.requiredCapabilities:
+                                delegation_requests.append(req)
+                except Exception as del_err:
+                    logger.warning("Malformed JSON in delegation block: %s", del_err)
+                    if publisher:
+                        publisher.publish(
+                            source_id=agent_id or "hermes_runner",
+                            source_kind="runtime",
+                            kind="delegation.rejected",
+                            detail=f"Malformed JSON in delegation block: {del_err}",
+                            job_id=job_id,
+                            metadata={"raw_block": cleaned[:500]},
+                        )
+        except ImportError:
+            pass
+
+        # 3. Parse Tool Request Blocks (Phase 7)
+        try:
+            from tools import ToolInvocationRequest, LYSSTACK_TOOL_REQUEST_START, LYSSTACK_TOOL_REQUEST_END
+            tool_pattern = re.compile(
+                rf"{re.escape(LYSSTACK_TOOL_REQUEST_START)}\s*(.*?)\s*{re.escape(LYSSTACK_TOOL_REQUEST_END)}",
+                re.DOTALL,
+            )
+            tool_matches = tool_pattern.findall(raw_text)
+            for block in tool_matches:
+                cleaned = block.strip()
+                if not cleaned:
+                    continue
+                try:
+                    parsed_json = json.loads(cleaned)
+                    items = parsed_json if isinstance(parsed_json, list) else [parsed_json]
+                    for item in items:
+                        if isinstance(item, dict):
+                            treq = ToolInvocationRequest.from_dict(item)
+                            if treq.toolId:
+                                tool_requests.append(treq)
+                except Exception as tool_err:
+                    logger.warning("Malformed JSON in tool request block: %s", tool_err)
+                    if publisher:
+                        publisher.publish(
+                            source_id=agent_id or "hermes_runner",
+                            source_kind="runtime",
+                            kind="tool.rejected",
+                            detail=f"Malformed JSON in tool request block: {tool_err}",
+                            job_id=job_id,
+                            metadata={"raw_block": cleaned[:500]},
+                        )
+        except ImportError:
+            pass
+
         return AgentTurnResult(
             execution_result=execution_result,
             text=raw_text,
             outgoing_messages=outgoing_messages,
+            delegation_requests=delegation_requests,
+            tool_requests=tool_requests,
         )
 
 

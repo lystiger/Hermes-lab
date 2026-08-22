@@ -250,12 +250,14 @@ def resolve_agent_profile(
             visual=PersonaVisual(subtitle=f"Operative ({agent_id})"),
         )
 
+    from capabilities import DEFAULT_CAPABILITY_PROFILES
+
     # Base profile
     profile = AgentProfile(
         id=agent_id,
         displayName=default_persona.name if default_persona else agent_id.capitalize(),
         persona=default_persona,
-        capabilities=["general-execution"],
+        capabilities=list(DEFAULT_CAPABILITY_PROFILES.get(agent_id, ["general-execution"])),
     )
 
     # 2. Check for character card file or custom dict override via PersonaLoader

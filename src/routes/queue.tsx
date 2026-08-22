@@ -1,17 +1,18 @@
 import React from 'react';
 import { QueueTable } from '../features/jobs/QueueTable';
 import { useConsoleStore } from '../stores/useConsoleStore';
-import { useJobs, usePipeline } from '../api/hooks';
-import { resolveActorRef } from '../api/mock/actors';
+import { useJobs, usePipeline, useAgents } from '../api/hooks';
+import { resolveActorPresentation } from '../api/actors';
 
 export const QueueRoute: React.FC = () => {
   const { setActiveModalJobId, liveMotion } = useConsoleStore();
   const { jobs } = useJobs();
   const { pipeline } = usePipeline();
+  const { agents } = useAgents();
 
   const getStateColor = (state: string) => {
     switch (state) {
-      case 'COMPLETE': return '#5C646E';
+      case 'COMPLETED': return '#5C646E';
       case 'RUNNING': return '#3FB950';
       case 'QUEUED': return '#8C949F';
       case 'CLAIMED': return '#CBA35C';
@@ -33,7 +34,7 @@ export const QueueRoute: React.FC = () => {
           {pipeline.map((p, idx) => {
             const isRunning = p.state === 'RUNNING';
             const isBlocked = p.state === 'BLOCKED';
-            const actor = p.agentId ? resolveActorRef(p.agentId) : null;
+            const actor = p.agentId ? resolveActorPresentation(p.agentId, agents) : null;
             const agentCol = actor?.accentColor || '#8C949F';
             const stateCol = getStateColor(p.state);
             const agentName = p.agentName || actor?.displayName || '—';
@@ -52,7 +53,7 @@ export const QueueRoute: React.FC = () => {
                     {p.id}
                   </span>
                   <span
-                    style={{ color: isRunning ? '#E6E9ED' : p.state === 'COMPLETE' ? '#8C949F' : '#5C646E' }}
+                    style={{ color: isRunning ? '#E6E9ED' : p.state === 'COMPLETED' ? '#8C949F' : '#5C646E' }}
                     className="w-16 flex-shrink-0 font-mono-code text-[11px] tracking-wider font-semibold"
                   >
                     {p.phase}
@@ -91,7 +92,7 @@ export const QueueRoute: React.FC = () => {
                 {idx < pipeline.length - 1 && (
                   <div
                     style={{
-                      backgroundColor: p.state === 'COMPLETE' ? 'rgba(63,185,80,0.4)' : '#1F242B'
+                      backgroundColor: p.state === 'COMPLETED' ? 'rgba(63,185,80,0.4)' : '#1F242B'
                     }}
                     className="h-3 w-[1px] ml-5"
                   />

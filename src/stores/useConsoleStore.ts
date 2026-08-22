@@ -1,7 +1,5 @@
 import { create } from 'zustand';
-import { TraceEvent } from '../api/types';
-import { RAW_SEED_EVENTS, RAW_POOL_EVENTS } from '../api/mock/events';
-import { resolveActorRef } from '../api/mock/actors';
+import { TraceEvent, AgentSummary, AgentDetail } from '../api/types';
 
 function pad(n: number, w: number): string {
   return String(n).padStart(w, '0');
@@ -19,15 +17,15 @@ interface ConsoleUIState {
   // Client UI Preferences & Selection
   selectedAgentId: string;
   activeModalJobId: string | null;
+  activeDossierAgent: AgentSummary | AgentDetail | null;
   qFilter: string;
   eFilter: string;
   liveMotion: boolean;
   ambient3d: boolean;
   portraits: 'both' | 'slots' | 'marks';
   
-  // Real-time Clock & Simulation State
+  // Real-time Visual Clock & Simulation State
   tick: number;
-  lastTs: number;
   clock: string;
   elapsed: string;
   tokensToday: string;
@@ -40,30 +38,23 @@ interface ConsoleUIState {
   // Actions
   setSelectedAgentId: (id: string) => void;
   setActiveModalJobId: (id: string | null) => void;
+  setActiveDossierAgent: (agent: AgentSummary | AgentDetail | null) => void;
   setQFilter: (filter: string) => void;
   setEFilter: (filter: string) => void;
   setLiveMotion: (enabled: boolean) => void;
   setAmbient3d: (enabled: boolean) => void;
   setPortraits: (mode: 'both' | 'slots' | 'marks') => void;
+  setInitialEvents: (events: TraceEvent[]) => void;
   addTraceEvent: (event: TraceEvent) => void;
   tickClock: () => void;
 }
 
 const baseTs = 10 * 3600 + 42 * 60 + 16;
-const initialEvents: TraceEvent[] = RAW_SEED_EVENTS.map((e, idx) => ({
-  id: `seed-${idx}`,
-  ts: fmtTs(baseTs + e.t),
-  rawTs: baseTs + e.t,
-  source: resolveActorRef(e.a),
-  kind: e.k,
-  detail: e.d,
-  dur: e.dur || '—',
-  jobId: '#142'
-})).reverse();
 
 export const useConsoleStore = create<ConsoleUIState>((set, get) => ({
   selectedAgentId: 'claude',
   activeModalJobId: null,
+  activeDossierAgent: null,
   qFilter: 'All',
   eFilter: 'All',
   liveMotion: true,
@@ -71,21 +62,26 @@ export const useConsoleStore = create<ConsoleUIState>((set, get) => ({
   portraits: 'both',
   
   tick: 0,
-  lastTs: baseTs + 31.4,
   clock: '10:42',
   elapsed: '08:41',
   tokensToday: '284K',
   jobTokens: '44.1k',
   hardenTokens: '13.7k',
-  allEvents: initialEvents,
+  allEvents: [],
 
   setSelectedAgentId: (id) => set({ selectedAgentId: id.toLowerCase() }),
   setActiveModalJobId: (id) => set({ activeModalJobId: id }),
+  setActiveDossierAgent: (agent) => set({ activeDossierAgent: agent }),
   setQFilter: (qFilter) => set({ qFilter }),
   setEFilter: (eFilter) => set({ eFilter }),
   setLiveMotion: (liveMotion) => set({ liveMotion }),
   setAmbient3d: (ambient3d) => set({ ambient3d }),
   setPortraits: (portraits) => set({ portraits }),
+
+  setInitialEvents: (events) =>
+    set((state) => ({
+      allEvents: state.allEvents.length === 0 ? events : state.allEvents
+    })),
 
   addTraceEvent: (event) =>
     set((state) => ({
@@ -103,40 +99,18 @@ export const useConsoleStore = create<ConsoleUIState>((set, get) => ({
     const hardenTokens = `${((13700 + nextTick * 41) / 1000).toFixed(1)}k`;
     const tokensToday = `${284 + Math.floor(nextTick * 0.06)}K`;
 
-    let nextEvents = state.allEvents;
-    let nextLastTs = state.lastTs;
-
-    if (state.liveMotion && nextTick % 2 === 1) {
-      const p = RAW_POOL_EVENTS[Math.floor(nextTick / 2) % RAW_POOL_EVENTS.length];
-      const ts = state.lastTs + 0.4 + ((nextTick * 37) % 130) / 100;
-      const newEvent: TraceEvent = {
-        id: `evt-${nextTick}-${Date.now()}`,
-        ts: fmtTs(ts),
-        rawTs: ts,
-        source: resolveActorRef(p.a),
-        kind: p.k,
-        detail: p.d,
-        dur: p.dur || '—',
-        jobId: '#142'
-      };
-      nextEvents = [newEvent, ...state.allEvents].slice(0, 100);
-      nextLastTs = ts;
-    }
-
     set({
       tick: nextTick,
-      lastTs: nextLastTs,
       clock,
       elapsed,
       jobTokens,
       hardenTokens,
-      tokensToday,
-      allEvents: nextEvents
+      tokensToday
     });
   }
 }));
 
-// Background live pulse ticker
+// Background client-only clock ticker
 if (typeof window !== 'undefined') {
   setInterval(() => {
     useConsoleStore.getState().tickClock();

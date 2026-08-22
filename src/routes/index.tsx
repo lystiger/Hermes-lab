@@ -8,7 +8,7 @@ import { QueueProjectionBar } from '../features/jobs/QueueProjectionBar';
 import { ProviderQuotaList } from '../features/telemetry/ProviderQuotaList';
 import { useConsoleStore } from '../stores/useConsoleStore';
 import { useAgents, useJobs } from '../api/hooks';
-import { resolveActorRef } from '../api/mock/actors';
+import { resolveActorPresentation } from '../api/actors';
 
 export const OverviewRoute: React.FC = () => {
   const navigate = useNavigate();
@@ -119,7 +119,7 @@ export const OverviewRoute: React.FC = () => {
 
             <div className="flex flex-col gap-1">
               {queueShort.map((q) => {
-                const leadActor = q.assignedAgentIds[0] ? resolveActorRef(q.assignedAgentIds[0]) : null;
+                const leadActor = q.assignedAgentIds[0] ? resolveActorPresentation(q.assignedAgentIds[0], agents) : null;
                 const leadColor = leadActor?.accentColor || '#8C949F';
 
                 return (
@@ -138,7 +138,7 @@ export const OverviewRoute: React.FC = () => {
                     <div className="flex items-center gap-2 mt-1.5 font-mono-code text-[11px] text-[#5C646E]">
                       <span className="truncate">{q.repository}</span>
                       <span style={{ color: leadColor }}>
-                        {q.assignedAgentIds.map(id => resolveActorRef(id).displayName).join(' → ')}
+                        {q.assignedAgentIds.map(id => resolveActorPresentation(id, agents).displayName).join(' → ')}
                       </span>
                       <span className="flex-1 text-right">{q.estimatedTime || '—'}</span>
                     </div>

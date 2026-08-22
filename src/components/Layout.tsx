@@ -3,8 +3,13 @@ import { Outlet } from 'react-router-dom';
 import { Sidebar } from './Sidebar';
 import { Header } from './Header';
 import { JobModal } from './JobModal';
+import { DossierModal } from './DossierModal';
+import { useEventStream } from '../api/hooks';
 
 export const Layout: React.FC = () => {
+  // Mount event stream subscription via LysStackApi
+  useEventStream();
+
   return (
     <div className="flex h-screen min-h-screen bg-[#0A0B0D] text-[#E6E9ED] text-[13px] overflow-hidden">
       {/* Left Navigation Sidebar */}
@@ -19,8 +24,9 @@ export const Layout: React.FC = () => {
         </div>
       </main>
 
-      {/* Job Details Modal */}
+      {/* Modals */}
       <JobModal />
+      <DossierModal />
     </div>
   );
 };

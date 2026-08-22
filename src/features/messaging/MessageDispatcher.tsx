@@ -32,7 +32,7 @@ export const MessageDispatcher: React.FC = () => {
     <div className="p-4 bg-[#0E1116] border border-[#1F242B] select-none">
       <div className="font-mono-code text-[11px] tracking-wider text-[#5C646E] mb-2.5 flex items-center justify-between">
         <span>TACTICAL DISPATCH / OPERATOR COMMAND</span>
-        <span className="text-[#CBA35C]">control-plane://mock</span>
+        <span className="text-[#CBA35C]">control-plane://active</span>
       </div>
 
       <form onSubmit={handleSend} className="flex flex-col gap-2.5">

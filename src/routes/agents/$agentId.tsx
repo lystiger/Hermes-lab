@@ -12,7 +12,7 @@ import { useAgent } from '../../api/hooks';
 
 export const AgentDetailRoute: React.FC = () => {
   const { agentId } = useParams<{ agentId: string }>();
-  const { setSelectedAgentId } = useConsoleStore();
+  const { setSelectedAgentId, setActiveDossierAgent } = useConsoleStore();
   const { agent, loading } = useAgent(agentId);
 
   useEffect(() => {
@@ -39,6 +39,7 @@ export const AgentDetailRoute: React.FC = () => {
 
   const isRunning = agent.status === 'RUNNING';
   const accentColor = agent.presentation?.accentColor || '#8C949F';
+  const hasCharacterCard = Boolean(agent.presentation?.characterCardUrl);
 
   return (
     <div className="flex flex-col select-none bg-[#0A0B0D]">
@@ -54,10 +55,24 @@ export const AgentDetailRoute: React.FC = () => {
             crawlCode={agent.crawlCode}
             size="lg"
           />
-          <div className="mt-2.5 w-full flex justify-between font-mono-code text-[11px] text-[#5C646E]">
+          <div className="mt-2.5 w-full flex justify-between items-center font-mono-code text-[11px] text-[#5C646E]">
             <span>{agent.model}</span>
             <span style={{ color: accentColor }}>{agent.traceId || `trc ${agent.id}·active`}</span>
           </div>
+
+          {/* Optional Restrained Dossier Trigger */}
+          {hasCharacterCard && (
+            <button
+              onClick={() => setActiveDossierAgent(agent)}
+              style={{
+                borderColor: `${accentColor}44`,
+                color: accentColor
+              }}
+              className="mt-2.5 w-full py-1 text-center font-mono-code text-[11px] tracking-wider border hover:bg-[#161A20] cursor-pointer transition-colors"
+            >
+              [ VIEW DOSSIER ]
+            </button>
+          )}
         </div>
 
         {/* Right Info and Breakdown */}

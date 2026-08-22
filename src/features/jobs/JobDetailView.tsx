@@ -1,7 +1,7 @@
 import React from 'react';
 import { useConsoleStore } from '../../stores/useConsoleStore';
-import { useJob } from '../../api/hooks';
-import { resolveActorRef } from '../../api/mock/actors';
+import { useJob, useAgents } from '../../api/hooks';
+import { resolveActorPresentation } from '../../api/actors';
 
 interface JobDetailViewProps {
   jobId?: string;
@@ -10,6 +10,7 @@ interface JobDetailViewProps {
 export const JobDetailView: React.FC<JobDetailViewProps> = ({ jobId = '#142' }) => {
   const { elapsed, jobTokens, hardenTokens, allEvents } = useConsoleStore();
   const { job } = useJob(jobId);
+  const { agents } = useAgents();
 
   const displayJob = job || {
     id: jobId,
@@ -23,10 +24,10 @@ export const JobDetailView: React.FC<JobDetailViewProps> = ({ jobId = '#142' }) 
     budget: '80k',
     policy: 'serial · retry 3',
     executionGraph: [
-      { id: '1', phase: 'BUILD' as const, agentId: 'gemini', agentName: 'Gemini', note: 'implementation complete', meta: '30.4k\n06:12', mark: '✓', state: 'COMPLETE' as const, task: 'Build' },
+      { id: '1', phase: 'BUILD' as const, agentId: 'gemini', agentName: 'Gemini', note: 'implementation complete', meta: '30.4k\n06:12', mark: '✓', state: 'COMPLETED' as const, task: 'Build' },
       { id: '2', phase: 'HARDEN' as const, agentId: 'claude', agentName: 'Claude', note: 'reviewing store contract', meta: `${hardenTokens}\n02:14`, mark: '●', state: 'RUNNING' as const, task: 'Harden' },
       { id: '3', phase: 'VERIFY' as const, agentId: 'codex', agentName: 'Codex', note: 'waiting for handoff', meta: '~19k\n~3m', mark: '○', state: 'QUEUED' as const, task: 'Verify' },
-      { id: '4', phase: 'COMPLETE' as const, agentId: 'elysia', agentName: 'Elysia', note: 'merge + report', meta: '', mark: '', state: 'idle' as const, task: 'Complete' }
+      { id: '4', phase: 'COMPLETE' as const, agentId: 'elysia', agentName: 'Elysia', note: 'merge + report', meta: '', mark: '', state: 'IDLE' as const, task: 'Complete' }
     ],
     changedFiles: [
       { mark: 'A' as const, path: 'src/state/redis_store.py', add: '+184', del: '−0', byActorId: 'gemini', byDisplayName: 'Gemini' },
@@ -94,9 +95,9 @@ export const JobDetailView: React.FC<JobDetailViewProps> = ({ jobId = '#142' }) 
           <div style={{ perspective: '800px' }} className="flex flex-col">
             <div style={{ transformStyle: 'preserve-3d' }} className="flex flex-col">
               {displayJob.executionGraph.map((g, idx) => {
-                const actor = g.agentId ? resolveActorRef(g.agentId) : null;
+                const actor = g.agentId ? resolveActorPresentation(g.agentId, agents) : null;
                 const col = actor?.accentColor || '#3A4048';
-                const isDone = g.state === 'COMPLETE';
+                const isDone = g.state === 'COMPLETED';
                 const isActive = g.state === 'RUNNING';
 
                 return (
@@ -129,7 +130,7 @@ export const JobDetailView: React.FC<JobDetailViewProps> = ({ jobId = '#142' }) 
                         >
                           {g.phase}
                         </div>
-                        <div style={{ color: g.state === 'idle' ? '#3A4048' : col }} className="text-[12px] mt-0.5">
+                        <div style={{ color: g.state === 'IDLE' ? '#3A4048' : col }} className="text-[12px] mt-0.5">
                           {g.agentName || actor?.displayName || '—'}
                         </div>
                         <div className="font-mono-code text-[11px] text-[#5C646E] mt-0.5">
@@ -198,7 +199,7 @@ export const JobDetailView: React.FC<JobDetailViewProps> = ({ jobId = '#142' }) 
             </div>
             <div className="flex flex-col gap-1">
               {displayJob.changedFiles.map((f, idx) => {
-                const actor = resolveActorRef(f.byActorId);
+                const actor = resolveActorPresentation(f.byActorId, agents);
                 return (
                   <div
                     key={idx}
@@ -291,7 +292,9 @@ export const JobDetailView: React.FC<JobDetailViewProps> = ({ jobId = '#142' }) 
                     {e.source.displayName}
                   </span>
                   <span className="w-28 text-[#8C949F]">{e.kind}</span>
-                  <span className="flex-1 min-w-0 text-[#B7BEC7] truncate">{e.detail}</span>
+                  <span className="flex-1 min-w-0 text-[#B7BEC7] truncate font-sans">
+                    {e.detail}
+                  </span>
                   <span className="w-16 text-right text-[#8C949F]">{e.dur}</span>
                 </div>
               ))}

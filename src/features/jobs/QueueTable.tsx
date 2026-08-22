@@ -1,7 +1,8 @@
 import React from 'react';
 import { Job, AgentId } from '../../api/types';
 import { useConsoleStore } from '../../stores/useConsoleStore';
-import { resolveActorRef } from '../../api/mock/actors';
+import { useAgents } from '../../api/hooks';
+import { resolveActorPresentation } from '../../api/actors';
 
 interface QueueTableProps {
   jobs: Job[];
@@ -24,7 +25,6 @@ const STATUS_COLOR: Record<string, string> = {
   BLOCKED: '#E3A008',
   FAILED: '#F2555A',
   COMPLETED: '#5C646E',
-  COMPLETE: '#5C646E',
   CANCELLED: '#5C646E'
 };
 
@@ -34,6 +34,7 @@ export const QueueTable: React.FC<QueueTableProps> = ({
   showFilters = true
 }) => {
   const { qFilter, setQFilter } = useConsoleStore();
+  const { agents } = useAgents();
 
   const filterOptions = ['All', 'Queued', 'Blocked', 'Completed', 'Cancelled'];
 
@@ -120,7 +121,7 @@ export const QueueTable: React.FC<QueueTableProps> = ({
               {/* Agent Chain Badges */}
               <div className="w-48 flex-shrink-0 hidden lg:flex items-center gap-1.5 overflow-hidden">
                 {q.assignedAgentIds.map((agId: AgentId, i: number) => {
-                  const actor = resolveActorRef(agId);
+                  const actor = resolveActorPresentation(agId, agents);
                   const agColor = actor.accentColor || '#8C949F';
                   return (
                     <React.Fragment key={agId + i}>

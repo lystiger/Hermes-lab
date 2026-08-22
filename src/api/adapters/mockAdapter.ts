@@ -10,7 +10,10 @@ import {
   ProjectionItem,
   SettingItem,
   TraceEvent,
-  OverviewTelemetry
+  OverviewTelemetry,
+  Thread,
+  Message,
+  MailboxEntry
 } from '../types';
 import { MOCK_AGENTS, createDynamicMockAgent } from '../mock/agents';
 import { MOCK_JOBS, MOCK_PIPELINE, MOCK_ACTIVE_JOB_DETAIL } from '../mock/jobs';
@@ -191,4 +194,128 @@ export class MockLysStackApi implements LysStackApi {
     console.log(`[MockLysStackApi] Action '${action}' on job ${jobId}`);
     return true;
   }
+  // --------------------------------------------------------------------------
+  // Phase 5 Operational Messaging & Threads (Mock)
+  // --------------------------------------------------------------------------
+
+  private mockThreads: Thread[] = [
+    {
+      id: "thread_job_#142",
+      jobId: "#142",
+      title: "Sprint #142 Execution",
+      participants: [
+        { id: "gemini", kind: "agent", displayName: "Gemini", accentColor: "#5B8CFF" },
+        { id: "claude", kind: "agent", displayName: "Claude", accentColor: "#D9A05B" },
+        { id: "codex", kind: "agent", displayName: "Codex", accentColor: "#3FB950" },
+        { id: "lysstack", kind: "runtime", displayName: "LysStack", accentColor: "#CBA35C" }
+      ],
+      createdAt: "2026-08-22T10:40:00Z",
+      updatedAt: "2026-08-22T10:42:17Z"
+    }
+  ];
+
+  private mockMessages: Message[] = [
+    {
+      id: "msg_mock_001",
+      threadId: "thread_job_#142",
+      from: { id: "gemini", kind: "agent", displayName: "Gemini", accentColor: "#5B8CFF" },
+      to: [{ id: "claude", kind: "agent", displayName: "Claude", accentColor: "#D9A05B" }],
+      kind: "handoff",
+      intent: "review_request",
+      text: "BUILD implementation complete. Commit 8a21fc9. Please review scheduler/state changes.",
+      jobId: "#142",
+      phaseId: "phase-1-build",
+      artifactRefs: [
+        { id: "art_m1", type: "git_commit", label: "BUILD commit", ref: "8a21fc9" },
+        { id: "art_m2", type: "handoff", label: "BUILD handoff", ref: "HANDOFF_BUILD.md" }
+      ],
+      createdAt: "2026-08-22T10:41:05Z"
+    },
+    {
+      id: "msg_mock_002",
+      threadId: "thread_job_#142",
+      from: { id: "claude", kind: "agent", displayName: "Claude", accentColor: "#D9A05B" },
+      to: [{ id: "codex", kind: "agent", displayName: "Codex", accentColor: "#3FB950" }],
+      kind: "handoff",
+      intent: "verification_request",
+      text: "HARDEN complete. Found one race in state cleanup; fixed in 91cf33a.",
+      jobId: "#142",
+      phaseId: "phase-2-harden",
+      artifactRefs: [
+        { id: "art_m3", type: "git_commit", label: "HARDEN commit", ref: "91cf33a" },
+        { id: "art_m4", type: "handoff", label: "HARDEN handoff", ref: "HANDOFF_CLAUDE.md" }
+      ],
+      createdAt: "2026-08-22T10:41:45Z"
+    },
+    {
+      id: "msg_mock_003",
+      threadId: "thread_job_#142",
+      from: { id: "codex", kind: "agent", displayName: "Codex", accentColor: "#3FB950" },
+      to: [{ id: "lysstack", kind: "runtime", displayName: "LysStack", accentColor: "#CBA35C" }],
+      kind: "verification_result",
+      intent: "verification_result",
+      text: "VERIFY passed: 42 tests passed, 0 failed.",
+      jobId: "#142",
+      phaseId: "phase-3-verify",
+      artifactRefs: [
+        { id: "art_m5", type: "test_report", label: "Verification result", ref: "verification.json" }
+      ],
+      createdAt: "2026-08-22T10:42:17Z"
+    }
+  ];
+
+  async getThreads(jobId?: string, participant?: string, limit?: number): Promise<Thread[]> {
+    let threads = [...this.mockThreads];
+    if (jobId) {
+      threads = threads.filter((t) => t.jobId === jobId || t.id.includes(jobId));
+    }
+    if (participant) {
+      threads = threads.filter((t) => t.participants.some((p) => p.id === participant.toLowerCase()));
+    }
+    return threads.slice(0, limit || 50);
+  }
+
+  async getThread(threadId: string): Promise<Thread | null> {
+    const found = this.mockThreads.find((t) => t.id === threadId || (t.jobId && threadId.includes(t.jobId)));
+    return found ? { ...found } : null;
+  }
+
+  async getMessages(threadId: string, limit?: number, after?: string): Promise<Message[]> {
+    let msgs = this.mockMessages.filter((m) => m.threadId === threadId || (threadId.includes(m.jobId || "---")));
+    if (after) {
+      const idx = msgs.findIndex((m) => m.id === after);
+      if (idx !== -1) msgs = msgs.slice(idx + 1);
+    }
+    return msgs.slice(0, limit || 50);
+  }
+
+  async getAgentInbox(agentId: string, state?: string, limit?: number): Promise<MailboxEntry[]> {
+    const norm = agentId.toLowerCase();
+    const entries: MailboxEntry[] = this.mockMessages
+      .filter((m) => m.to.some((t) => t.id === norm))
+      .map((m) => ({
+        messageId: m.id,
+        recipientId: norm,
+        state: "DELIVERED",
+        receivedAt: m.createdAt,
+        message: m
+      }));
+    return entries.slice(0, limit || 50);
+  }
+
+  async sendMessage(threadId: string, text: string, to?: string[], kind?: string, intent?: string): Promise<Message> {
+    const newMsg: Message = {
+      id: `msg_mock_${Date.now()}`,
+      threadId,
+      from: { id: "operator", kind: "operator", displayName: "Operator", accentColor: "#E6E9ED" },
+      to: (to || ["lysstack"]).map((id) => resolveActorPresentation(id)),
+      kind: kind || "operator",
+      intent,
+      text,
+      createdAt: new Date().toISOString()
+    };
+    this.mockMessages.push(newMsg);
+    return newMsg;
+  }
 }
+

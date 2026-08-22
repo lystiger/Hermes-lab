@@ -14,7 +14,10 @@ import {
   OverviewTelemetry,
   ActorRef,
   TraceEvent,
-  HealthStatus
+  HealthStatus,
+  Thread,
+  Message,
+  MailboxEntry
 } from './types';
 import { resolveActorPresentation } from './actors';
 import { useConsoleStore } from '../stores/useConsoleStore';
@@ -331,4 +334,120 @@ export function useEventStream() {
 export function useActorPresentation(actorIdentifier: string): ActorRef {
   const { agents } = useAgents();
   return resolveActorPresentation(actorIdentifier, agents);
+}
+
+export function useThreads(jobId?: string, participant?: string) {
+  const [threads, setThreads] = useState<Thread[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<Error | null>(null);
+  const { messageRuntimeVersion, jobRuntimeVersion } = useConsoleStore();
+
+  const fetchThreads = useCallback(async () => {
+    try {
+      setLoading(true);
+      const data = await lysStackApi.getThreads(jobId, participant);
+      setThreads(data);
+      setError(null);
+    } catch (err) {
+      setError(err as Error);
+    } finally {
+      setLoading(false);
+    }
+  }, [jobId, participant]);
+
+  useEffect(() => {
+    fetchThreads();
+  }, [fetchThreads, messageRuntimeVersion, jobRuntimeVersion]);
+
+  return { threads, loading, error, refetch: fetchThreads };
+}
+
+export function useThread(threadId: string | null) {
+  const [thread, setThread] = useState<Thread | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<Error | null>(null);
+  const { messageRuntimeVersion } = useConsoleStore();
+
+  const fetchThread = useCallback(async (id: string) => {
+    try {
+      setLoading(true);
+      const data = await lysStackApi.getThread(id);
+      setThread(data);
+      setError(null);
+    } catch (err) {
+      setError(err as Error);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (threadId) {
+      fetchThread(threadId);
+    } else {
+      setThread(null);
+    }
+  }, [threadId, fetchThread, messageRuntimeVersion]);
+
+  return { thread, loading, error, refetch: () => threadId && fetchThread(threadId) };
+}
+
+export function useMessages(threadId: string | null) {
+  const [messages, setMessages] = useState<Message[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<Error | null>(null);
+  const { messageRuntimeVersion } = useConsoleStore();
+
+  const fetchMessages = useCallback(async (id: string) => {
+    try {
+      setLoading(true);
+      const data = await lysStackApi.getMessages(id);
+      setMessages(data);
+      setError(null);
+    } catch (err) {
+      setError(err as Error);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (threadId) {
+      fetchMessages(threadId);
+    } else {
+      setMessages([]);
+    }
+  }, [threadId, fetchMessages, messageRuntimeVersion]);
+
+  return { messages, loading, error, refetch: () => threadId && fetchMessages(threadId) };
+}
+
+export function useAgentInbox(agentId?: string, state?: string) {
+  const [inbox, setInbox] = useState<MailboxEntry[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<Error | null>(null);
+  const { messageRuntimeVersion } = useConsoleStore();
+
+  const fetchInbox = useCallback(async (targetAgent: string) => {
+    try {
+      setLoading(true);
+      const data = await lysStackApi.getAgentInbox(targetAgent, state);
+      setInbox(data);
+      setError(null);
+    } catch (err) {
+      setError(err as Error);
+    } finally {
+      setLoading(false);
+    }
+  }, [state]);
+
+  useEffect(() => {
+    if (agentId) {
+      fetchInbox(agentId);
+    } else {
+      setInbox([]);
+    }
+  }, [agentId, fetchInbox, messageRuntimeVersion]);
+
+  return { inbox, loading, error, refetch: () => agentId && fetchInbox(agentId) };
 }

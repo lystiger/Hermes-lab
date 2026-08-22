@@ -29,7 +29,7 @@ export type PipelineStepState = 'COMPLETED' | 'RUNNING' | 'QUEUED' | 'CLAIMED' |
 
 export type PhaseName = string;
 
-export type ActorKind = 'agent' | 'system' | 'runtime' | 'tool';
+export type ActorKind = 'agent' | 'system' | 'runtime' | 'tool' | 'operator';
 
 export type ConnectionStatus = 'CONNECTING' | 'CONNECTED' | 'DEGRADED' | 'DISCONNECTED';
 
@@ -43,7 +43,7 @@ export interface HealthStatus {
 
 export interface ActorRef {
   id: string;
-  kind: ActorKind;
+  kind: ActorKind | string;
   displayName: string;
   accentColor?: string;
 }
@@ -132,6 +132,43 @@ export interface ArtifactRef {
   type: string;
   label: string;
   ref: string;
+  jobId?: string;
+  phaseId?: string;
+  metadata?: Record<string, any>;
+  createdAt?: string;
+}
+
+export interface Message {
+  id: string;
+  threadId: string;
+  from: ActorRef;
+  to: ActorRef[];
+  kind: string; // 'handoff' | 'review_request' | 'review_result' | 'verification_request' | 'verification_result' | 'status' | 'warning' | 'operator' | 'system'
+  text: string;
+  intent?: string;
+  jobId?: string;
+  phaseId?: string;
+  artifactRefs?: ArtifactRef[];
+  metadata?: Record<string, any>;
+  createdAt: string;
+}
+
+export interface Thread {
+  id: string;
+  jobId?: string;
+  title?: string;
+  participants: ActorRef[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface MailboxEntry {
+  messageId: string;
+  recipientId: string;
+  state: 'PENDING' | 'DELIVERED' | 'ACKNOWLEDGED';
+  receivedAt: string;
+  acknowledgedAt?: string | null;
+  message?: Message;
 }
 
 export interface JobPhase {

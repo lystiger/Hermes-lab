@@ -2,6 +2,7 @@ import React from 'react';
 import { useConsoleStore } from '../../stores/useConsoleStore';
 import { useJob, useAgents } from '../../api/hooks';
 import { resolveActorPresentation } from '../../api/actors';
+import { OperationalThreadView } from '../messaging/OperationalThreadView';
 
 interface JobDetailViewProps {
   jobId?: string;
@@ -175,10 +176,16 @@ export const JobDetailView: React.FC<JobDetailViewProps> = ({ jobId = '' }) => {
           )}
         </div>
 
-        {/* Right Column: Execution Events & Tool Calls */}
-        <div className="flex-1 min-w-0 flex flex-col">
+        {/* Right Column: Operational Thread & Execution Events */}
+        <div className="flex-1 min-w-0 flex flex-col p-4 gap-5">
+          {/* Phase 5 Operational Messaging & Handoffs View */}
+          <OperationalThreadView
+            jobId={job.id}
+            assignedAgentIds={job.assignedAgentIds}
+          />
+
           {/* Execution Trace */}
-          <div className="p-4 pb-8">
+          <div className="pb-8">
             <div className="font-mono-code text-[11px] tracking-wider text-[#5C646E] mb-2.5">
               RUNTIME EVENTS &amp; TRACES · {job.id}
             </div>

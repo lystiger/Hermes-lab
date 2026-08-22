@@ -27,6 +27,7 @@ interface ConsoleUIState {
   // Reactive Runtime State
   agentRuntimeStatuses: Record<string, AgentRuntimeState>;
   jobRuntimeVersion: number;
+  messageRuntimeVersion: number;
 
   // Client UI Preferences & Selection
   selectedAgentId: string;
@@ -73,6 +74,7 @@ export const useConsoleStore = create<ConsoleUIState>((set, get) => ({
   backendHealth: null,
   agentRuntimeStatuses: {},
   jobRuntimeVersion: 0,
+  messageRuntimeVersion: 0,
   selectedAgentId: 'claude',
   activeModalJobId: null,
   activeDossierAgent: null,
@@ -155,14 +157,17 @@ export const useConsoleStore = create<ConsoleUIState>((set, get) => ({
         }
       }
 
-      // 3. Reactively bump job runtime version on job/phase events
+      // 3. Reactively bump job/message runtime versions on runtime events
       const isJobEvent = event.kind.startsWith('job.') || event.kind.startsWith('phase.');
       const nextJobVersion = isJobEvent ? state.jobRuntimeVersion + 1 : state.jobRuntimeVersion;
+      const isMessageEvent = event.kind.startsWith('message.') || event.kind.startsWith('thread.') || event.kind.startsWith('artifact.');
+      const nextMessageVersion = isMessageEvent ? state.messageRuntimeVersion + 1 : state.messageRuntimeVersion;
 
       return {
         allEvents: nextEvents,
         agentRuntimeStatuses: nextStatuses,
-        jobRuntimeVersion: nextJobVersion
+        jobRuntimeVersion: nextJobVersion,
+        messageRuntimeVersion: nextMessageVersion
       };
     }),
 

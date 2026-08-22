@@ -11,7 +11,10 @@ import {
   SettingItem,
   TraceEvent,
   OverviewTelemetry,
-  HealthStatus
+  HealthStatus,
+  Thread,
+  Message,
+  MailboxEntry
 } from '../types';
 import { resolveActorPresentation } from '../actors';
 
@@ -434,4 +437,161 @@ export class HttpLysStackApi implements LysStackApi {
     console.warn(`[HttpLysStackApi] Action '${action}' on job ${jobId} is not available in real control-plane mode yet.`);
     return false;
   }
+  // --------------------------------------------------------------------------
+  // Phase 5 Operational Messaging & Threads
+  // --------------------------------------------------------------------------
+
+  async getThreads(jobId?: string, participant?: string, limit?: number): Promise<Thread[]> {
+    const params = new URLSearchParams();
+    if (jobId) params.set("jobId", jobId);
+    if (participant) params.set("participant", participant);
+    if (limit) params.set("limit", String(limit));
+
+    const res = await fetch(`${this.baseUrl}/threads?${params.toString()}`);
+    if (!res.ok) {
+      throw new Error(`LysStack /threads returned HTTP ${res.status}: ${res.statusText}`);
+    }
+    const data: any[] = await res.json();
+    return data.map((t) => ({
+      id: t.id,
+      jobId: t.jobId,
+      title: t.title,
+      participants: (t.participants || []).map((p: any) => ({
+        id: p.id,
+        kind: p.kind,
+        displayName: p.displayName || resolveActorPresentation(p.id).displayName,
+        accentColor: p.accentColor || resolveActorPresentation(p.id).accentColor
+      })),
+      createdAt: t.createdAt,
+      updatedAt: t.updatedAt
+    }));
+  }
+
+  async getThread(threadId: string): Promise<Thread | null> {
+    const res = await fetch(`${this.baseUrl}/threads/${encodeURIComponent(threadId)}`);
+    if (!res.ok) {
+      if (res.status === 404) return null;
+      throw new Error(`LysStack /threads/${threadId} returned HTTP ${res.status}: ${res.statusText}`);
+    }
+    const t = await res.json();
+    return {
+      id: t.id,
+      jobId: t.jobId,
+      title: t.title,
+      participants: (t.participants || []).map((p: any) => ({
+        id: p.id,
+        kind: p.kind,
+        displayName: p.displayName || resolveActorPresentation(p.id).displayName,
+        accentColor: p.accentColor || resolveActorPresentation(p.id).accentColor
+      })),
+      createdAt: t.createdAt,
+      updatedAt: t.updatedAt
+    };
+  }
+
+  async getMessages(threadId: string, limit?: number, after?: string): Promise<Message[]> {
+    const params = new URLSearchParams();
+    if (limit) params.set("limit", String(limit));
+    if (after) params.set("after", after);
+
+    const res = await fetch(`${this.baseUrl}/threads/${encodeURIComponent(threadId)}/messages?${params.toString()}`);
+    if (!res.ok) {
+      throw new Error(`LysStack /threads/${threadId}/messages returned HTTP ${res.status}: ${res.statusText}`);
+    }
+    const data: any[] = await res.json();
+    return data.map((m) => {
+      const fromActor = resolveActorPresentation(m.from?.id || "unknown");
+      return {
+        id: m.id,
+        threadId: m.threadId,
+        from: {
+          id: m.from?.id,
+          kind: m.from?.kind || "agent",
+          displayName: m.from?.displayName || fromActor.displayName,
+          accentColor: m.from?.accentColor || fromActor.accentColor
+        },
+        to: (m.to || []).map((to: any) => {
+          const toActor = resolveActorPresentation(to.id || "unknown");
+          return {
+            id: to.id,
+            kind: to.kind || "agent",
+            displayName: to.displayName || toActor.displayName,
+            accentColor: to.accentColor || toActor.accentColor
+          };
+        }),
+        kind: m.kind,
+        text: m.text,
+        intent: m.intent,
+        jobId: m.jobId,
+        phaseId: m.phaseId,
+        artifactRefs: m.artifactRefs || [],
+        metadata: m.metadata || {},
+        createdAt: m.createdAt
+      };
+    });
+  }
+
+  async getAgentInbox(agentId: string, state?: string, limit?: number): Promise<MailboxEntry[]> {
+    const params = new URLSearchParams();
+    if (state) params.set("state", state);
+    if (limit) params.set("limit", String(limit));
+
+    const res = await fetch(`${this.baseUrl}/agents/${encodeURIComponent(agentId)}/inbox?${params.toString()}`);
+    if (!res.ok) {
+      throw new Error(`LysStack /agents/${agentId}/inbox returned HTTP ${res.status}: ${res.statusText}`);
+    }
+    const data: any[] = await res.json();
+    return data.map((e) => ({
+      messageId: e.messageId,
+      recipientId: e.recipientId,
+      state: e.state,
+      receivedAt: e.receivedAt,
+      acknowledgedAt: e.acknowledgedAt,
+      message: e.message
+    }));
+  }
+
+  async sendMessage(threadId: string, text: string, to?: string[], kind?: string, intent?: string): Promise<Message> {
+    const res = await fetch(`${this.baseUrl}/messages`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        threadId,
+        text,
+        to,
+        kind: kind || "operator",
+        intent
+      })
+    });
+    if (!res.ok) {
+      throw new Error(`LysStack POST /messages returned HTTP ${res.status}: ${res.statusText}`);
+    }
+    const m = await res.json();
+    const fromActor = resolveActorPresentation(m.from?.id || "operator");
+    return {
+      id: m.id,
+      threadId: m.threadId,
+      from: {
+        id: m.from?.id,
+        kind: m.from?.kind || "operator",
+        displayName: m.from?.displayName || fromActor.displayName,
+        accentColor: m.from?.accentColor || fromActor.accentColor
+      },
+      to: (m.to || []).map((to: any) => ({
+        id: to.id,
+        kind: to.kind || "agent",
+        displayName: to.displayName || resolveActorPresentation(to.id).displayName,
+        accentColor: to.accentColor || resolveActorPresentation(to.id).accentColor
+      })),
+      kind: m.kind,
+      text: m.text,
+      intent: m.intent,
+      jobId: m.jobId,
+      phaseId: m.phaseId,
+      artifactRefs: m.artifactRefs || [],
+      metadata: m.metadata || {},
+      createdAt: m.createdAt
+    };
+  }
 }
+

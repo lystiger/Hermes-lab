@@ -244,4 +244,111 @@ describe('HttpLysStackApi Contract Implementation', () => {
     sub.unsubscribe();
     expect(closed).toBe(true);
   });
+
+  it("fetches operational threads and maps participants", async () => {
+    const mockThreads = [
+      {
+        id: "thread_job_run_1",
+        jobId: "run_1",
+        title: "Sprint 1",
+        participants: [{ id: "gemini", kind: "agent", displayName: "Gemini" }],
+        createdAt: "2026-08-22T10:00:00Z",
+        updatedAt: "2026-08-22T10:05:00Z"
+      }
+    ];
+
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => mockThreads
+    } as any);
+
+    const threads = await api.getThreads("run_1");
+    expect(global.fetch).toHaveBeenCalledWith("http://localhost:8000/threads?jobId=run_1");
+    expect(threads.length).toBe(1);
+    expect(threads[0].id).toBe("thread_job_run_1");
+    expect(threads[0].participants[0].displayName).toBe("Gemini");
+  });
+
+  it("fetches operational messages for a thread", async () => {
+    const mockMessages = [
+      {
+        id: "msg_1",
+        threadId: "thread_job_run_1",
+        from: { id: "gemini", kind: "agent", displayName: "Gemini" },
+        to: [{ id: "claude", kind: "agent", displayName: "Claude" }],
+        kind: "handoff",
+        intent: "review_request",
+        text: "BUILD completed.",
+        artifactRefs: [{ id: "art_1", type: "git_commit", label: "commit 1", ref: "8a21fc9" }],
+        createdAt: "2026-08-22T10:01:00Z"
+      }
+    ];
+
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => mockMessages
+    } as any);
+
+    const messages = await api.getMessages("thread_job_run_1");
+    expect(global.fetch).toHaveBeenCalledWith("http://localhost:8000/threads/thread_job_run_1/messages?");
+    expect(messages.length).toBe(1);
+    expect(messages[0].text).toBe("BUILD completed.");
+    expect(messages[0].intent).toBe("review_request");
+    expect(messages[0].artifactRefs?.[0].ref).toBe("8a21fc9");
+  });
+
+  it("sends operator message to control plane", async () => {
+    const mockCreated = {
+      id: "msg_op_1",
+      threadId: "thread_job_run_1",
+      from: { id: "operator", kind: "operator", displayName: "Operator" },
+      to: [{ id: "claude", kind: "agent", displayName: "Claude" }],
+      kind: "operator",
+      text: "Focus on cleanup.",
+      createdAt: "2026-08-22T10:02:00Z"
+    };
+
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => mockCreated
+    } as any);
+
+    const res = await api.sendMessage("thread_job_run_1", "Focus on cleanup.", ["claude"], "operator");
+    expect(global.fetch).toHaveBeenCalledWith(
+      "http://localhost:8000/messages",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({
+          threadId: "thread_job_run_1",
+          text: "Focus on cleanup.",
+          to: ["claude"],
+          kind: "operator",
+          intent: undefined
+        })
+      })
+    );
+    expect(res.id).toBe("msg_op_1");
+    expect(res.from.displayName).toBe("Operator");
+  });
+
+  it("fetches agent inbox mailbox entries", async () => {
+    const mockInbox = [
+      {
+        messageId: "msg_1",
+        recipientId: "claude",
+        state: "DELIVERED",
+        receivedAt: "2026-08-22T10:01:00Z"
+      }
+    ];
+
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => mockInbox
+    } as any);
+
+    const inbox = await api.getAgentInbox("claude");
+    expect(global.fetch).toHaveBeenCalledWith("http://localhost:8000/agents/claude/inbox?");
+    expect(inbox.length).toBe(1);
+    expect(inbox[0].recipientId).toBe("claude");
+  });
 });

@@ -1,13 +1,35 @@
-export type AgentName = 'Gemini' | 'Claude' | 'Codex' | 'Elysia';
+// Generic Agent Identity (No closed unions)
+export type AgentId = string;
 
-export type JobStatus = 'QUEUED' | 'CLAIMED' | 'RUNNING' | 'VERIFYING' | 'BLOCKED' | 'FAILED' | 'COMPLETE' | 'COMPLETED' | 'CANCELLED';
+export type AgentStatus = 'RUNNING' | 'WAITING' | 'IDLE' | 'OFFLINE' | 'BUSY' | 'ERROR';
 
 export type Priority = 'P0' | 'P1' | 'P2' | 'P3';
 
-export type PhaseName = 'BUILD' | 'HARDEN' | 'VERIFY' | 'COMPLETE';
+export type JobStatus = 'QUEUED' | 'CLAIMED' | 'RUNNING' | 'VERIFYING' | 'BLOCKED' | 'FAILED' | 'COMPLETE' | 'COMPLETED' | 'CANCELLED';
+
+export type PhaseName = 'BUILD' | 'HARDEN' | 'VERIFY' | 'COMPLETE' | 'REVIEW' | 'CUSTOM';
+
+export type ActorKind = 'agent' | 'system' | 'runtime' | 'tool';
+
+export interface ActorRef {
+  id: string;
+  kind: ActorKind;
+  displayName: string;
+  accentColor?: string;
+}
+
+export interface AgentPresentation {
+  displayName: string;
+  avatarUrl?: string;
+  accentColor?: string;
+  animationProfile?: 'quick' | 'relaxed' | 'slow' | 'steady' | 'none';
+  sigil?: string;
+  code?: string;
+  badge?: string;
+}
 
 export interface ActivityItem {
-  op: 'READ' | 'WRITE' | 'RUN' | 'STAGE' | 'NOTE' | 'IDLE';
+  op: 'READ' | 'WRITE' | 'RUN' | 'STAGE' | 'NOTE' | 'IDLE' | 'CUSTOM';
   path: string;
   meta: string;
 }
@@ -35,20 +57,26 @@ export interface AllowanceItem {
   tag: 'EXACT' | 'EST' | 'N/A';
 }
 
-export interface AgentData {
-  id: string;
-  name: AgentName;
-  model: string;
+export interface AgentSummary {
+  id: AgentId;
+  displayName: string;
   provider: string;
+  model: string;
   role: string;
-  status: 'RUNNING' | 'WAITING' | 'IDLE' | 'OFFLINE';
-  phase: PhaseName;
-  task: string;
-  tool: string;
-  color: string;
-  ctxUsed: string;
-  ctxMax: string;
-  ctxPct: string;
+  capabilities: string[];
+  status: AgentStatus;
+  phase?: PhaseName;
+  presentation?: AgentPresentation;
+  currentTask?: string;
+  activeTool?: string;
+  contextPct?: string;
+  contextUsed?: string;
+  contextMax?: string;
+  queueDepth?: number;
+  sessionTokens?: string;
+}
+
+export interface AgentDetail extends AgentSummary {
   input: string;
   output: string;
   cached: string;
@@ -56,7 +84,6 @@ export interface AgentData {
   inPct: string;
   outPct: string;
   cachePct: string;
-  avatarUrl: string;
   activity: ActivityItem[];
   metrics: MetricItem[];
   runs: RunHistoryItem[];
@@ -64,37 +91,26 @@ export interface AgentData {
   capacity: string;
   reset: string;
   resetNote: string;
-  crawlCode: string;
-  frameLog: string;
-  traceId: string;
-  depth: number;
+  crawlCode?: string;
+  frameLog?: string;
+  traceId?: string;
 }
 
-export interface JobItem {
+export interface Job {
   id: string;
-  prio: Priority;
-  task: string;
-  repo: string;
+  priority: Priority;
+  title: string;
+  repository: string;
   branch?: string;
-  chain: AgentName[];
-  tokens: string;
-  time: string;
   status: JobStatus;
-  started?: string;
-  elapsed?: string;
+  assignedAgentIds: AgentId[];
+  estimatedTokens?: string;
+  estimatedTime?: string;
+  createdAt?: string;
+  startedAt?: string;
+  completedAt?: string;
   budget?: string;
   policy?: string;
-  testLog?: string;
-}
-
-export interface PipelineStep {
-  id: string;
-  phase: PhaseName;
-  agent: AgentName | '—';
-  task: string;
-  meta: string;
-  state: 'COMPLETE' | 'RUNNING' | 'QUEUED' | 'CLAIMED' | 'BLOCKED';
-  note?: string;
 }
 
 export interface ChangedFile {
@@ -102,21 +118,67 @@ export interface ChangedFile {
   path: string;
   add: string;
   del: string;
-  by: AgentName;
+  byActorId: string;
+  byDisplayName: string;
+}
+
+export interface JobRetryItem {
+  attempt: number;
+  phase: PhaseName;
+  status: 'passed' | 'failed';
+  note?: string;
+}
+
+export interface JobTokenBreakdown {
+  agentId: AgentId;
+  agentName: string;
+  phase: PhaseName;
+  tokensFormatted: string;
+  color?: string;
+  percentage?: number;
+}
+
+export interface JobDetail extends Job {
+  executionGraph: PipelineStep[];
+  changedFiles: ChangedFile[];
+  testSummary?: {
+    passed: number;
+    skipped: number;
+    failed: number;
+    duration: string;
+    rawLog: string;
+  };
+  retryHistory: JobRetryItem[];
+  retriesUsed: number;
+  maxRetries: number;
+  tokenBreakdown: JobTokenBreakdown[];
+}
+
+export interface PipelineStep {
+  id: string;
+  phase: PhaseName;
+  agentId?: AgentId;
+  agentName?: string;
+  task: string;
+  meta: string;
+  state: 'COMPLETE' | 'RUNNING' | 'QUEUED' | 'CLAIMED' | 'BLOCKED' | 'idle';
+  note?: string;
+  mark?: string;
 }
 
 export interface TraceEvent {
   id: string;
   ts: string;
   rawTs: number;
-  agent: string;
+  source: ActorRef;
   kind: string;
   detail: string;
   dur: string;
-  job: string;
+  jobId?: string;
 }
 
 export interface ProviderQuota {
+  id: string;
   name: string;
   color: string;
   pct: string;
@@ -145,4 +207,44 @@ export interface SettingItem {
   label: string;
   value: string;
   color?: string;
+}
+
+export interface OverviewTelemetry {
+  runningJobsCount: number;
+  queuedJobsCount: number;
+  blockedJobsCount: number;
+  failed24hCount: number;
+  tokensToday: string;
+  estSpendToday: string;
+  sprintBudgetUsedPct: number;
+}
+
+// Future-Proof Messaging Contracts (Contracts Only - No A2A implementation yet)
+export type ArtifactType = 'git_commit' | 'git_diff' | 'file' | 'test_report' | 'log' | 'generic';
+
+export interface ArtifactRef {
+  id: string;
+  type: ArtifactType;
+  ref: string;
+  label?: string;
+}
+
+export interface Message {
+  id: string;
+  threadId: string;
+  from: ActorRef;
+  to: ActorRef[];
+  text: string;
+  intent?: string;
+  jobId?: string;
+  artifactRefs?: ArtifactRef[];
+  createdAt: string;
+}
+
+export interface Thread {
+  id: string;
+  jobId?: string;
+  participants: ActorRef[];
+  createdAt: string;
+  updatedAt: string;
 }

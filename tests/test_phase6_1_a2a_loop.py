@@ -1089,5 +1089,111 @@ sys.exit(0 if success else 1)
                 self.assertEqual(handoff_msg["from"]["id"], "gemini")
 
 
+
+class TestPhase61HandoffPhaseBoundaryRegression(unittest.TestCase):
+    def test_handoff_review_request_not_invoked_by_schedule_a2a_turns_and_runs_in_normal_phase(self):
+        """
+        Regression Test:
+        Given Gemini BUILD -> handoff/review_request -> Claude,
+        assert Claude is NOT invoked by schedule_a2a_turns during Phase 1;
+        Claude executes exactly once when the normal phase loop reaches HARDEN (Phase 2).
+        """
+        mod = _get_runner_module()
+        HermesSprintRunner = mod.HermesSprintRunner
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            tmp_root = Path(tmp_dir)
+            target_repo = tmp_root / "repo"
+            target_repo.mkdir()
+            subprocess.run(["git", "init", "-b", "main"], cwd=target_repo, check=True, capture_output=True)
+            subprocess.run(["git", "config", "user.name", "Test"], cwd=target_repo, check=True)
+            subprocess.run(["git", "config", "user.email", "test@example.com"], cwd=target_repo, check=True)
+            (target_repo / "README.md").write_text("# Test\n", encoding="utf-8")
+            subprocess.run(["git", "add", "README.md"], cwd=target_repo, check=True)
+            subprocess.run(["git", "commit", "-m", "initial commit"], cwd=target_repo, check=True)
+
+            p1 = tmp_root / "p1.md"
+            p1.write_text("Builder prompt", encoding="utf-8")
+            p2 = tmp_root / "p2.md"
+            p2.write_text("Hardener prompt", encoding="utf-8")
+
+            sprint_spec = {
+                "sprint_id": "test-handoff-regression",
+                "name": "Phase 6.1 Handoff Regression Sprint",
+                "target_repo": str(target_repo),
+                "target_branch": "hermes/test-reg/integration",
+                "worktree_root": str(tmp_root / "worktrees"),
+                "runs_root": str(tmp_root / "runs"),
+                "phases": [
+                    {
+                        "name": "01_builder",
+                        "role": "builder",
+                        "agent": "gemini",
+                        "worktree_dir": "wt_builder",
+                        "branch": "test-reg/builder",
+                        "prompt_file": str(p1),
+                        "expected_handoff": "HANDOFF_BUILD.md",
+                        "commit_message": "feat: build",
+                    },
+                    {
+                        "name": "02_hardener",
+                        "role": "hardener",
+                        "agent": "claude",
+                        "worktree_dir": "wt_hardener",
+                        "branch": "test-reg/hardener",
+                        "prompt_file": str(p2),
+                        "expected_handoff": "HANDOFF_HARDEN.md",
+                        "commit_message": "fix: harden",
+                    }
+                ],
+                "verification": [
+                    {
+                        "name": "check",
+                        "command": [sys.executable, "-c", "print('OK')"],
+                        "timeout_seconds": 10
+                    }
+                ]
+            }
+
+            spec_file = tmp_root / "spec.json"
+            spec_file.write_text(json.dumps(sprint_spec, indent=2), encoding="utf-8")
+
+            runner = HermesSprintRunner(spec_path=spec_file, skip_agent_exec=False)
+            claude_invocations = []
+            gemini_invocations = []
+
+            def simulated_agent(phase, wt_dir, mailbox_messages=None, active_a2a_turn=None):
+                agent_name = phase["agent"]
+                if agent_name == "claude":
+                    claude_invocations.append({
+                        "phase": phase["name"],
+                        "is_a2a_turn": active_a2a_turn is not None,
+                    })
+                elif agent_name == "gemini":
+                    gemini_invocations.append({
+                        "phase": phase["name"],
+                        "is_a2a_turn": active_a2a_turn is not None,
+                    })
+
+                (wt_dir / f"file_{agent_name}.py").write_text("# code\n", encoding="utf-8")
+                (wt_dir / phase["expected_handoff"]).write_text(f"# Handoff for {phase['name']}\n", encoding="utf-8")
+                return SimpleNamespace(runtime_metadata={})
+
+            runner.execute_agent = simulated_agent
+            success = runner.execute()
+
+            self.assertTrue(success)
+            # Gemini executed exactly once during Phase 1
+            self.assertEqual(len(gemini_invocations), 1)
+            self.assertEqual(gemini_invocations[0]["phase"], "01_builder")
+            self.assertFalse(gemini_invocations[0]["is_a2a_turn"])
+
+            # Claude was NOT invoked by schedule_a2a_turns during Phase 1
+            # Claude executed exactly once when the normal phase loop reached 02_hardener (HARDEN)
+            self.assertEqual(len(claude_invocations), 1)
+            self.assertEqual(claude_invocations[0]["phase"], "02_hardener")
+            self.assertFalse(claude_invocations[0]["is_a2a_turn"])
+
+
 if __name__ == "__main__":
     unittest.main()

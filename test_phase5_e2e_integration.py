@@ -189,8 +189,7 @@ def simulated_agent(phase, wt_dir, mailbox_messages=None):
         current_agent=agent_name,
         mailbox_messages=mailbox_messages,
     )
-    if agent_name not in captured_prompts or mailbox_messages:
-        captured_prompts[agent_name] = effective_prompt
+    captured_prompts[agent_name] = effective_prompt
 
     # Simulate modified code and handoff file
     (wt_dir / f"file_{{agent_name}}.py").write_text("# code from " + agent_name + "\\n", encoding="utf-8")

@@ -1457,10 +1457,14 @@ class HermesSprintRunner:
 
                 kind = msg.get("kind")
                 intent = msg.get("intent")
-                # Schedulable: explicitly schedulable request intents or A2A non-terminal messages
+                # Handoffs are phase-transition boundaries for the normal phase loop, not inline A2A turns
+                if kind == "handoff":
+                    continue
+
+                # Schedulable: A2A conversational messages or request intents, excluding terminal intents
                 is_schedulable = (
-                    intent in SCHEDULABLE_INTENTS
-                    or (kind == "a2a" and intent not in TERMINAL_INTENTS)
+                    (kind == "a2a" or intent in SCHEDULABLE_INTENTS)
+                    and (intent not in TERMINAL_INTENTS)
                 )
 
                 if is_schedulable:

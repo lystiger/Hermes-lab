@@ -101,6 +101,11 @@ class HermesSprintRunner:
         self.summary_file = self.run_dir / "run_summary.json"
         self.job_id = os.environ.get("HERMES_JOB_ID") or f"run_{timestamp}_{self.sprint_id}"
         self._backend_cache = {}
+        self.thread_id = f"thread_job_{self.job_id}"
+        self.local_messages = []
+        self.local_artifacts = []
+        self.messages_file = self.run_dir / "messages.jsonl"
+        self.artifacts_file = self.run_dir / "artifacts.json" 
         
         self.logger = self._setup_logging()
         self.run_summary = {
@@ -250,10 +255,107 @@ class HermesSprintRunner:
     def _invalid_context(message):
         raise SprintRunnerError("FAILED_INVALID_CONTEXT_SPEC", message)
 
-    def build_effective_prompt(self, base_prompt):
-        if not self.context_bundle:
-            return base_prompt
-        return f"{base_prompt}\n\n{self.context_bundle}"
+    def _record_artifact(self, artifact_dict):
+        self.local_artifacts.append(artifact_dict)
+        try:
+            self.artifacts_file.parent.mkdir(parents=True, exist_ok=True)
+            with open(self.artifacts_file, "w", encoding="utf-8") as f:
+                json.dump(self.local_artifacts, f, indent=2)
+        except Exception as exc:
+            self.logger.warning("Failed writing artifacts.json: %s", exc)
+
+        if default_publisher:
+            default_publisher.publish_artifact(artifact_dict)
+        return artifact_dict
+
+    def _record_message(
+        self,
+        from_actor,
+        to_actors,
+        kind,
+        text,
+        intent=None,
+        phase_id=None,
+        artifact_refs=None,
+        metadata=None,
+    ):
+        now_iso = datetime.now().isoformat()
+        ts_ms = int(datetime.now().timestamp() * 1000)
+        msg_id = f"msg_{ts_ms}_{len(self.local_messages) + 1:04d}"
+
+        msg_dict = {
+            "id": msg_id,
+            "threadId": self.thread_id,
+            "from": from_actor,
+            "to": to_actors,
+            "kind": kind,
+            "text": text,
+            "intent": intent,
+            "jobId": self.job_id,
+            "phaseId": phase_id,
+            "artifactRefs": artifact_refs or [],
+            "metadata": metadata or {},
+            "createdAt": now_iso,
+        }
+
+        self.local_messages.append(msg_dict)
+        try:
+            self.messages_file.parent.mkdir(parents=True, exist_ok=True)
+            with open(self.messages_file, "a", encoding="utf-8") as f:
+                f.write(json.dumps(msg_dict) + "\n")
+        except Exception as exc:
+            self.logger.warning("Failed appending to messages.jsonl: %s", exc)
+
+        if default_publisher:
+            default_publisher.publish_message(
+                thread_id=self.thread_id,
+                from_actor=from_actor,
+                to_actors=to_actors,
+                kind=kind,
+                text=text,
+                intent=intent,
+                job_id=self.job_id,
+                phase_id=phase_id,
+                artifact_refs=artifact_refs,
+                metadata=metadata,
+            )
+        return msg_dict
+
+    def build_operational_thread_section(self, current_agent=None):
+        if not self.local_messages:
+            return ""
+
+        sections = ["--- LYSSTACK OPERATIONAL THREAD ---"]
+        for msg in self.local_messages:
+            from_id = msg.get("from", {}).get("id", "unknown")
+            kind = msg.get("kind", "status")
+            intent = msg.get("intent")
+            text = msg.get("text", "")
+            artifacts = msg.get("artifactRefs", [])
+
+            header = f"[from: {from_id}]\nkind: {kind}"
+            if intent:
+                header += f"\nintent: {intent}"
+            body = f"{header}\n\n{text}"
+            if artifacts:
+                art_lines = ["\nArtifacts:"]
+                for art in artifacts:
+                    art_lines.append(f"- {art.get('type', 'generic')}: {art.get('ref', '')} ({art.get('label', '')})")
+                body += "\n".join(art_lines)
+
+            sections.append(body)
+
+        sections.append("--- END THREAD ---")
+        return "\n\n".join(sections)
+
+    def build_effective_prompt(self, base_prompt, current_agent=None):
+        parts = [base_prompt]
+        if self.context_bundle:
+            parts.append(self.context_bundle)
+        thread_section = self.build_operational_thread_section(current_agent)
+        if thread_section:
+            parts.append(thread_section)
+        return "\n\n".join(parts)
 
     def _load_verification_spec(self):
         verification = self.spec.get("verification", [])
@@ -643,7 +745,8 @@ class HermesSprintRunner:
             phase=phase,
             worktree=wt_dir,
             prompt=self.build_effective_prompt(
-                prompt_file.read_text(encoding="utf-8").strip()
+                prompt_file.read_text(encoding="utf-8").strip(),
+                current_agent=agent_name,
             ),
             options=phase.get("cmd_options", {}),
             stdout_file=self.run_dir / f"{phase['name']}_{agent_name}_stdout.log",
@@ -874,6 +977,68 @@ class HermesSprintRunner:
             }
             self.run_summary["phases"].append(phase_result)
 
+            # Phase 5 Operational Messaging & Artifact Registration
+            phases_list = self.spec.get("phases", [])
+            next_agent = phases_list[phase_index]["agent"] if phase_index < len(phases_list) else "hermes_runner"
+            intent = (
+                "review_request" if role == "builder" else (
+                    "verification_request" if role == "hardener" else (
+                        "verification_result" if role == "verifier" else "handoff"
+                    )
+                )
+            )
+
+            msg_artifacts = []
+            if commit_sha:
+                art_commit = {
+                    "id": f"art_commit_{phase_index}",
+                    "type": "git_commit",
+                    "label": f"{phase_name} commit ({commit_sha[:7]})",
+                    "ref": commit_sha,
+                    "jobId": self.job_id,
+                    "phaseId": f"phase-{phase_index}-{phase_name}",
+                }
+                self._record_artifact(art_commit)
+                msg_artifacts.append(art_commit)
+
+            handoff_rel = f"handoffs/{phase_index:02d}_{self._safe_filename_component(role)}_{self._safe_filename_component(agent)}.md"
+            art_handoff = {
+                "id": f"art_handoff_{phase_index}",
+                "type": "handoff",
+                "label": f"{phase_name} handoff ({expected_handoff})",
+                "ref": handoff_rel,
+                "jobId": self.job_id,
+                "phaseId": f"phase-{phase_index}-{phase_name}",
+            }
+            self._record_artifact(art_handoff)
+            msg_artifacts.append(art_handoff)
+
+            if role == "builder":
+                msg_text = f"{phase_name} ({role}) implementation completed. Commit {commit_sha[:7] if commit_sha else 'n/a'}. {len(changed_files)} files modified. Please review."
+            elif role == "hardener":
+                msg_text = f"{phase_name} ({role}) review and hardening completed. Commit {commit_sha[:7] if commit_sha else 'n/a'}. Ready for verification."
+            elif role == "verifier":
+                msg_text = f"{phase_name} ({role}) verification completed."
+            else:
+                msg_text = f"{phase_name} completed successfully."
+
+            from_actor = {"id": agent, "kind": "agent", "displayName": agent.capitalize()}
+            to_actor = {
+                "id": next_agent,
+                "kind": "agent" if any(p.get("agent") == next_agent for p in phases_list) else "runtime",
+                "displayName": next_agent.capitalize(),
+            }
+
+            self._record_message(
+                from_actor=from_actor,
+                to_actors=[to_actor],
+                kind="handoff" if role != "verifier" else "verification_result",
+                text=msg_text,
+                intent=intent,
+                phase_id=f"phase-{phase_index}-{phase_name}",
+                artifact_refs=msg_artifacts,
+            )
+
             if default_publisher:
                 default_publisher.publish(
                     source_id=agent,
@@ -891,6 +1056,17 @@ class HermesSprintRunner:
                 )
         except Exception as exc:
             err_msg = getattr(exc, "message", str(exc))
+            self._record_message(
+                from_actor={"id": agent, "kind": "agent", "displayName": agent.capitalize()},
+                to_actors=[
+                    {"id": "hermes_runner", "kind": "runtime", "displayName": "Hermes Runner"},
+                    {"id": "lysstack", "kind": "runtime", "displayName": "LysStack"},
+                ],
+                kind="warning",
+                intent="phase_failure",
+                text=f"Phase {phase_name} ({agent}) failed: {err_msg}",
+                phase_id=f"phase-{phase_index}-{phase_name}",
+            )
             if default_publisher:
                 default_publisher.publish(
                     source_id=agent,
@@ -1035,6 +1211,51 @@ class HermesSprintRunner:
         self.run_summary["integration_commit"] = sha_res.stdout.strip()
         self.run_summary["status"] = "READY_FOR_REVIEW"
         self.run_summary["end_time"] = datetime.now().isoformat()
+
+        # Record final artifacts & verification result message (Phase 5)
+        integration_commit = self.run_summary["integration_commit"]
+        art_integration = {
+            "id": "art_integration_commit",
+            "type": "git_commit",
+            "label": f"Integration Commit ({integration_commit[:7]})",
+            "ref": integration_commit,
+            "jobId": self.job_id,
+        }
+        self._record_artifact(art_integration)
+
+        art_summary = {
+            "id": "art_summary",
+            "type": "run_summary",
+            "label": "Run Summary Report",
+            "ref": str(self.summary_file),
+            "jobId": self.job_id,
+        }
+        self._record_artifact(art_summary)
+
+        art_log = {
+            "id": "art_log",
+            "type": "log",
+            "label": "Runner Execution Log",
+            "ref": str(self.log_file),
+            "jobId": self.job_id,
+        }
+        self._record_artifact(art_log)
+
+        verifier_agent = self.spec.get("phases", [])[-1]["agent"] if self.spec.get("phases") else "hermes_runner"
+        verification_passed = len([v for v in self.run_summary.get("verification_results", []) if v.get("status") == "PASSED"])
+        ver_text = f"Verification passed: {verification_passed} checks passed, 0 failed." if verification_passed else "Verification completed successfully."
+        
+        self._record_message(
+            from_actor={"id": verifier_agent, "kind": "agent", "displayName": verifier_agent.capitalize()},
+            to_actors=[
+                {"id": "lysstack", "kind": "runtime", "displayName": "LysStack"},
+                {"id": "hermes_runner", "kind": "runtime", "displayName": "Hermes Runner"},
+            ],
+            kind="verification_result",
+            intent="verification_result",
+            text=ver_text,
+            artifact_refs=[art_integration, art_summary],
+        )
         
         self.logger.info("\n==========================================")
         self.logger.info(f"Sprint {self.sprint_id} Workflow Complete!")
@@ -1118,7 +1339,20 @@ class HermesSprintRunner:
         return destination
 
     def execute(self):
+        participants = [
+            {"id": p["agent"], "kind": "agent", "displayName": p["agent"].capitalize()}
+            for p in self.spec.get("phases", [])
+        ]
+        participants.append({"id": "hermes_runner", "kind": "runtime", "displayName": "Hermes Runner"})
+        participants.append({"id": "lysstack", "kind": "runtime", "displayName": "LysStack"})
+
         if default_publisher:
+            default_publisher.publish_thread(
+                self.thread_id,
+                job_id=self.job_id,
+                title=self.spec.get("name", f"Hermes Sprint {self.sprint_id}"),
+                participants=participants,
+            )
             default_publisher.publish(
                 source_id="hermes_runner",
                 source_kind="runtime",

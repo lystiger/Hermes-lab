@@ -14,6 +14,10 @@ class AgentRegistry:
     def get(self, name):
         adapter_type = self._adapters.get(name)
         if adapter_type is None:
+            alias_map = {"gemini": "antigravity", "agy": "antigravity"}
+            if name in alias_map:
+                adapter_type = self._adapters.get(alias_map[name])
+        if adapter_type is None:
             raise SprintRunnerError("FAILED_UNKNOWN_AGENT", f"Unknown agent type: {name}")
         return adapter_type()
 

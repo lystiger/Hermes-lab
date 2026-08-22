@@ -5,7 +5,7 @@ import sys
 from pathlib import Path
 import urllib.error
 import urllib.request
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional, Union
 
 ROOT_DIR = Path(__file__).resolve().parent.parent.parent
 if str(ROOT_DIR) not in sys.path:
@@ -18,8 +18,8 @@ logger = logging.getLogger("hermes.event_publisher")
 
 class RuntimeEventPublisher:
     """
-    Runner-side lightweight HTTP publisher that streams sprint execution telemetry
-    to the LysStack control-plane API process (POST /internal/events).
+    Runner-side lightweight HTTP publisher that streams sprint execution telemetry,
+    messages, threads, and artifacts to the LysStack control-plane API process.
 
     Failure isolation:
     If the control plane URL is not configured or unavailable, execution continues unaffected.
@@ -29,6 +29,39 @@ class RuntimeEventPublisher:
         url = control_url or os.environ.get("LYSSTACK_CONTROL_URL")
         self.control_url = url.rstrip("/") if url else None
         self.timeout = timeout
+
+    def _post_json(self, endpoint_path: str, payload: Dict[str, Any]) -> bool:
+        if not self.control_url:
+            return False
+
+        endpoint = f"{self.control_url}{endpoint_path}"
+        try:
+            req_data = json.dumps(payload).encode("utf-8")
+            req = urllib.request.Request(
+                endpoint,
+                data=req_data,
+                headers={"Content-Type": "application/json"},
+                method="POST",
+            )
+            with urllib.request.urlopen(req, timeout=self.timeout) as resp:
+                if resp.status in {200, 201, 202}:
+                    return True
+                logger.warning(
+                    "Control plane returned unexpected status %s for %s",
+                    resp.status,
+                    endpoint_path,
+                )
+                return False
+        except urllib.error.URLError as err:
+            logger.warning(
+                "Telemetry delivery to %s skipped (control API unreachable): %s",
+                endpoint,
+                err.reason,
+            )
+            return False
+        except Exception as exc:
+            logger.warning("Telemetry delivery failed: %s", exc)
+            return False
 
     def publish(
         self,
@@ -42,10 +75,7 @@ class RuntimeEventPublisher:
         metadata: Optional[Dict[str, Any]] = None,
         accent_color: Optional[str] = None,
     ) -> bool:
-        if not self.control_url:
-            return False
-
-        normalized_id = normalize_agent_id(source_id)
+        normalized_id = normalize_agent_id(source_id) if source_kind == "agent" else source_id
         display_name = source_name or normalized_id.capitalize()
 
         payload = {
@@ -61,39 +91,55 @@ class RuntimeEventPublisher:
             "jobId": job_id,
             "metadata": metadata or {},
         }
+        return self._post_json("/internal/events", payload)
 
-        endpoint = f"{self.control_url}/internal/events"
+    def publish_thread(
+        self,
+        thread_id: str,
+        job_id: Optional[str] = None,
+        title: Optional[str] = None,
+        participants: Optional[List[Dict[str, Any]]] = None,
+    ) -> bool:
+        payload = {
+            "id": thread_id,
+            "jobId": job_id,
+            "title": title or f"Thread {thread_id}",
+            "participants": participants or [],
+        }
+        return self._post_json("/internal/threads", payload)
 
-        try:
-            req_data = json.dumps(payload).encode("utf-8")
-            req = urllib.request.Request(
-                endpoint,
-                data=req_data,
-                headers={"Content-Type": "application/json"},
-                method="POST",
-            )
-            with urllib.request.urlopen(req, timeout=self.timeout) as resp:
-                if resp.status in {200, 201, 202}:
-                    return True
-                logger.warning(
-                    "Control plane returned unexpected status %s for event %s",
-                    resp.status,
-                    kind,
-                )
-                return False
-        except urllib.error.URLError as err:
-            logger.warning(
-                "Telemetry event delivery to %s skipped (control API unreachable): %s",
-                endpoint,
-                err.reason,
-            )
-            return False
-        except Exception as exc:
-            logger.warning(
-                "Telemetry event delivery failed: %s",
-                exc,
-            )
-            return False
+    def publish_message(
+        self,
+        thread_id: str,
+        from_actor: Dict[str, Any],
+        to_actors: List[Dict[str, Any]],
+        kind: str,
+        text: str,
+        intent: Optional[str] = None,
+        job_id: Optional[str] = None,
+        phase_id: Optional[str] = None,
+        artifact_refs: Optional[List[Dict[str, Any]]] = None,
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> bool:
+        payload = {
+            "threadId": thread_id,
+            "from": from_actor,
+            "to": to_actors,
+            "kind": kind,
+            "text": text,
+            "intent": intent,
+            "jobId": job_id,
+            "phaseId": phase_id,
+            "artifactRefs": artifact_refs or [],
+            "metadata": metadata or {},
+        }
+        return self._post_json("/internal/messages", payload)
+
+    def publish_artifact(
+        self,
+        artifact: Dict[str, Any],
+    ) -> bool:
+        return self._post_json("/internal/artifacts", artifact)
 
 
 default_publisher = RuntimeEventPublisher()

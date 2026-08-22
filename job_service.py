@@ -5,6 +5,7 @@ import logging
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 from normalization import normalize_agent_id
+from artifact_registry import ArtifactRef, artifact_registry
 
 logger = logging.getLogger("hermes.job_service")
 
@@ -15,6 +16,7 @@ class ArtifactRefDTO:
     type: str  # "git_commit" | "run_summary" | "log" | "handoff" | "test_report" | "file"
     label: str
     ref: str
+    metadata: Dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -87,6 +89,7 @@ class JobService:
         self._jobs: Dict[str, JobDetailDTO] = {}
         self.runs_root = runs_root or (Path(__file__).resolve().parent.parent / "hermes-runs")
         self.sprints_root = sprints_root or (Path(__file__).resolve().parent / "sprints")
+        artifact_registry.add_allowed_root(self.runs_root)
         self._recover_recent_runs()
 
     def _recover_recent_runs(self) -> None:
@@ -146,36 +149,75 @@ class JobService:
             )
 
         artifacts: List[ArtifactRefDTO] = []
-        commit_sha = summary.get("integration_commit")
-        if commit_sha:
-            artifacts.append(
-                ArtifactRefDTO(
+
+        # Check for artifacts.json in run_dir
+        artifacts_file = run_dir / "artifacts.json"
+        if artifacts_file.exists():
+            try:
+                with open(artifacts_file, "r", encoding="utf-8") as af:
+                    loaded = json.load(af)
+                    for item in loaded:
+                        art = ArtifactRef.from_dict(item)
+                        artifact_registry.register(art)
+                        artifacts.append(
+                            ArtifactRefDTO(
+                                id=art.id,
+                                type=art.type,
+                                label=art.label,
+                                ref=art.ref,
+                                metadata=art.metadata,
+                            )
+                        )
+            except Exception as e:
+                logger.debug("Failed loading artifacts.json from %s: %s", artifacts_file, e)
+
+        # Fallback discovery if artifacts.json not present
+        if not artifacts:
+            commit_sha = summary.get("integration_commit")
+            if commit_sha:
+                art = ArtifactRefDTO(
                     id="art_commit",
                     type="git_commit",
                     label=f"Integration Commit ({commit_sha[:7]})",
                     ref=commit_sha,
                 )
-            )
-        summary_path = run_dir / "run_summary.json"
-        if summary_path.exists():
-            artifacts.append(
-                ArtifactRefDTO(
+                artifacts.append(art)
+                artifact_registry.register(ArtifactRef(id=art.id, type=art.type, label=art.label, ref=art.ref, jobId=job_id))
+
+            summary_path = run_dir / "run_summary.json"
+            if summary_path.exists():
+                art = ArtifactRefDTO(
                     id="art_summary",
                     type="run_summary",
                     label="Run Summary Report",
                     ref=str(summary_path),
                 )
-            )
-        log_path = run_dir / "runner.log"
-        if log_path.exists():
-            artifacts.append(
-                ArtifactRefDTO(
+                artifacts.append(art)
+                artifact_registry.register(ArtifactRef(id=art.id, type=art.type, label=art.label, ref=art.ref, jobId=job_id))
+
+            log_path = run_dir / "runner.log"
+            if log_path.exists():
+                art = ArtifactRefDTO(
                     id="art_log",
                     type="log",
                     label="Runner Execution Log",
                     ref=str(log_path),
                 )
-            )
+                artifacts.append(art)
+                artifact_registry.register(ArtifactRef(id=art.id, type=art.type, label=art.label, ref=art.ref, jobId=job_id))
+
+            # Scan handoffs directory
+            handoffs_dir = run_dir / "handoffs"
+            if handoffs_dir.is_dir():
+                for hf in sorted(handoffs_dir.glob("*.md")):
+                    art = ArtifactRefDTO(
+                        id=f"art_handoff_{hf.stem}",
+                        type="handoff",
+                        label=f"Handoff ({hf.name})",
+                        ref=str(hf),
+                    )
+                    artifacts.append(art)
+                    artifact_registry.register(ArtifactRef(id=art.id, type=art.type, label=art.label, ref=art.ref, jobId=job_id))
 
         if canonical_status == "COMPLETED":
             progress = 1.0

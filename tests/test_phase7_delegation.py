@@ -280,9 +280,12 @@ class TestPhase7ToolExecutionIntegration(unittest.TestCase):
                 conversation_id=conv_id,
             )
 
-            # Claude emits tool request for tool.git.inspect
+            claude_invocations = []
+            # Claude emits tool request on turn 1, then handles tool result on turn 2
             def stub_claude_execute(context):
-                raw_stdout = f"""
+                claude_invocations.append(context)
+                if len(claude_invocations) == 1:
+                    raw_stdout = f"""
 Claude analyzing code:
 Requesting git diff via tool.
 
@@ -295,6 +298,19 @@ Requesting git diff via tool.
 }}
 {LYSSTACK_TOOL_REQUEST_END}
 """
+                else:
+                    # Continuation turn: receives tool result in context and concludes
+                    raw_stdout = f"""
+Claude received tool output.
+{LYSSTACK_A2A_START}
+{{
+  "intent": "review_result",
+  "to": ["operator"],
+  "text": "Code review complete: git diff inspected.",
+  "conversationId": "{conv_id}"
+}}
+{LYSSTACK_A2A_END}
+"""
                 return ExecutionResult(command=["claude"], returncode=0, stdout=raw_stdout, stderr="", backend="subprocess")
 
             mock_registry = MagicMock()
@@ -304,6 +320,9 @@ Requesting git diff via tool.
             runner.agent_registry = mock_registry
 
             runner.schedule_a2a_turns(phase, target_repo, conversation_id=conv_id)
+
+            # Assert 2 turns executed (Turn 1 tool request, Turn 2 tool result continuation)
+            self.assertEqual(len(claude_invocations), 2)
 
             # Verify tool_result message was recorded
             tool_msg = next((m for m in runner.local_messages if m.get("kind") == "tool_result"), None)
@@ -544,6 +563,377 @@ Subagent completed memory inspection.
             sub_profile = runner.subagent_manager.list_subagents()[0]
             self.assertEqual(sub_profile.parentAgentId, "claude")
             self.assertEqual(sub_profile.depth, 1)
+
+
+
+class TestPhase7_1_RuntimePolicyPatches(unittest.TestCase):
+    """
+    Focused regression test suite for Phase 7.1 runtime policy patches:
+    1. bind subagent identity -> parent/provider adapter
+    2. controller-allowlist subagent capabilities
+    3. propagate true parent depth
+    4. enforce actor capability + allowed_tools + tool policy
+    5. add real tool-result continuation
+    6. regression tests for all paths
+    """
+
+    def test_bind_subagent_identity_to_parent_provider_adapter(self):
+        mod = _get_runner_module()
+        HermesSprintRunner = mod.HermesSprintRunner
+        from runner.agents.antigravity import AntigravityAdapter
+        from runner.agents.claude import ClaudeAdapter
+        from runner.agents.codex import CodexAdapter
+        from runner.agents.registry import default_registry
+
+        # 1. AgentRegistry resolves subagent IDs to parent/provider adapters
+        self.assertIsInstance(default_registry.get("subagent_gemini_1"), AntigravityAdapter)
+        self.assertIsInstance(default_registry.get("subagent_claude_1"), ClaudeAdapter)
+        self.assertIsInstance(default_registry.get("subagent_codex_1"), CodexAdapter)
+        self.assertIsInstance(default_registry.get("subagent_custom_1", parent_provider="claude"), ClaudeAdapter)
+
+        # 2. SubagentProfile stores provider
+        manager = SubagentManager(allow_subagents=True, max_subagents_per_job=3, max_depth=2)
+        sub1 = manager.create_subagent(parent_agent_id="claude", task="Subtask 1")
+        self.assertEqual(sub1.provider, "claude")
+
+        sub2 = manager.create_subagent(parent_agent_id="gemini", task="Subtask 2")
+        self.assertEqual(sub2.provider, "antigravity")
+
+        # 3. Runner execute_agent resolves subagent provider adapter seamlessly
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            tmp_root = Path(tmp_dir)
+            p1 = tmp_root / "p1.md"
+            p1.write_text("Prompt content", encoding="utf-8")
+
+            spec_path = ROOT_DIR / "sprints" / "lab-s04.json"
+            runner = HermesSprintRunner(spec_path=spec_path, skip_agent_exec=True)
+            runner.subagent_manager = manager
+
+            phase = {
+                "name": "subagent_claude_1",
+                "role": "hardener",
+                "agent": sub1.id,
+                "worktree_dir": "worker",
+                "prompt_file": str(p1),
+            }
+
+            # execute_agent should find Claude adapter via subagent manager profile without raising FAILED_UNKNOWN_AGENT
+            mock_adapter = MagicMock()
+            mock_adapter.execute.return_value = ExecutionResult(command=["subagent"], returncode=0, stdout="OK", stderr="", backend="subprocess")
+            runner.agent_registry = MagicMock()
+            runner.agent_registry.get.return_value = mock_adapter
+
+            wt = tmp_root / "worker"
+            wt.mkdir(parents=True, exist_ok=True)
+            res = runner.execute_agent(phase, wt)
+            self.assertEqual(res.returncode, 0)
+            runner.agent_registry.get.assert_called_with("subagent_claude_1")
+
+    def test_controller_allowlist_subagent_capabilities(self):
+        mock_pub = MagicMock()
+        manager = SubagentManager(
+            allow_subagents=True,
+            max_subagents_per_job=5,
+            max_depth=2,
+            allowed_capabilities=["code.python", "testing.unit", "review.code"],
+        )
+
+        # 1. Permitted capability request succeeds
+        sub_allowed = manager.create_subagent(
+            parent_agent_id="claude",
+            task="Valid task",
+            capabilities=["code.python", "testing.unit"],
+            publisher=mock_pub,
+            job_id="job_allowlist_test",
+        )
+        self.assertIsNotNone(sub_allowed)
+        self.assertEqual(sub_allowed.capabilities, ["code.python", "testing.unit"])
+
+        # 2. Unallowlisted capability request is REJECTED by controller policy
+        sub_disallowed = manager.create_subagent(
+            parent_agent_id="claude",
+            task="Dangerous task",
+            capabilities=["code.python", "dangerous.escalation.cap"],
+            publisher=mock_pub,
+            job_id="job_allowlist_test",
+        )
+        self.assertIsNone(sub_disallowed)
+        mock_pub.publish.assert_any_call(
+            source_id="subagent_manager",
+            source_kind="runtime",
+            kind="delegation.rejected",
+            detail="Subagent capabilities ['dangerous.escalation.cap'] not permitted by controller allowlist (allowed: ['code.python', 'review.code', 'testing.unit']).",
+            job_id="job_allowlist_test",
+            metadata={
+                "reason": "capabilities_not_allowlisted",
+                "disallowedCapabilities": ["dangerous.escalation.cap"],
+                "allowedCapabilities": ["code.python", "review.code", "testing.unit"],
+            },
+        )
+
+    def test_propagate_true_parent_depth(self):
+        mock_pub = MagicMock()
+        manager = SubagentManager(
+            allow_subagents=True,
+            max_subagents_per_job=5,
+            max_depth=2,
+        )
+
+        # 1. Root agent (parent_depth=0) creates depth 1 subagent
+        sub1 = manager.create_subagent(
+            parent_agent_id="claude",
+            task="Depth 1 task",
+            parent_depth=0,
+            publisher=mock_pub,
+            job_id="job_depth_test",
+        )
+        self.assertIsNotNone(sub1)
+        self.assertEqual(sub1.depth, 1)
+
+        # 2. Depth 1 subagent creates depth 2 subagent (parent_depth=1)
+        sub2 = manager.create_subagent(
+            parent_agent_id=sub1.id,
+            task="Depth 2 task",
+            parent_depth=sub1.depth,
+            publisher=mock_pub,
+            job_id="job_depth_test",
+        )
+        self.assertIsNotNone(sub2)
+        self.assertEqual(sub2.depth, 2)
+        self.assertEqual(sub2.parentAgentId, sub1.id)
+
+        # 3. Depth 2 subagent attempting to create depth 3 subagent exceeds max_depth=2 -> REJECTED
+        sub3 = manager.create_subagent(
+            parent_agent_id=sub2.id,
+            task="Depth 3 task",
+            parent_depth=sub2.depth,
+            publisher=mock_pub,
+            job_id="job_depth_test",
+        )
+        self.assertIsNone(sub3)
+        mock_pub.publish.assert_any_call(
+            source_id="subagent_manager",
+            source_kind="runtime",
+            kind="delegation.limit_reached",
+            detail="Subagent depth (3) exceeds maximum permitted depth (2).",
+            job_id="job_depth_test",
+            metadata={"reason": "max_depth_exceeded", "requestedDepth": 3, "maxDepth": 2},
+        )
+
+    def test_enforce_actor_capability_on_tool_invocation(self):
+        cap_reg = create_default_capability_registry()
+
+        # Actor 'gemini' does NOT have 'git.inspect' or 'repo.read'
+        treq_gemini = ToolInvocationRequest(
+            toolId="tool.git.inspect",
+            args={"operation": "status"},
+            requester={"id": "gemini", "kind": "agent"},
+        )
+        res_gemini = default_tool_registry.execute(
+            request=treq_gemini,
+            capability_registry=cap_reg,
+        )
+        self.assertEqual(res_gemini.status, "rejected")
+        self.assertIn("lacks required capabilities", res_gemini.error)
+        self.assertIn("tool.git.inspect", res_gemini.error)
+
+        # Actor 'claude' has 'git.inspect' -> capability check passes
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            tmp_repo = Path(tmp_dir)
+            subprocess.run(["git", "init", "-b", "main"], cwd=tmp_repo, check=True, capture_output=True)
+            treq_claude = ToolInvocationRequest(
+                toolId="tool.git.inspect",
+                args={"operation": "status"},
+                requester={"id": "claude", "kind": "agent"},
+            )
+            res_claude = default_tool_registry.execute(
+                request=treq_claude,
+                worktree_dir=tmp_repo,
+                capability_registry=cap_reg,
+            )
+            self.assertEqual(res_claude.status, "success")
+
+        # Actor 'gemini' HAS 'testing.unit' -> can invoke tool.test_runner
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            tmp_wt = Path(tmp_dir)
+            treq_test = ToolInvocationRequest(
+                toolId="tool.test_runner",
+                args={"target": "nonexistent_test.py"},
+                requester={"id": "gemini", "kind": "agent"},
+            )
+            res_test = default_tool_registry.execute(
+                request=treq_test,
+                worktree_dir=tmp_wt,
+                capability_registry=cap_reg,
+            )
+            # Capability check passed (failed only because test file does not exist, not rejected)
+            self.assertIn(res_test.status, ["success", "failed"])
+            self.assertNotEqual(res_test.status, "rejected")
+
+    def test_enforce_allowed_tools_and_tool_policy(self):
+        cap_reg = create_default_capability_registry()
+
+        # 1. Job limits allow_tools = False -> REJECTED
+        job_config_disabled = {"limits": {"allow_tools": False}}
+        treq = ToolInvocationRequest(
+            toolId="tool.git.inspect",
+            args={"operation": "status"},
+            requester={"id": "claude", "kind": "agent"},
+        )
+        res_disabled = default_tool_registry.execute(
+            request=treq,
+            job_config=job_config_disabled,
+            capability_registry=cap_reg,
+        )
+        self.assertEqual(res_disabled.status, "rejected")
+        self.assertIn("disabled by job policy", res_disabled.error)
+
+        # 2. Job limits allowed_tools restriction -> tool not in list is REJECTED
+        job_config_restricted = {"limits": {"allowed_tools": ["tool.test_runner"]}}
+        res_restricted = default_tool_registry.execute(
+            request=treq,
+            job_config=job_config_restricted,
+            capability_registry=cap_reg,
+        )
+        self.assertEqual(res_restricted.status, "rejected")
+        self.assertIn("not permitted for this job", res_restricted.error)
+
+        # 3. Disallowed flag option in git inspect -> REJECTED
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            tmp_repo = Path(tmp_dir)
+            treq_flag = ToolInvocationRequest(
+                toolId="tool.git.inspect",
+                args={"operation": "diff", "target": "--exec=malicious"},
+                requester={"id": "claude", "kind": "agent"},
+            )
+            res_flag = default_tool_registry.execute(
+                request=treq_flag,
+                worktree_dir=tmp_repo,
+                capability_registry=cap_reg,
+            )
+            self.assertEqual(res_flag.status, "rejected")
+            self.assertIn("Disallowed flag option", res_flag.error)
+
+    def test_real_tool_result_continuation(self):
+        """
+        Tests the full two-turn tool continuation loop:
+        Turn 1: Claude requests tool.git.inspect.
+        Hermes executes tool, generates tool_result message.
+        Turn 2: Claude receives tool_result continuation turn, processes output, and emits terminal review_result.
+        """
+        mod = _get_runner_module()
+        HermesSprintRunner = mod.HermesSprintRunner
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            tmp_root = Path(tmp_dir)
+            target_repo = tmp_root / "repo"
+            target_repo.mkdir()
+            subprocess.run(["git", "init", "-b", "main"], cwd=target_repo, check=True, capture_output=True)
+            subprocess.run(["git", "config", "user.name", "Test"], cwd=target_repo, check=True)
+            subprocess.run(["git", "config", "user.email", "test@example.com"], cwd=target_repo, check=True)
+            (target_repo / "service.py").write_text("# initial service\n", encoding="utf-8")
+            subprocess.run(["git", "add", "service.py"], cwd=target_repo, check=True)
+            subprocess.run(["git", "commit", "-m", "initial commit"], cwd=target_repo, check=True)
+            (target_repo / "service.py").write_text("# updated service with mutex guard\n", encoding="utf-8")
+
+            p1 = tmp_root / "p1.md"
+            p1.write_text("Hardener prompt", encoding="utf-8")
+
+            spec_path = ROOT_DIR / "sprints" / "lab-s04.json"
+            runner = HermesSprintRunner(spec_path=spec_path, skip_agent_exec=False)
+            runner.job_id = "job_continuation_e2e"
+            runner.thread_id = "thread_job_continuation_e2e"
+            runner.run_dir = tmp_root / "runs" / "test_continuation"
+            runner.run_dir.mkdir(parents=True, exist_ok=True)
+            runner.messages_file = runner.run_dir / "messages.jsonl"
+            runner.worktree_root = target_repo.parent
+
+            phase = {
+                "name": "02_hardener",
+                "role": "hardener",
+                "agent": "claude",
+                "worktree_dir": target_repo.name,
+                "prompt_file": str(p1),
+            }
+            runner.spec["phases"] = [phase]
+
+            conv_id = "conv_tool_continuation_e2e"
+            runner._record_message(
+                from_actor={"id": "operator", "kind": "user", "displayName": "Operator"},
+                to_actors=[{"id": "claude", "kind": "agent", "displayName": "Claude"}],
+                kind="operator",
+                intent="question",
+                text="Please inspect the service diff.",
+                conversation_id=conv_id,
+            )
+
+            turns_executed = []
+
+            def stub_claude_execute(context):
+                turns_executed.append(context)
+                turn_num = len(turns_executed)
+
+                if turn_num == 1:
+                    # Turn 1: request tool execution
+                    raw_stdout = f"""
+Claude analyzing code:
+Requesting git diff via controlled tool.
+{LYSSTACK_TOOL_REQUEST_START}
+{{
+  "toolId": "tool.git.inspect",
+  "args": {{
+    "operation": "diff"
+  }}
+}}
+{LYSSTACK_TOOL_REQUEST_END}
+"""
+                elif turn_num == 2:
+                    # Turn 2: continuation turn with tool result in context
+                    raw_stdout = f"""
+Claude received tool inspection result:
+Verified diff contains mutex guard.
+{LYSSTACK_A2A_START}
+{{
+  "intent": "review_result",
+  "to": ["operator"],
+  "text": "Review complete: mutex guard confirmed present and correct.",
+  "conversationId": "{conv_id}"
+}}
+{LYSSTACK_A2A_END}
+"""
+                else:
+                    raw_stdout = "No further action."
+
+                return ExecutionResult(command=["claude"], returncode=0, stdout=raw_stdout, stderr="", backend="subprocess")
+
+            mock_registry = MagicMock()
+            mock_adapter = MagicMock()
+            mock_adapter.execute.side_effect = stub_claude_execute
+            mock_registry.get.return_value = mock_adapter
+            runner.agent_registry = mock_registry
+
+            # Run scheduler loop
+            runner.schedule_a2a_turns(phase, target_repo, conversation_id=conv_id)
+
+            # Assert exactly 2 turns were executed
+            self.assertEqual(len(turns_executed), 2)
+            self.assertEqual(runner.job_a2a_turns, 2)
+
+            # Verify message flow sequence:
+            # 1. operator question
+            # 2. tool_result from tool.git.inspect to claude
+            # 3. review_result from claude to operator
+            tool_msg = next((m for m in runner.local_messages if m.get("kind") == "tool_result"), None)
+            self.assertIsNotNone(tool_msg)
+            self.assertEqual(tool_msg["from"]["id"], "tool.git.inspect")
+            self.assertEqual(tool_msg["to"][0]["id"], "claude")
+            self.assertIn("mutex guard", tool_msg["text"])
+
+            review_msg = next((m for m in runner.local_messages if m.get("intent") == "review_result"), None)
+            self.assertIsNotNone(review_msg)
+            self.assertEqual(review_msg["from"]["id"], "claude")
+            self.assertEqual(review_msg["to"][0]["id"], "operator")
+            self.assertIn("mutex guard confirmed present", review_msg["text"])
 
 
 if __name__ == "__main__":

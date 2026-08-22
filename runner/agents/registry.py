@@ -11,12 +11,22 @@ class AgentRegistry:
     def register(self, adapter_type):
         self._adapters[adapter_type.name] = adapter_type
 
-    def get(self, name):
+    def get(self, name, parent_provider=None):
         adapter_type = self._adapters.get(name)
         if adapter_type is None:
             alias_map = {"gemini": "antigravity", "agy": "antigravity"}
             if name in alias_map:
                 adapter_type = self._adapters.get(alias_map[name])
+        if adapter_type is None and parent_provider:
+            return self.get(parent_provider)
+        if adapter_type is None and str(name).startswith("subagent_"):
+            parts = str(name).split("_")
+            if len(parts) >= 2:
+                inferred = parts[1]
+                try:
+                    return self.get(inferred)
+                except SprintRunnerError:
+                    pass
         if adapter_type is None:
             raise SprintRunnerError("FAILED_UNKNOWN_AGENT", f"Unknown agent type: {name}")
         return adapter_type()

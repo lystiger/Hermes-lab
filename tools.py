@@ -105,6 +105,29 @@ class ToolInvocationResult:
         )
 
 
+@dataclass
+class ToolPolicy:
+    """Configurable tool policy constraints."""
+    allow_tools: bool = True
+    allowed_tools: Optional[List[str]] = None
+    require_actor_capability: bool = True
+    read_only_only: bool = True
+    max_timeout_seconds: int = 120
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {k: v for k, v in asdict(self).items() if v is not None}
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> "ToolPolicy":
+        return cls(
+            allow_tools=bool(data.get("allow_tools", data.get("allowTools", True))),
+            allowed_tools=data.get("allowed_tools") or data.get("allowedTools"),
+            require_actor_capability=bool(data.get("require_actor_capability", True)),
+            read_only_only=bool(data.get("read_only_only", True)),
+            max_timeout_seconds=int(data.get("max_timeout_seconds", 120)),
+        )
+
+
 class ToolRegistry:
     """
     Central registry for tool actor profiles and safe execution dispatch.
@@ -135,14 +158,20 @@ class ToolRegistry:
         request: ToolInvocationRequest,
         worktree_dir: Optional[Path] = None,
         job_config: Optional[Dict[str, Any]] = None,
+        capability_registry: Optional[Any] = None,
         publisher: Any = None,
         job_id: Optional[str] = None,
     ) -> ToolInvocationResult:
         """
-        Validates permission and executes tool safely under Hermes control.
+        Validates permission, actor capability, and executes tool safely under Hermes control.
         """
         tool_id = request.toolId
         req_id = request.id or "unknown"
+        requester_id = ""
+        if isinstance(request.requester, dict):
+            requester_id = str(request.requester.get("id", "")).strip()
+        elif request.requester:
+            requester_id = str(request.requester).strip()
 
         if publisher:
             publisher.publish(
@@ -175,10 +204,29 @@ class ToolRegistry:
                 )
             return ToolInvocationResult(requestId=req_id, toolId=tool_id, status="rejected", error=err)
 
-        # 2. Permission check against job/runtime policy
+        # 2. Permission and tool policy checks
         if job_config:
-            limits = job_config.get("limits", {})
+            limits = job_config.get("limits", {}) if isinstance(job_config.get("limits"), dict) else {}
+            # 2a. Check if tools are enabled
+            allow_tools = limits.get("allow_tools")
+            if allow_tools is False:
+                err = "Tool execution is disabled by job policy (limits.allow_tools=false)."
+                logger.warning(err)
+                if publisher:
+                    publisher.publish(
+                        source_id="hermes_runner",
+                        source_kind="runtime",
+                        kind="tool.rejected",
+                        detail=err,
+                        job_id=job_id or request.jobId,
+                        metadata={"requestId": req_id, "toolId": tool_id, "reason": "tools_disabled"},
+                    )
+                return ToolInvocationResult(requestId=req_id, toolId=tool_id, status="rejected", error=err)
+
+            # 2b. allowed_tools allowlist check
             allowed_tools = limits.get("allowed_tools")
+            if allowed_tools is None and "allowed_tools" in job_config:
+                allowed_tools = job_config.get("allowed_tools")
             if allowed_tools is not None:
                 allowed_set = {t.strip() for t in allowed_tools}
                 if tool_id not in allowed_set:
@@ -195,6 +243,36 @@ class ToolRegistry:
                         )
                     return ToolInvocationResult(requestId=req_id, toolId=tool_id, status="rejected", error=err)
 
+        # 3. Actor capability enforcement
+        if requester_id and profile.capabilities:
+            cap_reg = capability_registry
+            if not cap_reg:
+                from capabilities import default_capability_registry
+                cap_reg = default_capability_registry
+
+            actor_caps = set(cap_reg.get_actor_capabilities(requester_id))
+            has_capability = any(c in actor_caps for c in profile.capabilities)
+            if not has_capability:
+                err = f"Actor '{requester_id}' lacks required capabilities for tool '{tool_id}' (requires one of {profile.capabilities}, actor has {sorted(list(actor_caps))})."
+                logger.warning(err)
+                if publisher:
+                    publisher.publish(
+                        source_id="hermes_runner",
+                        source_kind="runtime",
+                        kind="tool.rejected",
+                        detail=err,
+                        job_id=job_id or request.jobId,
+                        metadata={
+                            "requestId": req_id,
+                            "toolId": tool_id,
+                            "actorId": requester_id,
+                            "reason": "insufficient_actor_capabilities",
+                            "toolCapabilities": profile.capabilities,
+                            "actorCapabilities": sorted(list(actor_caps)),
+                        },
+                    )
+                return ToolInvocationResult(requestId=req_id, toolId=tool_id, status="rejected", error=err)
+
         if publisher:
             publisher.publish(
                 source_id="hermes_runner",
@@ -205,7 +283,7 @@ class ToolRegistry:
                 metadata={"requestId": req_id, "toolId": tool_id},
             )
 
-        # 3. Handler execution
+        # 4. Handler execution
         handler = self._handlers[tool_id]
         try:
             result = handler(request, worktree_dir, job_config)
@@ -291,7 +369,10 @@ def _handle_git_inspect(
     # Handle safe optional arguments
     if op == "diff":
         target = args.get("target") or args.get("path")
-        if target and isinstance(target, str) and not target.startswith("-"):
+        if target and isinstance(target, str):
+            if target.startswith("-"):
+                err = f"Disallowed flag option '{target}' in diff target."
+                return ToolInvocationResult(requestId=req_id, toolId=tool_id, status="rejected", error=err)
             cmd.append(target)
     elif op == "log":
         limit = args.get("limit") or args.get("max_count", 10)
@@ -302,7 +383,10 @@ def _handle_git_inspect(
             cmd.extend(["-n", "10"])
     elif op == "show":
         commit = args.get("commit") or args.get("ref", "HEAD")
-        if commit and isinstance(commit, str) and not commit.startswith("-"):
+        if commit and isinstance(commit, str):
+            if commit.startswith("-"):
+                err = f"Disallowed flag option '{commit}' in show target."
+                return ToolInvocationResult(requestId=req_id, toolId=tool_id, status="rejected", error=err)
             cmd.append(commit)
 
     timeout = request.timeoutSeconds or 30

@@ -154,6 +154,7 @@ class HermesSprintRunner:
             allow_subagents=delegation_limits.get("allow_subagents", False),
             max_subagents_per_job=delegation_limits.get("max_subagents_per_job", 3),
             max_depth=delegation_limits.get("max_depth", 1),
+            allowed_capabilities=delegation_limits.get("allowed_capabilities") or delegation_limits.get("allowed_subagent_capabilities"),
         )
         self.task_assignments = {}
         self.job_delegations = 0
@@ -1003,7 +1004,24 @@ class HermesSprintRunner:
 
     def execute_agent(self, phase, wt_dir, mailbox_messages=None, active_a2a_turn=None):
         agent_name = phase["agent"]
-        adapter = self.agent_registry.get(agent_name)
+        sub_profile = (
+            getattr(self, "subagent_manager", None).get_subagent(agent_name)
+            if getattr(self, "subagent_manager", None)
+            else None
+        )
+        parent_provider = (
+            sub_profile.provider
+            or sub_profile.parentAgentId
+            if sub_profile
+            else phase.get("provider") or phase.get("parent_agent")
+        )
+        try:
+            adapter = self.agent_registry.get(agent_name)
+        except SprintRunnerError:
+            if parent_provider:
+                adapter = self.agent_registry.get(parent_provider)
+            else:
+                raise
         backend = self._get_backend(self.resolve_backend_name(phase))
         prompt_file = self.resolve_prompt_file(phase)
         context = AgentContext(
@@ -1475,10 +1493,10 @@ class HermesSprintRunner:
                 if kind == "handoff":
                     continue
 
-                # Schedulable: A2A conversational messages or request intents, excluding terminal intents
+                # Schedulable: A2A conversational messages or request intents, or tool_result continuations
                 is_schedulable = (
-                    (kind == "a2a" or intent in SCHEDULABLE_INTENTS)
-                    and (intent not in TERMINAL_INTENTS)
+                    (kind in ("a2a", "tool_result", "delegation") or intent in SCHEDULABLE_INTENTS or intent == "tool_result")
+                    and (intent not in TERMINAL_INTENTS or kind == "tool_result" or intent == "tool_result")
                 )
 
                 if is_schedulable:
@@ -1728,10 +1746,13 @@ class HermesSprintRunner:
                 else:
                     # Check if subagent creation is permitted
                     if del_req.allowSubagent and self.subagent_manager.allow_subagents:
+                        parent_sub = self.subagent_manager.get_subagent(target_agent)
+                        parent_depth = parent_sub.depth if parent_sub else 0
                         sub_profile = self.subagent_manager.create_subagent(
                             parent_agent_id=target_agent,
                             task=del_req.task,
                             capabilities=del_req.requiredCapabilities,
+                            parent_depth=parent_depth,
                             publisher=default_publisher,
                             job_id=self.job_id,
                         )
@@ -1741,6 +1762,8 @@ class HermesSprintRunner:
                                 **target_phase,
                                 "name": f"subagent_{sub_profile.id}",
                                 "agent": sub_profile.id,
+                                "parent_agent": target_agent,
+                                "provider": sub_profile.provider,
                             }
                             self.job_delegations += 1
                             task_id = f"task_{del_req.id}"
@@ -1807,6 +1830,7 @@ class HermesSprintRunner:
                     request=tool_req,
                     worktree_dir=target_wt,
                     job_config=self.spec,
+                    capability_registry=self.capability_registry,
                     publisher=default_publisher,
                     job_id=self.job_id,
                 )

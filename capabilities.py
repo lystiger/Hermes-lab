@@ -68,6 +68,8 @@ DEFAULT_CAPABILITY_PROFILES: Dict[str, List[str]] = {
         "code.python",
         "frontend.react",
         "documentation",
+        "git.inspect",
+        "repo.read",
     ],
     "codex": [
         "verification",
@@ -118,6 +120,8 @@ class CapabilityRegistry:
     def get_actor_capabilities(self, actor_id: str) -> List[str]:
         profile = self.get_actor(actor_id)
         if not profile:
+            if actor_id in DEFAULT_CAPABILITY_PROFILES:
+                return list(DEFAULT_CAPABILITY_PROFILES[actor_id])
             return []
         raw_caps = getattr(profile, "capabilities", []) or []
         res = []

@@ -793,101 +793,119 @@ class HermesSprintRunner:
                 },
             )
 
-        if not prompt_file.exists():
-            raise SprintRunnerError("FAILED_MISSING_PROMPT", f"Prompt file not found: {prompt_file}")
-
-        # Every phase after the first starts from the latest integration state.
-        if self.run_summary["phases"]:
-            target_branch = self.spec.get("target_branch", "s02/integration")
-            self.sync_phase_worktree(wt_dir, target_branch)
-
-        handoff_path, original_handoff = self._prepare_handoff_path(
-            wt_dir,
-            expected_handoff,
-        )
         try:
-            if not self.skip_agent_exec and not self.dry_run:
-                execution_result = self.execute_agent(phase, wt_dir)
-            else:
-                execution_result = None
-                self.logger.info(f"Skipping agent execution CLI (skip_agent_exec={self.skip_agent_exec}, dry_run={self.dry_run})")
+            if not prompt_file.exists():
+                raise SprintRunnerError("FAILED_MISSING_PROMPT", f"Prompt file not found: {prompt_file}")
 
-            self.capture_handoff(
-                phase_index,
-                role,
-                agent,
+            # Every phase after the first starts from the latest integration state.
+            if self.run_summary["phases"]:
+                target_branch = self.spec.get("target_branch", "s02/integration")
+                self.sync_phase_worktree(wt_dir, target_branch)
+
+            handoff_path, original_handoff = self._prepare_handoff_path(
                 wt_dir,
                 expected_handoff,
             )
-        finally:
-            self._restore_handoff_path(handoff_path, original_handoff)
+            try:
+                if not self.skip_agent_exec and not self.dry_run:
+                    execution_result = self.execute_agent(phase, wt_dir)
+                else:
+                    execution_result = None
+                    self.logger.info(f"Skipping agent execution CLI (skip_agent_exec={self.skip_agent_exec}, dry_run={self.dry_run})")
 
-        changed_files = self.inspect_changed_files(wt_dir)
-        max_limit = self.limits.get("max_changed_files", 15)
-        if role == "verifier" and changed_files:
-            raise SprintRunnerError(
-                "FAILED_FORBIDDEN_CHANGES",
-                f"Verifier phase '{phase_name}' modified {len(changed_files)} target files.",
-            )
-        if role != "verifier" and len(changed_files) > max_limit:
-            raise SprintRunnerError(
-                "FAILED_EXCESSIVE_FILES",
-                f"Worktree {wt_dir.name} changed {len(changed_files)} files, exceeding limit of {max_limit}.",
-            )
-        if role in {"builder", "legacy"} and not changed_files:
-            raise SprintRunnerError(
-                "FAILED_NO_CHANGES",
-                f"Worktree {wt_dir.name} produced NO file changes.",
-            )
+                self.capture_handoff(
+                    phase_index,
+                    role,
+                    agent,
+                    wt_dir,
+                    expected_handoff,
+                )
+            finally:
+                self._restore_handoff_path(handoff_path, original_handoff)
 
-        self.validate_python_syntax(wt_dir)
+            changed_files = self.inspect_changed_files(wt_dir)
+            max_limit = self.limits.get("max_changed_files", 15)
+            if role == "verifier" and changed_files:
+                raise SprintRunnerError(
+                    "FAILED_FORBIDDEN_CHANGES",
+                    f"Verifier phase '{phase_name}' modified {len(changed_files)} target files.",
+                )
+            if role != "verifier" and len(changed_files) > max_limit:
+                raise SprintRunnerError(
+                    "FAILED_EXCESSIVE_FILES",
+                    f"Worktree {wt_dir.name} changed {len(changed_files)} files, exceeding limit of {max_limit}.",
+                )
+            if role in {"builder", "legacy"} and not changed_files:
+                raise SprintRunnerError(
+                    "FAILED_NO_CHANGES",
+                    f"Worktree {wt_dir.name} produced NO file changes.",
+                )
 
-        should_integrate = bool(changed_files) and role != "verifier"
-        commit_sha = None
-        if should_integrate:
-            self.logger.info(f"Controller staging changes in {wt_dir.name}")
-            self.run_cmd(["git", "add", "."], cwd=wt_dir)
-            self.run_cmd(["git", "commit", "-m", commit_msg], cwd=wt_dir)
+            self.validate_python_syntax(wt_dir)
 
-            sha_res = self.run_cmd(["git", "rev-parse", "HEAD"], cwd=wt_dir)
-            commit_sha = sha_res.stdout.strip()
-            self.logger.info(f"Committed phase changes: {commit_sha[:7]} - {commit_msg}")
+            should_integrate = bool(changed_files) and role != "verifier"
+            commit_sha = None
+            if should_integrate:
+                self.logger.info(f"Controller staging changes in {wt_dir.name}")
+                self.run_cmd(["git", "add", "."], cwd=wt_dir)
+                self.run_cmd(["git", "commit", "-m", commit_msg], cwd=wt_dir)
 
-            integration_dir = self.worktree_root / "integration"
-            self.logger.info(f"Controller merging commit {commit_sha[:7]} into integration worktree")
-            self.run_cmd(["git", "merge", "--no-ff", "-m", f"merge({self.sprint_id}): merge {agent} phase ({commit_sha[:7]})", commit_sha], cwd=integration_dir)
+                sha_res = self.run_cmd(["git", "rev-parse", "HEAD"], cwd=wt_dir)
+                commit_sha = sha_res.stdout.strip()
+                self.logger.info(f"Committed phase changes: {commit_sha[:7]} - {commit_msg}")
 
-        phase_result = {
-            "phase": phase_name,
-            "role": role,
-            "agent": agent,
-            "backend": backend_name,
-            "status": "SUCCESS",
-            "commit_sha": commit_sha,
-            "changed_files_count": len(changed_files),
-            "integrated": should_integrate,
-            "handoff": "captured",
-            "runtime_metadata": (
-                dict(execution_result.runtime_metadata) if execution_result else {}
-            ),
-        }
-        self.run_summary["phases"].append(phase_result)
+                integration_dir = self.worktree_root / "integration"
+                self.logger.info(f"Controller merging commit {commit_sha[:7]} into integration worktree")
+                self.run_cmd(["git", "merge", "--no-ff", "-m", f"merge({self.sprint_id}): merge {agent} phase ({commit_sha[:7]})", commit_sha], cwd=integration_dir)
 
-        if default_publisher:
-            default_publisher.publish(
-                source_id=agent,
-                source_kind="agent",
-                kind="phase.completed",
-                detail=f"Phase {phase_name} completed successfully",
-                job_id=self.job_id,
-                metadata={
-                    "phase": phase_name,
-                    "role": role,
-                    "agent": agent,
-                    "commitSha": commit_sha,
-                    "changedFilesCount": len(changed_files),
-                },
-            )
+            phase_result = {
+                "phase": phase_name,
+                "role": role,
+                "agent": agent,
+                "backend": backend_name,
+                "status": "SUCCESS",
+                "commit_sha": commit_sha,
+                "changed_files_count": len(changed_files),
+                "integrated": should_integrate,
+                "handoff": "captured",
+                "runtime_metadata": (
+                    dict(execution_result.runtime_metadata) if execution_result else {}
+                ),
+            }
+            self.run_summary["phases"].append(phase_result)
+
+            if default_publisher:
+                default_publisher.publish(
+                    source_id=agent,
+                    source_kind="agent",
+                    kind="phase.completed",
+                    detail=f"Phase {phase_name} completed successfully",
+                    job_id=self.job_id,
+                    metadata={
+                        "phase": phase_name,
+                        "role": role,
+                        "agent": agent,
+                        "commitSha": commit_sha,
+                        "changedFilesCount": len(changed_files),
+                    },
+                )
+        except Exception as exc:
+            err_msg = getattr(exc, "message", str(exc))
+            if default_publisher:
+                default_publisher.publish(
+                    source_id=agent,
+                    source_kind="agent",
+                    kind="phase.failed",
+                    detail=f"Phase {phase_name} failed: {err_msg}",
+                    job_id=self.job_id,
+                    metadata={
+                        "phase": phase_name,
+                        "role": role,
+                        "agent": agent,
+                        "error": err_msg,
+                    },
+                )
+            raise
 
     def run_tests_in_venv(self):
         self.logger.info("\n=== Running Controller Verification & Pytest Suite ===")

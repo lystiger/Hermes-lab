@@ -177,20 +177,30 @@ class JobService:
                 )
             )
 
+        if canonical_status == "COMPLETED":
+            progress = 1.0
+        elif phases:
+            progress = round(len([p for p in phases if p.status == "SUCCEEDED"]) / len(phases), 2)
+        else:
+            progress = 0.0
+
+        repo_name = summary.get("target_repo") or sprint_id
+        target_branch = summary.get("target_branch") or f"hermes/{sprint_id}/integration"
+
         return JobDetailDTO(
             id=job_id,
             sprintId=sprint_id,
             title=f"Hermes Sprint {sprint_id}",
-            repository="Hermes Managed Repo",
-            branch=f"hermes/{sprint_id}/integration",
+            repository=repo_name,
+            branch=target_branch,
             priority="P1",
             status=canonical_status,
             currentPhase=phases[-1].name if phases else None,
-            assignedAgentIds=assigned_agents or ["gemini", "claude", "codex"],
+            assignedAgentIds=assigned_agents,
             createdAt=summary.get("start_time", datetime.now(timezone.utc).isoformat()),
             startedAt=summary.get("start_time"),
             completedAt=summary.get("end_time"),
-            progress=1.0 if canonical_status == "COMPLETED" else 0.8,
+            progress=progress,
             phases=phases,
             verification={"status": summary.get("verification_status", "PASSED"), "results": summary.get("verification_results", [])},
             artifacts=artifacts,

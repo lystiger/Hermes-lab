@@ -162,6 +162,9 @@ class JobStateReducer:
                     target_phase.status = "FAILED"
                     target_phase.completedAt = now_iso
                 job.status = "FAILED"
+                job.completedAt = now_iso
+                if meta.get("error"):
+                    job.errors.append({"phase": phase_name, "error": str(meta["error"])})
 
         elif kind == "job.completed":
             if job:
@@ -183,6 +186,10 @@ class JobStateReducer:
             if job:
                 job.status = "FAILED"
                 job.completedAt = now_iso
+                for p in job.phases:
+                    if p.status == "RUNNING":
+                        p.status = "FAILED"
+                        p.completedAt = now_iso
                 if meta.get("error"):
                     job.errors.append({"error": str(meta.get("error"))})
 

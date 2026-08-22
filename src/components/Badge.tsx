@@ -11,7 +11,7 @@ interface BadgeProps {
 
 export const Badge: React.FC<BadgeProps> = ({
   label,
-  variant = 'status',
+  variant: _variant = 'status',
   color = '#8C949F',
   dot = false,
   pulse = false,

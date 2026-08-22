@@ -1,11 +1,11 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { AgentData } from '../../api/types';
+import { AgentSummary } from '../../api/types';
 import { AgentPortrait } from './AgentPortrait';
 import { useConsoleStore } from '../../stores/useConsoleStore';
 
 interface AgentLaneCardProps {
-  agent: AgentData;
+  agent: AgentSummary;
   size?: 'compact' | 'full';
 }
 
@@ -14,12 +14,14 @@ export const AgentLaneCard: React.FC<AgentLaneCardProps> = ({
   size = 'compact'
 }) => {
   const navigate = useNavigate();
-  const { setSelectedAgentId, liveMotion, tick } = useConsoleStore();
+  const { setSelectedAgentId, liveMotion } = useConsoleStore();
   const [showCtxPopup, setShowCtxPopup] = useState(false);
 
   const isRunning = agent.status === 'RUNNING';
-  const tokBase = { Gemini: 30400, Claude: 13700, Codex: 0, Elysia: 42800 }[agent.name] || 0;
-  const currentTokens = isRunning ? tokBase + tick * (agent.name === 'Gemini' ? 12 : 29) : tokBase;
+  const accentColor = agent.presentation?.accentColor || '#8C949F';
+  const contextPct = agent.contextPct || '30%';
+  const contextUsed = agent.contextUsed || '50k';
+  const contextMax = agent.contextMax || '200k';
 
   const handleClick = () => {
     setSelectedAgentId(agent.id);
@@ -37,12 +39,18 @@ export const AgentLaneCard: React.FC<AgentLaneCardProps> = ({
         className="flex-1 min-w-[270px] p-4 border-r border-b border-[#1F242B] cursor-pointer hover:bg-[#12151A] hover:opacity-100 transition-all select-none"
       >
         <div className="flex gap-3.5">
-          <AgentPortrait agent={agent} size="sm" />
+          <AgentPortrait
+            displayName={agent.displayName}
+            presentation={agent.presentation}
+            status={agent.status}
+            phase={agent.phase}
+            size="sm"
+          />
 
           <div className="flex-1 min-w-0">
             <div className="flex items-center justify-between gap-2">
-              <span className="text-[14px] font-semibold text-[#E6E9ED]">{agent.name}</span>
-              <span className="font-mono-code text-[11px] text-[#5C646E]">{agent.model}</span>
+              <span className="text-[14px] font-semibold text-[#E6E9ED]">{agent.displayName}</span>
+              <span className="font-mono-code text-[11px] text-[#5C646E] truncate max-w-[100px]">{agent.model}</span>
             </div>
 
             <div className="flex items-center gap-2 mt-1.5">
@@ -56,19 +64,21 @@ export const AgentLaneCard: React.FC<AgentLaneCardProps> = ({
               >
                 {agent.status}
               </span>
-              <span className="font-mono-code text-[11px] tracking-wider text-[#8C949F] border-l border-[#2A3038] pl-2">
-                {agent.phase}
-              </span>
+              {agent.phase && (
+                <span className="font-mono-code text-[11px] tracking-wider text-[#8C949F] border-l border-[#2A3038] pl-2">
+                  {agent.phase}
+                </span>
+              )}
             </div>
 
             <p className="mt-2 text-[12px] text-[#B7BEC7] line-clamp-2 leading-relaxed">
-              {agent.task}
+              {agent.currentTask || agent.role}
             </p>
 
             <div className="mt-2.5 flex flex-wrap items-center gap-x-3.5 gap-y-1 font-mono-code text-[11px] text-[#8C949F]">
-              <span>{isRunning ? 'active runtime' : 'idle 02:14'}</span>
-              <span>{(currentTokens / 1000).toFixed(1)}k tokens</span>
-              <span style={{ color: agent.color }}>{agent.tool}</span>
+              <span>{isRunning ? 'active runtime' : 'idle'}</span>
+              <span>{agent.sessionTokens || '0k'}</span>
+              <span style={{ color: accentColor }}>{agent.activeTool || 'tool: —'}</span>
             </div>
 
             {/* Context meter */}
@@ -76,14 +86,14 @@ export const AgentLaneCard: React.FC<AgentLaneCardProps> = ({
               <div className="flex-1 h-[3px] bg-[#1F242B] relative">
                 <div
                   style={{
-                    width: agent.ctxPct,
-                    backgroundColor: agent.color
+                    width: contextPct,
+                    backgroundColor: accentColor
                   }}
                   className="absolute left-0 top-0 bottom-0 opacity-85"
                 />
               </div>
               <span className="font-mono-code text-[11px] text-[#5C646E]">
-                ctx {agent.ctxPct}
+                ctx {contextPct}
               </span>
             </div>
           </div>
@@ -97,22 +107,30 @@ export const AgentLaneCard: React.FC<AgentLaneCardProps> = ({
     <div
       onClick={handleClick}
       style={{ backgroundColor: '#0A0B0D' }}
-      className="flex-1 min-w-[360px] flex gap-4 p-5 border-r border-b border-[#1F242B] cursor-pointer hover:bg-[#0E1116] transition-colors select-none"
+      className="flex-1 min-w-[340px] flex gap-4 p-5 border-r border-b border-[#1F242B] cursor-pointer hover:bg-[#0E1116] transition-colors select-none"
     >
-      <AgentPortrait agent={agent} size="md" />
+      <AgentPortrait
+        displayName={agent.displayName}
+        presentation={agent.presentation}
+        status={agent.status}
+        phase={agent.phase}
+        size="md"
+      />
 
       <div className="flex-1 min-w-0 flex flex-col">
         <div className="flex items-center gap-2.5">
-          <span className="text-[15px] font-semibold text-[#E6E9ED]">{agent.name}</span>
-          <span
-            style={{
-              color: agent.color,
-              borderColor: `${agent.color}44`
-            }}
-            className="font-mono-code text-[11px] tracking-wider border px-1.5 py-0.5"
-          >
-            {agent.phase}
-          </span>
+          <span className="text-[15px] font-semibold text-[#E6E9ED]">{agent.displayName}</span>
+          {agent.phase && (
+            <span
+              style={{
+                color: accentColor,
+                borderColor: `${accentColor}44`
+              }}
+              className="font-mono-code text-[11px] tracking-wider border px-1.5 py-0.5"
+            >
+              {agent.phase}
+            </span>
+          )}
           <span
             style={{ color: isRunning ? '#3FB950' : '#8C949F' }}
             className="flex items-center gap-1.5 font-mono-code text-[11px] tracking-wider"
@@ -137,11 +155,11 @@ export const AgentLaneCard: React.FC<AgentLaneCardProps> = ({
         >
           <div className="flex items-center justify-between font-mono-code text-[11px] text-[#8C949F]">
             <span className="tracking-wider">CONTEXT WINDOW</span>
-            <span className="text-[#E6E9ED]">{agent.ctxUsed} / {agent.ctxMax} ({agent.ctxPct})</span>
+            <span className="text-[#E6E9ED]">{contextUsed} / {contextMax} ({contextPct})</span>
           </div>
           <div className="mt-1.5 h-[7px] bg-[#14171C] relative">
             <div
-              style={{ width: agent.ctxPct, backgroundColor: agent.color }}
+              style={{ width: contextPct, backgroundColor: accentColor }}
               className="absolute left-0 top-0 bottom-0 opacity-90"
             />
             <div className="absolute inset-0 bg-striped-pattern pointer-events-none" />
@@ -150,18 +168,15 @@ export const AgentLaneCard: React.FC<AgentLaneCardProps> = ({
           {showCtxPopup && (
             <div className="absolute left-0 top-full mt-2 z-30 w-64 p-3 bg-[#12151A] border border-[#2A3038] shadow-2xl font-mono-code text-[11px] text-[#B7BEC7] leading-relaxed">
               <div className="font-semibold text-[#E6E9ED] pb-1 border-b border-[#2A3038] mb-1.5">Context Window Allocation</div>
-              <div>• Input: {agent.input} ({agent.inPct})</div>
-              <div>• Output: {agent.output} ({agent.outPct})</div>
-              <div>• Cached: {agent.cached} ({agent.cachePct})</div>
-              <div style={{ color: agent.color }} className="pt-1 mt-1 border-t border-[#1F242B]">
-                • Free: {agent.remaining}
-              </div>
+              <div>• Used: {contextUsed} ({contextPct})</div>
+              <div>• Total Cap: {contextMax}</div>
+              <div>• Capabilities: {agent.capabilities.join(', ')}</div>
             </div>
           )}
         </div>
 
-        <p className="mt-3 text-[12px] text-[#B7BEC7] line-clamp-2 leading-relaxed">
-          {agent.task}
+        <p className="mt-3 text-[12px] text-[#B7BEC7] line-clamp-2 leading-relaxed font-sans">
+          {agent.currentTask || agent.role}
         </p>
 
         <div className="flex-1 min-h-3" />
@@ -169,20 +184,20 @@ export const AgentLaneCard: React.FC<AgentLaneCardProps> = ({
         {/* Bottom Quick Stats */}
         <div className="grid grid-cols-4 gap-2 pt-3 border-t border-[#1F242B]">
           <div>
-            <div className="text-[11px] text-[#5C646E] tracking-wider">QUEUE</div>
-            <div className="font-mono-code text-[13px] text-[#E6E9ED] mt-0.5">{agent.depth}</div>
+            <div className="text-[11px] text-[#5C646E] tracking-wider font-mono-code">QUEUE</div>
+            <div className="font-mono-code text-[13px] text-[#E6E9ED] mt-0.5">{agent.queueDepth ?? 0}</div>
           </div>
           <div>
-            <div className="text-[11px] text-[#5C646E] tracking-wider">SESSION</div>
-            <div className="font-mono-code text-[13px] text-[#E6E9ED] mt-0.5">{(currentTokens / 1000).toFixed(1)}k</div>
+            <div className="text-[11px] text-[#5C646E] tracking-wider font-mono-code">SESSION</div>
+            <div className="font-mono-code text-[13px] text-[#E6E9ED] mt-0.5">{agent.sessionTokens || '0k'}</div>
           </div>
           <div>
-            <div className="text-[11px] text-[#5C646E] tracking-wider">SUCCESS</div>
-            <div className="font-mono-code text-[13px] text-[#3FB950] mt-0.5">{agent.metrics[4]?.value || '95%'}</div>
+            <div className="text-[11px] text-[#5C646E] tracking-wider font-mono-code">STATUS</div>
+            <div className="font-mono-code text-[13px] text-[#3FB950] mt-0.5">{agent.status}</div>
           </div>
           <div>
-            <div className="text-[11px] text-[#5C646E] tracking-wider">FAILURES</div>
-            <div className="font-mono-code text-[13px] text-[#E3A008] mt-0.5">{agent.metrics[6]?.value || '0'}</div>
+            <div className="text-[11px] text-[#5C646E] tracking-wider font-mono-code">ROLE</div>
+            <div className="font-mono-code text-[13px] text-[#8C949F] mt-0.5 truncate">{agent.capabilities[0] || 'agent'}</div>
           </div>
         </div>
       </div>

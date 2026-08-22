@@ -1,45 +1,85 @@
 import React from 'react';
 import { useConsoleStore } from '../../stores/useConsoleStore';
-import { AGENT_COLOR_MAP } from '../../api/mockData';
+import { useJob } from '../../api/hooks';
+import { resolveActorRef } from '../../api/mock/actors';
 
-export const JobDetailView: React.FC = () => {
-  const { elapsed, jobTokens, hardenTokens, changedFiles, allEvents } = useConsoleStore();
+interface JobDetailViewProps {
+  jobId?: string;
+}
 
-  const graphSteps = [
-    { phase: 'BUILD', agent: 'Gemini', note: 'implementation complete', meta: '30.4k\n06:12', mark: '✓', state: 'done' },
-    { phase: 'HARDEN', agent: 'Claude', note: 'reviewing store contract', meta: `${hardenTokens}\n02:14`, mark: '●', state: 'active' },
-    { phase: 'VERIFY', agent: 'Codex', note: 'waiting for handoff', meta: '~19k\n~3m', mark: '○', state: 'next' },
-    { phase: 'COMPLETE', agent: 'Elysia', note: 'merge + report', meta: '', mark: '', state: 'idle' }
-  ];
+export const JobDetailView: React.FC<JobDetailViewProps> = ({ jobId = '#142' }) => {
+  const { elapsed, jobTokens, hardenTokens, allEvents } = useConsoleStore();
+  const { job } = useJob(jobId);
 
-  const testLog = `tests/state/test_redis_store.py ......... [ 62%]
-tests/state/test_migration.py ....s.... [ 91%]
-tests/state/test_ttl.py ....s [100%]
-186 collected · 184 passed · 2 skipped in 18.4s`;
+  const displayJob = job || {
+    id: jobId,
+    priority: 'P1' as const,
+    title: 'Redis State Migration',
+    repository: 'moveinmate/backend',
+    branch: 'feat/redis-state',
+    status: 'RUNNING' as const,
+    assignedAgentIds: ['gemini', 'claude', 'codex'],
+    startedAt: '10:38',
+    budget: '80k',
+    policy: 'serial · retry 3',
+    executionGraph: [
+      { id: '1', phase: 'BUILD' as const, agentId: 'gemini', agentName: 'Gemini', note: 'implementation complete', meta: '30.4k\n06:12', mark: '✓', state: 'COMPLETE' as const, task: 'Build' },
+      { id: '2', phase: 'HARDEN' as const, agentId: 'claude', agentName: 'Claude', note: 'reviewing store contract', meta: `${hardenTokens}\n02:14`, mark: '●', state: 'RUNNING' as const, task: 'Harden' },
+      { id: '3', phase: 'VERIFY' as const, agentId: 'codex', agentName: 'Codex', note: 'waiting for handoff', meta: '~19k\n~3m', mark: '○', state: 'QUEUED' as const, task: 'Verify' },
+      { id: '4', phase: 'COMPLETE' as const, agentId: 'elysia', agentName: 'Elysia', note: 'merge + report', meta: '', mark: '', state: 'idle' as const, task: 'Complete' }
+    ],
+    changedFiles: [
+      { mark: 'A' as const, path: 'src/state/redis_store.py', add: '+184', del: '−0', byActorId: 'gemini', byDisplayName: 'Gemini' },
+      { mark: 'M' as const, path: 'src/state/store.py', add: '+22', del: '−96', byActorId: 'gemini', byDisplayName: 'Gemini' },
+      { mark: 'M' as const, path: 'src/state/__init__.py', add: '+4', del: '−2', byActorId: 'gemini', byDisplayName: 'Gemini' },
+      { mark: 'A' as const, path: 'tests/state/test_redis_store.py', add: '+141', del: '−0', byActorId: 'gemini', byDisplayName: 'Gemini' },
+      { mark: 'M' as const, path: 'tests/state/test_migration.py', add: '+38', del: '−11', byActorId: 'gemini', byDisplayName: 'Gemini' },
+      { mark: 'M' as const, path: 'docs/adr/0007-state.md', add: '+61', del: '−4', byActorId: 'claude', byDisplayName: 'Claude' },
+      { mark: 'M' as const, path: 'compose.yaml', add: '+9', del: '−0', byActorId: 'gemini', byDisplayName: 'Gemini' }
+    ],
+    testSummary: {
+      passed: 184,
+      skipped: 2,
+      failed: 0,
+      duration: '18.4s',
+      rawLog: `tests/state/test_redis_store.py ......... [ 62%]\ntests/state/test_migration.py ....s.... [ 91%]\ntests/state/test_ttl.py ....s [100%]\n186 collected · 184 passed · 2 skipped in 18.4s`
+    },
+    retryHistory: [
+      { attempt: 1, phase: 'BUILD' as const, status: 'failed' as const, note: 'redis connection refused in sandbox; retried with local container' },
+      { attempt: 2, phase: 'BUILD' as const, status: 'passed' as const, note: 'container connection successful' }
+    ],
+    retriesUsed: 1,
+    maxRetries: 3,
+    tokenBreakdown: [
+      { agentId: 'gemini', agentName: 'Gemini', phase: 'BUILD' as const, tokensFormatted: '30.4k', color: '#5B8CFF', percentage: 38 },
+      { agentId: 'claude', agentName: 'Claude', phase: 'HARDEN' as const, tokensFormatted: hardenTokens, color: '#D9A05B', percentage: 17 },
+      { agentId: 'codex', agentName: 'Codex', phase: 'VERIFY' as const, tokensFormatted: '~19k', color: '#4EC9A0', percentage: 0 }
+    ]
+  };
 
   return (
     <div className="w-full bg-[#0A0B0D] select-none">
       {/* Header Banner */}
       <div className="p-5 border-b border-[#1F242B] bg-[#0C0E11]">
         <div className="flex items-center gap-3">
-          <span className="font-mono-code text-[22px] text-[#5C646E]">#142</span>
+          <span className="font-mono-code text-[22px] text-[#5C646E]">{displayJob.id}</span>
           <h2 className="text-[22px] font-semibold text-[#E6E9ED]">
-            Redis State Migration
+            {displayJob.title}
           </h2>
           <span className="flex items-center gap-1.5 font-mono-code text-[11px] tracking-wider text-[#3FB950] border border-[rgba(63,185,80,0.35)] px-2 py-0.5 bg-[rgba(63,185,80,0.08)]">
             <span className="w-1 h-1 rounded-[1px] bg-[#3FB950] animate-pulse" />
-            RUNNING
+            {displayJob.status}
           </span>
         </div>
 
         <div className="mt-2.5 flex items-center flex-wrap gap-x-4 gap-y-1 font-mono-code text-[11px] text-[#8C949F]">
-          <span>moveinmate/backend</span>
-          <span className="text-[#CBA35C]">feat/redis-state</span>
+          <span>{displayJob.repository}</span>
+          {displayJob.branch && <span className="text-[#CBA35C]">{displayJob.branch}</span>}
           <span className="text-[#2A3038]">·</span>
-          <span>started 10:38</span>
+          <span>started {displayJob.startedAt || '10:38'}</span>
           <span>elapsed <span className="text-[#E6E9ED]">{elapsed}</span></span>
-          <span>budget <span className="text-[#E6E9ED]">{jobTokens}</span> / 80k</span>
-          <span>policy <span className="text-[#E6E9ED]">serial · retry 3</span></span>
+          <span>budget <span className="text-[#E6E9ED]">{jobTokens}</span> / {displayJob.budget || '80k'}</span>
+          <span>policy <span className="text-[#E6E9ED]">{displayJob.policy || 'serial · retry 3'}</span></span>
         </div>
       </div>
 
@@ -53,13 +93,14 @@ tests/state/test_ttl.py ....s [100%]
 
           <div style={{ perspective: '800px' }} className="flex flex-col">
             <div style={{ transformStyle: 'preserve-3d' }} className="flex flex-col">
-              {graphSteps.map((g, idx) => {
-                const col = AGENT_COLOR_MAP[g.agent] || '#3A4048';
-                const isDone = g.state === 'done';
-                const isActive = g.state === 'active';
+              {displayJob.executionGraph.map((g, idx) => {
+                const actor = g.agentId ? resolveActorRef(g.agentId) : null;
+                const col = actor?.accentColor || '#3A4048';
+                const isDone = g.state === 'COMPLETE';
+                const isActive = g.state === 'RUNNING';
 
                 return (
-                  <div key={idx}>
+                  <div key={g.id || idx}>
                     <div
                       style={{
                         borderColor: isActive ? 'rgba(217,160,91,0.45)' : isDone ? '#1F242B' : '#161A1F',
@@ -78,7 +119,7 @@ tests/state/test_ttl.py ....s [100%]
                         }}
                         className="w-4.5 h-4.5 flex-shrink-0 flex items-center justify-center font-mono-code text-[11px] clip-hex"
                       >
-                        {g.mark}
+                        {g.mark || (isDone ? '✓' : isActive ? '●' : '○')}
                       </div>
 
                       <div className="flex-1 min-w-0">
@@ -89,7 +130,7 @@ tests/state/test_ttl.py ....s [100%]
                           {g.phase}
                         </div>
                         <div style={{ color: g.state === 'idle' ? '#3A4048' : col }} className="text-[12px] mt-0.5">
-                          {g.agent}
+                          {g.agentName || actor?.displayName || '—'}
                         </div>
                         <div className="font-mono-code text-[11px] text-[#5C646E] mt-0.5">
                           {g.note}
@@ -102,7 +143,7 @@ tests/state/test_ttl.py ....s [100%]
                     </div>
 
                     {/* Step Connector */}
-                    {idx < graphSteps.length - 1 && (
+                    {idx < displayJob.executionGraph.length - 1 && (
                       <div
                         style={{ backgroundColor: isDone ? 'rgba(63,185,80,0.4)' : '#1F242B' }}
                         className="h-4 w-[1px] ml-5"
@@ -120,27 +161,29 @@ tests/state/test_ttl.py ....s [100%]
               TOKEN CONSUMPTION
             </div>
             <div className="flex h-2.5 bg-[#14171C] overflow-hidden">
-              <div className="w-[38%] bg-[#5B8CFF] opacity-85" title="Gemini BUILD: 30.4k" />
-              <div className="w-[17%] bg-[#D9A05B] opacity-85" title="Claude HARDEN: 13.7k" />
-              <div className="w-[0%] bg-[#4EC9A0] opacity-85" title="Codex VERIFY: pending" />
+              {displayJob.tokenBreakdown.map((t, idx) => (
+                <div
+                  key={idx}
+                  style={{
+                    width: `${t.percentage || 25}%`,
+                    backgroundColor: t.color || '#5B8CFF',
+                    opacity: 0.85
+                  }}
+                  title={`${t.agentName} ${t.phase}: ${t.tokensFormatted}`}
+                />
+              ))}
             </div>
 
             <div className="mt-2.5 flex flex-col gap-1.5 font-mono-code text-[11px]">
-              <div className="flex justify-between text-[#8C949F]">
-                <span className="text-[#5B8CFF]">Gemini · BUILD</span>
-                <span>30.4k</span>
-              </div>
-              <div className="flex justify-between text-[#8C949F]">
-                <span className="text-[#D9A05B]">Claude · HARDEN</span>
-                <span>{hardenTokens}</span>
-              </div>
-              <div className="flex justify-between text-[#8C949F]">
-                <span className="text-[#4EC9A0]">Codex · VERIFY</span>
-                <span>pending ~19k</span>
-              </div>
+              {displayJob.tokenBreakdown.map((t, idx) => (
+                <div key={idx} className="flex justify-between text-[#8C949F]">
+                  <span style={{ color: t.color }}>{t.agentName} · {t.phase}</span>
+                  <span>{t.tokensFormatted}</span>
+                </div>
+              ))}
               <div className="flex justify-between text-[#8C949F] border-t border-[#1F242B] pt-1.5 mt-1">
                 <span>total / cap</span>
-                <span className="text-[#E6E9ED]">{jobTokens} / 80k</span>
+                <span className="text-[#E6E9ED]">{jobTokens} / {displayJob.budget || '80k'}</span>
               </div>
             </div>
           </div>
@@ -151,33 +194,36 @@ tests/state/test_ttl.py ....s [100%]
           {/* Changed Files */}
           <div className="p-4 border-b border-[#1F242B]">
             <div className="font-mono-code text-[11px] tracking-wider text-[#5C646E] mb-2.5">
-              CHANGED FILES · {changedFiles.length}
+              CHANGED FILES · {displayJob.changedFiles.length}
             </div>
             <div className="flex flex-col gap-1">
-              {changedFiles.map((f, idx) => (
-                <div
-                  key={idx}
-                  className="flex items-center gap-3.5 py-1 font-mono-code text-[11.5px] hover:bg-[#12151A] px-1"
-                >
-                  <span
-                    style={{ color: f.mark === 'A' ? '#3FB950' : '#E3A008' }}
-                    className="w-4 font-bold"
+              {displayJob.changedFiles.map((f, idx) => {
+                const actor = resolveActorRef(f.byActorId);
+                return (
+                  <div
+                    key={idx}
+                    className="flex items-center gap-3.5 py-1 font-mono-code text-[11.5px] hover:bg-[#12151A] px-1"
                   >
-                    {f.mark}
-                  </span>
-                  <span className="flex-1 min-w-0 text-[#D7DCE2] truncate">
-                    {f.path}
-                  </span>
-                  <span className="w-14 text-right text-[#3FB950]">{f.add}</span>
-                  <span className="w-12 text-right text-[#F2555A]">{f.del}</span>
-                  <span
-                    style={{ color: AGENT_COLOR_MAP[f.by] }}
-                    className="w-16 text-right font-medium"
-                  >
-                    {f.by}
-                  </span>
-                </div>
-              ))}
+                    <span
+                      style={{ color: f.mark === 'A' ? '#3FB950' : '#E3A008' }}
+                      className="w-4 font-bold"
+                    >
+                      {f.mark}
+                    </span>
+                    <span className="flex-1 min-w-0 text-[#D7DCE2] truncate">
+                      {f.path}
+                    </span>
+                    <span className="w-14 text-right text-[#3FB950]">{f.add}</span>
+                    <span className="w-12 text-right text-[#F2555A]">{f.del}</span>
+                    <span
+                      style={{ color: actor.accentColor || '#8C949F' }}
+                      className="w-16 text-right font-medium"
+                    >
+                      {f.byDisplayName || actor.displayName}
+                    </span>
+                  </div>
+                );
+              })}
             </div>
           </div>
 
@@ -189,13 +235,13 @@ tests/state/test_ttl.py ....s [100%]
                 TEST RESULTS
               </div>
               <div className="flex gap-5 font-mono-code text-[12px]">
-                <span className="text-[#3FB950]">184 passed</span>
-                <span className="text-[#E3A008]">2 skipped</span>
-                <span className="text-[#8C949F]">0 failed</span>
-                <span className="text-[#5C646E]">18.4s</span>
+                <span className="text-[#3FB950]">{displayJob.testSummary?.passed || 0} passed</span>
+                <span className="text-[#E3A008]">{displayJob.testSummary?.skipped || 0} skipped</span>
+                <span className="text-[#8C949F]">{displayJob.testSummary?.failed || 0} failed</span>
+                <span className="text-[#5C646E]">{displayJob.testSummary?.duration || '—'}</span>
               </div>
               <div className="mt-3 p-3 bg-[#0E1116] border border-[#1F242B] font-mono-code text-[11px] text-[#8C949F] leading-relaxed whitespace-pre">
-                {testLog}
+                {displayJob.testSummary?.rawLog || 'No test logs available.'}
               </div>
             </div>
 
@@ -205,20 +251,22 @@ tests/state/test_ttl.py ....s [100%]
                 RETRY HISTORY
               </div>
               <div className="flex flex-col gap-2 font-mono-code text-[11px]">
-                <div className="flex justify-between text-[#8C949F]">
-                  <span>attempt 1 · BUILD</span>
-                  <span className="text-[#F2555A]">failed</span>
-                </div>
-                <div className="text-[#5C646E] text-[10.5px] leading-relaxed">
-                  redis connection refused in sandbox; retried with local container
-                </div>
-                <div className="flex justify-between text-[#8C949F] border-t border-[#1F242B] pt-2">
-                  <span>attempt 2 · BUILD</span>
-                  <span className="text-[#3FB950]">passed</span>
-                </div>
-                <div className="flex justify-between text-[#8C949F]">
+                {displayJob.retryHistory.map((r, idx) => (
+                  <div key={idx} className="flex flex-col gap-0.5">
+                    <div className="flex justify-between text-[#8C949F]">
+                      <span>attempt {r.attempt} · {r.phase}</span>
+                      <span className={r.status === 'passed' ? 'text-[#3FB950]' : 'text-[#F2555A]'}>{r.status}</span>
+                    </div>
+                    {r.note && (
+                      <div className="text-[#5C646E] text-[10.5px] leading-relaxed">
+                        {r.note}
+                      </div>
+                    )}
+                  </div>
+                ))}
+                <div className="flex justify-between text-[#8C949F] border-t border-[#1F242B] pt-2 mt-1">
                   <span>retries used</span>
-                  <span className="text-[#E6E9ED]">1 / 3</span>
+                  <span className="text-[#E6E9ED]">{displayJob.retriesUsed} / {displayJob.maxRetries}</span>
                 </div>
               </div>
             </div>
@@ -227,20 +275,20 @@ tests/state/test_ttl.py ....s [100%]
           {/* Tool Calls */}
           <div className="p-4 pb-8">
             <div className="font-mono-code text-[11px] tracking-wider text-[#5C646E] mb-2.5">
-              TOOL CALLS · JOB #142
+              TOOL CALLS · {displayJob.id}
             </div>
             <div className="flex flex-col">
-              {allEvents.slice(0, 8).map((e, idx) => (
+              {allEvents.slice(0, 8).map((e) => (
                 <div
-                  key={idx}
+                  key={e.id}
                   className="flex items-center gap-3.5 py-1 font-mono-code text-[11px] border-b border-[#101216]"
                 >
                   <span className="w-24 text-[#5C646E]">{e.ts}</span>
                   <span
-                    style={{ color: AGENT_COLOR_MAP[e.agent] || '#8C949F' }}
+                    style={{ color: e.source.accentColor || '#8C949F' }}
                     className="w-16 font-medium"
                   >
-                    {e.agent}
+                    {e.source.displayName}
                   </span>
                   <span className="w-28 text-[#8C949F]">{e.kind}</span>
                   <span className="flex-1 min-w-0 text-[#B7BEC7] truncate">{e.detail}</span>

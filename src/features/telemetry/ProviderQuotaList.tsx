@@ -1,8 +1,8 @@
 import React from 'react';
-import { useConsoleStore } from '../../stores/useConsoleStore';
+import { useTelemetry } from '../../api/hooks';
 
 export const ProviderQuotaList: React.FC<{ compact?: boolean }> = ({ compact = false }) => {
-  const { quotas } = useConsoleStore();
+  const { quotas } = useTelemetry();
 
   if (compact) {
     return (
@@ -16,7 +16,7 @@ export const ProviderQuotaList: React.FC<{ compact?: boolean }> = ({ compact = f
             const tagColor = q.tag === 'EXACT' ? '#3FB950' : q.tag === 'ESTIMATED' ? '#E3A008' : '#8C949F';
 
             return (
-              <div key={q.name}>
+              <div key={q.id}>
                 <div className="flex items-center justify-between mb-1.5 font-mono-code text-[11px]">
                   <span style={{ color: q.color }}>{q.name}</span>
                   <span
@@ -69,7 +69,7 @@ export const ProviderQuotaList: React.FC<{ compact?: boolean }> = ({ compact = f
 
           return (
             <div
-              key={q.name}
+              key={q.id}
               style={{
                 borderColor: q.tag === 'UNKNOWN' ? '#1A1E24' : '#1F242B'
               }}

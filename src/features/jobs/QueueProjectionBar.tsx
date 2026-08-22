@@ -1,8 +1,8 @@
 import React from 'react';
-import { useConsoleStore } from '../../stores/useConsoleStore';
+import { useTelemetry } from '../../api/hooks';
 
 export const QueueProjectionBar: React.FC<{ compact?: boolean }> = ({ compact = false }) => {
-  const { projections } = useConsoleStore();
+  const { projections } = useTelemetry();
 
   if (compact) {
     return (
@@ -80,7 +80,7 @@ export const QueueProjectionBar: React.FC<{ compact?: boolean }> = ({ compact = 
       <div className="mt-4 max-w-4xl flex justify-between pt-3 border-t border-[#1F242B] font-mono-code text-[11px]">
         <span className="text-[#5C646E]">projected remainder after queue</span>
         <span className="text-[#E3A008]">
-          ~12k · ⚠ another large Codex verification may exceed budget
+          ~12k · ⚠ another large verification may exceed budget
         </span>
       </div>
     </div>

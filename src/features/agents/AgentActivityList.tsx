@@ -1,7 +1,7 @@
 import React from 'react';
-import { AgentData } from '../../api/types';
+import { AgentDetail } from '../../api/types';
 
-export const AgentActivityList: React.FC<{ agent: AgentData }> = ({ agent }) => {
+export const AgentActivityList: React.FC<{ agent: AgentDetail }> = ({ agent }) => {
   const getOpColor = (op: string) => {
     switch (op) {
       case 'WRITE': return '#E3A008';

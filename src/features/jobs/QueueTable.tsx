@@ -1,10 +1,10 @@
 import React from 'react';
-import { JobItem } from '../../api/types';
+import { Job, AgentId } from '../../api/types';
 import { useConsoleStore } from '../../stores/useConsoleStore';
-import { AGENT_COLOR_MAP } from '../../api/mockData';
+import { resolveActorRef } from '../../api/mock/actors';
 
 interface QueueTableProps {
-  jobs: JobItem[];
+  jobs: Job[];
   onSelectJob?: (jobId: string) => void;
   showFilters?: boolean;
 }
@@ -24,6 +24,7 @@ const STATUS_COLOR: Record<string, string> = {
   BLOCKED: '#E3A008',
   FAILED: '#F2555A',
   COMPLETED: '#5C646E',
+  COMPLETE: '#5C646E',
   CANCELLED: '#5C646E'
 };
 
@@ -35,6 +36,11 @@ export const QueueTable: React.FC<QueueTableProps> = ({
   const { qFilter, setQFilter } = useConsoleStore();
 
   const filterOptions = ['All', 'Queued', 'Blocked', 'Completed', 'Cancelled'];
+
+  const filteredJobs = jobs.filter((q) => {
+    if (qFilter === 'All') return true;
+    return q.status.toUpperCase() === qFilter.toUpperCase();
+  });
 
   return (
     <div className="w-full select-none">
@@ -74,9 +80,9 @@ export const QueueTable: React.FC<QueueTableProps> = ({
 
       {/* Table Body */}
       <div className="flex flex-col">
-        {jobs.map((q) => {
+        {filteredJobs.map((q) => {
           const isBlocked = q.status === 'BLOCKED';
-          const prioColor = PRIO_COLOR[q.prio] || '#8C949F';
+          const prioColor = PRIO_COLOR[q.priority] || '#8C949F';
           const statusColor = STATUS_COLOR[q.status] || '#8C949F';
 
           return (
@@ -93,7 +99,7 @@ export const QueueTable: React.FC<QueueTableProps> = ({
                 style={{ color: prioColor }}
                 className="w-8 flex-shrink-0 font-mono-code text-[11px] font-semibold"
               >
-                {q.prio}
+                {q.priority}
               </span>
 
               {/* ID */}
@@ -103,20 +109,21 @@ export const QueueTable: React.FC<QueueTableProps> = ({
 
               {/* Task Name */}
               <span className="flex-1 min-w-[220px] text-[13px] text-[#E6E9ED] truncate">
-                {q.task}
+                {q.title}
               </span>
 
               {/* Repo */}
               <span className="w-36 flex-shrink-0 hidden md:block font-mono-code text-[11px] text-[#8C949F] truncate">
-                {q.repo}
+                {q.repository}
               </span>
 
               {/* Agent Chain Badges */}
               <div className="w-48 flex-shrink-0 hidden lg:flex items-center gap-1.5 overflow-hidden">
-                {q.chain.map((agName, i) => {
-                  const agColor = AGENT_COLOR_MAP[agName] || '#8C949F';
+                {q.assignedAgentIds.map((agId: AgentId, i: number) => {
+                  const actor = resolveActorRef(agId);
+                  const agColor = actor.accentColor || '#8C949F';
                   return (
-                    <React.Fragment key={i}>
+                    <React.Fragment key={agId + i}>
                       <div
                         style={{
                           borderColor: agColor,
@@ -124,11 +131,11 @@ export const QueueTable: React.FC<QueueTableProps> = ({
                           backgroundColor: `${agColor}18`
                         }}
                         className="w-4 h-4 flex items-center justify-center font-mono-code text-[10px] clip-hex"
-                        title={agName}
+                        title={actor.displayName}
                       >
-                        {agName[0]}
+                        {actor.displayName ? actor.displayName[0] : agId[0].toUpperCase()}
                       </div>
-                      {i < q.chain.length - 1 && (
+                      {i < q.assignedAgentIds.length - 1 && (
                         <span className="font-mono-code text-[11px] text-[#3A4048]">→</span>
                       )}
                     </React.Fragment>
@@ -138,12 +145,12 @@ export const QueueTable: React.FC<QueueTableProps> = ({
 
               {/* Tokens */}
               <span className="w-24 flex-shrink-0 text-right font-mono-code text-[11px] text-[#8C949F]">
-                {q.tokens}
+                {q.estimatedTokens || '—'}
               </span>
 
               {/* Time */}
               <span className="w-20 flex-shrink-0 text-right hidden sm:block font-mono-code text-[11px] text-[#8C949F]">
-                {q.time}
+                {q.estimatedTime || '—'}
               </span>
 
               {/* Status */}

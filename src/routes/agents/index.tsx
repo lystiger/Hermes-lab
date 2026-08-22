@@ -1,10 +1,10 @@
 import React from 'react';
 import { AgentLaneCard } from '../../features/agents/AgentLaneCard';
 import { MessageDispatcher } from '../../features/messaging/MessageDispatcher';
-import { useConsoleStore } from '../../stores/useConsoleStore';
+import { useAgents } from '../../api/hooks';
 
 export const AgentsListRoute: React.FC = () => {
-  const { agents } = useConsoleStore();
+  const { agents, loading } = useAgents();
 
   return (
     <div className="flex flex-col select-none bg-[#0A0B0D]">
@@ -19,6 +19,12 @@ export const AgentsListRoute: React.FC = () => {
           <AgentLaneCard key={ag.id} agent={ag} size="full" />
         ))}
       </div>
+
+      {loading && (
+        <div className="p-8 text-center font-mono-code text-[12px] text-[#5C646E]">
+          Loading operator registry...
+        </div>
+      )}
 
       <div className="p-5 font-mono-code text-[11px] text-[#5C646E]">
         Operator configuration loaded from <span className="text-[#8C949F]">~/.lyscontrol/agents.toml</span> · Click any operator to inspect metrics, context window allocations, and trace history.

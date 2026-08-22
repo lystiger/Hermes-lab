@@ -1,7 +1,6 @@
 import React from 'react';
 
 export const AnimatedCube: React.FC<{ size?: number }> = ({ size = 26 }) => {
-  const half = Math.round(size / 2);
   const inner = Math.round(size * 0.54);
   const zTrans = Math.round(inner / 2);
 

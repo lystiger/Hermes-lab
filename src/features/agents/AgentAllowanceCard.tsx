@@ -1,8 +1,9 @@
 import React, { useState } from 'react';
-import { AgentData } from '../../api/types';
+import { AgentDetail } from '../../api/types';
 
-export const AgentAllowanceCard: React.FC<{ agent: AgentData }> = ({ agent }) => {
+export const AgentAllowanceCard: React.FC<{ agent: AgentDetail }> = ({ agent }) => {
   const [showTooltip, setShowTooltip] = useState(false);
+  const accentColor = agent.presentation?.accentColor || '#8C949F';
 
   return (
     <div className="flex-1 min-w-[240px]">
@@ -34,7 +35,7 @@ export const AgentAllowanceCard: React.FC<{ agent: AgentData }> = ({ agent }) =>
                 <div
                   style={{
                     width: al.pct,
-                    backgroundColor: al.tag === 'N/A' ? '#3A4048' : agent.color,
+                    backgroundColor: al.tag === 'N/A' ? '#3A4048' : accentColor,
                     opacity: isEst ? 0.5 : 0.9
                   }}
                   className="absolute left-0 top-0 bottom-0"

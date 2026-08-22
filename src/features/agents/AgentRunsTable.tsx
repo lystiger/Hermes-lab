@@ -1,8 +1,9 @@
 import React from 'react';
-import { AgentData } from '../../api/types';
-import { AGENT_COLOR_MAP } from '../../api/mockData';
+import { AgentDetail } from '../../api/types';
 
-export const AgentRunsTable: React.FC<{ agent: AgentData }> = ({ agent }) => {
+export const AgentRunsTable: React.FC<{ agent: AgentDetail }> = ({ agent }) => {
+  const accentColor = agent.presentation?.accentColor || '#8C949F';
+
   const getResultColor = (res: string) => {
     switch (res) {
       case 'PASSED': return '#3FB950';
@@ -28,7 +29,7 @@ export const AgentRunsTable: React.FC<{ agent: AgentData }> = ({ agent }) => {
           >
             <span className="w-12 text-[#8C949F]">{r.id}</span>
             <span
-              style={{ color: agent.color }}
+              style={{ color: accentColor }}
               className="w-16 tracking-wider font-semibold"
             >
               {r.phase}
@@ -46,6 +47,11 @@ export const AgentRunsTable: React.FC<{ agent: AgentData }> = ({ agent }) => {
             </span>
           </div>
         ))}
+        {agent.runs.length === 0 && (
+          <div className="py-4 text-center font-mono-code text-[11px] text-[#5C646E]">
+            No recent execution runs logged for this agent.
+          </div>
+        )}
       </div>
     </div>
   );

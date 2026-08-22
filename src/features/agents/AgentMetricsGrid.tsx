@@ -1,7 +1,7 @@
 import React from 'react';
-import { AgentData } from '../../api/types';
+import { AgentDetail } from '../../api/types';
 
-export const AgentMetricsGrid: React.FC<{ agent: AgentData }> = ({ agent }) => {
+export const AgentMetricsGrid: React.FC<{ agent: AgentDetail }> = ({ agent }) => {
   return (
     <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 border-b border-[#1F242B]">
       {agent.metrics.map((m, idx) => (
@@ -9,7 +9,7 @@ export const AgentMetricsGrid: React.FC<{ agent: AgentData }> = ({ agent }) => {
           key={idx}
           className="p-4 border-r border-[#1F242B] last:border-r-0 bg-[#0C0E11]"
         >
-          <div className="text-[11px] tracking-wider text-[#5C646E]">
+          <div className="text-[11px] tracking-wider text-[#5C646E] font-mono-code">
             {m.label}
           </div>
           <div

@@ -1,11 +1,12 @@
 import React from 'react';
 import { useConsoleStore } from '../stores/useConsoleStore';
-import { AGENT_COLOR_MAP } from '../api/mockData';
+import { useAgents } from '../api/hooks';
 
 export const EventsRoute: React.FC = () => {
-  const { events, eFilter, setEFilter, allEvents, setActiveModalJobId, liveMotion } = useConsoleStore();
+  const { allEvents, eFilter, setEFilter, setActiveModalJobId, liveMotion } = useConsoleStore();
+  const { agents } = useAgents();
 
-  const filterTabs = ['All', 'Hermes', 'Gemini', 'Claude', 'Codex', 'Errors', 'Tools'];
+  const filterTabs = ['All', 'Hermes', ...agents.map(a => a.displayName), 'Errors', 'Tools'];
 
   const getKindColor = (k: string) => {
     if (k === 'error') return '#F2555A';
@@ -21,13 +22,23 @@ export const EventsRoute: React.FC = () => {
     return 'transparent';
   };
 
+  const filteredEvents = allEvents.filter((e) => {
+    if (eFilter === 'All') return true;
+    if (eFilter === 'Errors') return e.kind === 'error' || e.kind === 'retry' || e.kind === 'quota.warn';
+    if (eFilter === 'Tools') return e.kind.startsWith('tool.');
+    return (
+      e.source.id.toLowerCase() === eFilter.toLowerCase() ||
+      e.source.displayName.toLowerCase() === eFilter.toLowerCase()
+    );
+  });
+
   return (
     <div className="flex flex-col select-none bg-[#0A0B0D]">
       {/* Sticky Filter Header */}
-      <div className="sticky top-0 z-20 flex items-center justify-between px-5 py-2.5 border-b border-[#1F242B] bg-[#0A0B0D]">
-        <div className="flex gap-1">
+      <div className="sticky top-0 z-20 flex items-center justify-between px-5 py-2.5 border-b border-[#1F242B] bg-[#0A0B0D] overflow-x-auto">
+        <div className="flex gap-1 flex-shrink-0">
           {filterTabs.map((f) => {
-            const isActive = eFilter === f;
+            const isActive = eFilter.toLowerCase() === f.toLowerCase();
             return (
               <button
                 key={f}
@@ -44,7 +55,7 @@ export const EventsRoute: React.FC = () => {
           })}
         </div>
 
-        <div className="flex items-center gap-3.5 font-mono-code text-[11px] text-[#5C646E]">
+        <div className="flex items-center gap-3.5 font-mono-code text-[11px] text-[#5C646E] flex-shrink-0 pl-4">
           <span>{allEvents.length} events logged</span>
           <span className="flex items-center gap-1.5 text-[#3FB950]">
             <span className={`w-1.5 h-1.5 rounded-[1px] bg-[#3FB950] ${liveMotion ? 'animate-pulse' : ''}`} />
@@ -65,8 +76,8 @@ export const EventsRoute: React.FC = () => {
 
       {/* Event Rows */}
       <div className="flex flex-col">
-        {events.map((e) => {
-          const agColor = AGENT_COLOR_MAP[e.agent] || '#8C949F';
+        {filteredEvents.map((e) => {
+          const actorColor = e.source.accentColor || '#8C949F';
 
           return (
             <div
@@ -74,9 +85,9 @@ export const EventsRoute: React.FC = () => {
               style={{ backgroundColor: getRowBg(e.kind) }}
               className="flex items-center gap-4 px-5 py-1.5 font-mono-code text-[11.5px] border-b border-[#101216] hover:bg-[#12151A] transition-colors"
             >
-              <span className="w-24 flex-shrink-0 text-[#5C646E]">{e.ts}</span>
-              <span style={{ color: agColor }} className="w-20 flex-shrink-0 font-semibold">
-                {e.agent}
+              <span className="w-24 text-[#5C646E]">{e.ts}</span>
+              <span style={{ color: actorColor }} className="w-20 flex-shrink-0 font-semibold">
+                {e.source.displayName}
               </span>
               <span style={{ color: getKindColor(e.kind) }} className="w-32 flex-shrink-0 font-medium">
                 {e.kind}
@@ -85,12 +96,16 @@ export const EventsRoute: React.FC = () => {
                 {e.detail}
               </span>
               <span className="w-20 flex-shrink-0 text-right text-[#8C949F]">{e.dur}</span>
-              <button
-                onClick={() => setActiveModalJobId(e.job)}
-                className="w-16 flex-shrink-0 text-right text-[#CBA35C] hover:underline cursor-pointer"
-              >
-                {e.job}
-              </button>
+              {e.jobId ? (
+                <button
+                  onClick={() => setActiveModalJobId(e.jobId || null)}
+                  className="w-16 flex-shrink-0 text-right text-[#CBA35C] hover:underline cursor-pointer"
+                >
+                  {e.jobId}
+                </button>
+              ) : (
+                <span className="w-16 flex-shrink-0 text-right text-[#5C646E]">—</span>
+              )}
             </div>
           );
         })}

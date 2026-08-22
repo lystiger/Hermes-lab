@@ -2,13 +2,11 @@ import React from 'react';
 import { useNavigate } from 'react-router-dom';
 import { SandboxStatus } from '../features/tools/SandboxStatus';
 import { useConsoleStore } from '../stores/useConsoleStore';
+import { useAgents, useSettings } from '../api/hooks';
 
 export const SettingsRoute: React.FC = () => {
   const navigate = useNavigate();
   const {
-    runtimeSettings,
-    policySettings,
-    agents,
     liveMotion,
     setLiveMotion,
     ambient3d,
@@ -16,6 +14,9 @@ export const SettingsRoute: React.FC = () => {
     portraits,
     setPortraits
   } = useConsoleStore();
+
+  const { agents } = useAgents();
+  const { settings } = useSettings();
 
   return (
     <div className="flex flex-col select-none bg-[#0A0B0D]">
@@ -27,7 +28,7 @@ export const SettingsRoute: React.FC = () => {
             RUNTIME &amp; ENVIRONMENT
           </div>
           <div className="flex flex-col gap-2.5">
-            {runtimeSettings.map((s, idx) => (
+            {settings.runtime.map((s, idx) => (
               <div key={idx} className="flex justify-between items-baseline font-mono-code text-[12px]">
                 <span className="text-[#8C949F]">{s.label}</span>
                 <span style={{ color: s.color || '#E6E9ED' }}>{s.value}</span>
@@ -84,7 +85,7 @@ export const SettingsRoute: React.FC = () => {
             BUDGET &amp; POLICY
           </div>
           <div className="flex flex-col gap-2.5">
-            {policySettings.map((s, idx) => (
+            {settings.policy.map((s, idx) => (
               <div key={idx} className="flex justify-between items-baseline font-mono-code text-[12px]">
                 <span className="text-[#8C949F]">{s.label}</span>
                 <span style={{ color: s.color || '#E6E9ED' }}>{s.value}</span>
@@ -98,29 +99,34 @@ export const SettingsRoute: React.FC = () => {
               REGISTERED OPERATORS
             </div>
             <div className="flex flex-col gap-1">
-              {agents.map((ag) => (
-                <div
-                  key={ag.id}
-                  onClick={() => navigate(`/agents/${ag.id}`)}
-                  style={{ borderLeftColor: ag.color }}
-                  className="flex items-center gap-3.5 p-2.5 bg-[#101216] border-l-2 hover:bg-[#161A20] cursor-pointer transition-colors"
-                >
-                  <span
-                    style={{ borderColor: ag.color, backgroundColor: `${ag.color}22` }}
-                    className="w-3.5 h-3.5 border clip-hex"
-                  />
-                  <span className="w-20 text-[13px] text-[#E6E9ED]">{ag.name}</span>
-                  <span style={{ color: ag.color }} className="w-16 font-mono-code text-[11px] tracking-wider font-semibold">
-                    {ag.phase}
-                  </span>
-                  <span className="flex-1 min-w-0 font-mono-code text-[11px] text-[#8C949F] truncate">
-                    {ag.model}
-                  </span>
-                  <span className="w-24 text-right font-mono-code text-[11px] text-[#5C646E]">
-                    max 1 job
-                  </span>
-                </div>
-              ))}
+              {agents.map((ag) => {
+                const accentColor = ag.presentation?.accentColor || '#8C949F';
+                return (
+                  <div
+                    key={ag.id}
+                    onClick={() => navigate(`/agents/${ag.id}`)}
+                    style={{ borderLeftColor: accentColor }}
+                    className="flex items-center gap-3.5 p-2.5 bg-[#101216] border-l-2 hover:bg-[#161A20] cursor-pointer transition-colors"
+                  >
+                    <span
+                      style={{ borderColor: accentColor, backgroundColor: `${accentColor}22` }}
+                      className="w-3.5 h-3.5 border clip-hex flex items-center justify-center font-mono-code text-[9px]"
+                    >
+                      {ag.displayName[0]}
+                    </span>
+                    <span className="w-20 text-[13px] text-[#E6E9ED]">{ag.displayName}</span>
+                    <span style={{ color: accentColor }} className="w-16 font-mono-code text-[11px] tracking-wider font-semibold">
+                      {ag.phase || 'IDLE'}
+                    </span>
+                    <span className="flex-1 min-w-0 font-mono-code text-[11px] text-[#8C949F] truncate">
+                      {ag.model}
+                    </span>
+                    <span className="w-24 text-right font-mono-code text-[11px] text-[#5C646E]">
+                      {ag.capabilities[0] || 'agent'}
+                    </span>
+                  </div>
+                );
+              })}
             </div>
           </div>
         </div>

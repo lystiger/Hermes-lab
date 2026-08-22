@@ -1,6 +1,5 @@
 import React from 'react';
 import { useConsoleStore } from '../../stores/useConsoleStore';
-import { AGENT_COLOR_MAP } from '../../api/mockData';
 
 export const AgentChatterFeed: React.FC<{ limit?: number }> = ({ limit = 10 }) => {
   const { allEvents } = useConsoleStore();
@@ -21,7 +20,7 @@ export const AgentChatterFeed: React.FC<{ limit?: number }> = ({ limit = 10 }) =
 
       <div className="flex flex-col gap-2">
         {chatterEvents.map((evt) => {
-          const color = AGENT_COLOR_MAP[evt.agent] || '#CBA35C';
+          const color = evt.source.accentColor || '#CBA35C';
 
           return (
             <div
@@ -30,7 +29,7 @@ export const AgentChatterFeed: React.FC<{ limit?: number }> = ({ limit = 10 }) =
             >
               <div className="flex items-center justify-between font-mono-code text-[11px] mb-1">
                 <span style={{ color }} className="font-semibold">
-                  [{evt.agent}]
+                  [{evt.source.displayName}]
                 </span>
                 <span className="text-[#5C646E]">{evt.ts}</span>
               </div>

@@ -1,16 +1,23 @@
 import React from 'react';
+import { PipelineStep } from '../../api/types';
 import { useConsoleStore } from '../../stores/useConsoleStore';
-import { AGENT_COLOR_MAP } from '../../api/mockData';
+import { resolveActorRef } from '../../api/mock/actors';
 
-export const JobPipelineGraph: React.FC = () => {
+interface JobPipelineGraphProps {
+  steps?: PipelineStep[];
+}
+
+export const JobPipelineGraph: React.FC<JobPipelineGraphProps> = ({ steps }) => {
   const { hardenTokens, liveMotion } = useConsoleStore();
 
-  const phases = [
-    { name: 'BUILD', agent: 'Gemini', note: 'closed 30.4k', state: 'done' },
-    { name: 'HARDEN', agent: 'Claude', note: `02:14 · ${hardenTokens}`, state: 'active' },
-    { name: 'VERIFY', agent: 'Codex', note: 'staged ~19k', state: 'next' },
-    { name: 'COMPLETE', agent: 'Elysia', note: 'auto-merge & notify', state: 'idle' }
+  const defaultPhases: PipelineStep[] = [
+    { id: '1', phase: 'BUILD', agentId: 'gemini', agentName: 'Gemini', note: 'closed 30.4k', state: 'COMPLETE', task: 'Build', meta: '' },
+    { id: '2', phase: 'HARDEN', agentId: 'claude', agentName: 'Claude', note: `02:14 · ${hardenTokens}`, state: 'RUNNING', task: 'Harden', meta: '' },
+    { id: '3', phase: 'VERIFY', agentId: 'codex', agentName: 'Codex', note: 'staged ~19k', state: 'QUEUED', task: 'Verify', meta: '' },
+    { id: '4', phase: 'COMPLETE', agentId: 'elysia', agentName: 'Elysia', note: 'auto-merge & notify', state: 'idle', task: 'Complete', meta: '' }
   ];
+
+  const graphSteps = steps || defaultPhases;
 
   return (
     <div style={{ perspective: '900px' }} className="w-full select-none">
@@ -21,18 +28,19 @@ export const JobPipelineGraph: React.FC = () => {
         }}
         className="flex items-start relative"
       >
-        {phases.map((p, idx) => {
-          const col = AGENT_COLOR_MAP[p.agent] || '#3A4048';
-          const isDone = p.state === 'done';
-          const isActive = p.state === 'active';
+        {graphSteps.map((p, idx) => {
+          const actor = p.agentId ? resolveActorRef(p.agentId) : null;
+          const col = actor?.accentColor || '#3A4048';
+          const isDone = p.state === 'COMPLETE';
+          const isActive = p.state === 'RUNNING';
 
           return (
             <div
-              key={idx}
+              key={p.id || idx}
               className="flex-1 relative flex flex-col items-start"
             >
               {/* Connecting Line */}
-              {idx < phases.length - 1 && (
+              {idx < graphSteps.length - 1 && (
                 <div
                   style={{
                     backgroundColor: isDone ? 'rgba(63,185,80,0.5)' : '#1F242B'
@@ -66,14 +74,14 @@ export const JobPipelineGraph: React.FC = () => {
                 style={{ color: isDone || isActive ? '#E6E9ED' : '#5C646E' }}
                 className="mt-3 font-mono-code text-[12px] tracking-wider font-semibold"
               >
-                {p.name}
+                {p.phase}
               </div>
 
               <div
                 style={{ color: p.state === 'idle' ? '#3A4048' : col }}
                 className="mt-1 text-[11px]"
               >
-                {p.agent}
+                {p.agentName || actor?.displayName || '—'}
               </div>
 
               <div className="mt-0.5 font-mono-code text-[11px] text-[#5C646E]">

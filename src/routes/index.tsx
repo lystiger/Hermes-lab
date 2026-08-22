@@ -7,19 +7,23 @@ import { BudgetRiskAlert } from '../features/telemetry/BudgetRiskAlert';
 import { QueueProjectionBar } from '../features/jobs/QueueProjectionBar';
 import { ProviderQuotaList } from '../features/telemetry/ProviderQuotaList';
 import { useConsoleStore } from '../stores/useConsoleStore';
-import { AGENT_COLOR_MAP } from '../api/mockData';
+import { useAgents, useJobs } from '../api/hooks';
+import { resolveActorRef } from '../api/mock/actors';
 
 export const OverviewRoute: React.FC = () => {
   const navigate = useNavigate();
-  const { agents, allEvents, allQueue, setActiveModalJobId } = useConsoleStore();
+  const { allEvents, setActiveModalJobId } = useConsoleStore();
+  const { agents } = useAgents();
+  const { jobs } = useJobs();
 
   const recentTrace = allEvents.slice(0, 8);
-  const queueShort = allQueue.slice(0, 4);
+  const queueShort = jobs.slice(0, 4);
 
   const getKindColor = (k: string) => {
     if (k === 'error') return '#F2555A';
     if (k === 'retry' || k === 'quota.warn') return '#E3A008';
     if (k.startsWith('agent.')) return '#3FB950';
+    if (k === 'job.start' || k === 'phase.change') return '#CBA35C';
     return '#8C949F';
   };
 
@@ -31,7 +35,7 @@ export const OverviewRoute: React.FC = () => {
 
   return (
     <div className="flex flex-col min-h-0 select-none">
-      {/* Top 7 Metrics Bar */}
+      {/* Top Telemetry Metrics Bar */}
       <TopMetricsBar />
 
       {/* Main Split Body: Left Main (Execution + Lanes + Live Trace), Right Rail */}
@@ -63,30 +67,33 @@ export const OverviewRoute: React.FC = () => {
             </div>
 
             <div className="flex flex-col">
-              {recentTrace.map((e) => (
-                <div
-                  key={e.id}
-                  className="flex items-center gap-4 py-1 font-mono-code text-[11px] border-b border-[#14171C] hover:bg-[#12151A] px-1 transition-colors"
-                >
-                  <span className="w-24 text-[#5C646E]">{e.ts}</span>
-                  <span
-                    style={{ color: AGENT_COLOR_MAP[e.agent] || '#8C949F' }}
-                    className="w-16 font-semibold"
+              {recentTrace.map((e) => {
+                const actorColor = e.source.accentColor || '#8C949F';
+                return (
+                  <div
+                    key={e.id}
+                    className="flex items-center gap-4 py-1 font-mono-code text-[11px] border-b border-[#14171C] hover:bg-[#12151A] px-1 transition-colors"
                   >
-                    {e.agent}
-                  </span>
-                  <span
-                    style={{ color: getKindColor(e.kind) }}
-                    className="w-28"
-                  >
-                    {e.kind}
-                  </span>
-                  <span className="flex-1 min-w-0 text-[#B7BEC7] truncate font-sans">
-                    {e.detail}
-                  </span>
-                  <span className="w-16 text-right text-[#5C646E]">{e.dur}</span>
-                </div>
-              ))}
+                    <span className="w-24 text-[#5C646E]">{e.ts}</span>
+                    <span
+                      style={{ color: actorColor }}
+                      className="w-16 font-semibold"
+                    >
+                      {e.source.displayName}
+                    </span>
+                    <span
+                      style={{ color: getKindColor(e.kind) }}
+                      className="w-28"
+                    >
+                      {e.kind}
+                    </span>
+                    <span className="flex-1 min-w-0 text-[#B7BEC7] truncate font-sans">
+                      {e.detail}
+                    </span>
+                    <span className="w-16 text-right text-[#5C646E]">{e.dur}</span>
+                  </div>
+                );
+              })}
             </div>
           </div>
         </div>
@@ -100,7 +107,7 @@ export const OverviewRoute: React.FC = () => {
           <div className="p-4 border-b border-[#1F242B]">
             <div className="flex items-center justify-between mb-3">
               <span className="font-mono-code text-[11px] tracking-wider text-[#5C646E]">
-                QUEUE · {allQueue.length}
+                QUEUE · {jobs.length}
               </span>
               <button
                 onClick={() => navigate('/queue')}
@@ -111,26 +118,33 @@ export const OverviewRoute: React.FC = () => {
             </div>
 
             <div className="flex flex-col gap-1">
-              {queueShort.map((q) => (
-                <div
-                  key={q.id}
-                  onClick={() => setActiveModalJobId(q.id)}
-                  style={{ borderLeftColor: getPrioColor(q.prio) }}
-                  className="p-2.5 bg-[#101216] border-l-2 hover:bg-[#161A20] cursor-pointer transition-colors"
-                >
-                  <div className="flex items-center gap-2 font-mono-code text-[11px]">
-                    <span style={{ color: getPrioColor(q.prio) }} className="font-semibold">{q.prio}</span>
-                    <span className="text-[#5C646E]">{q.id}</span>
-                    <span className="flex-1 min-w-0 text-[12px] text-[#D7DCE2] font-sans truncate">{q.task}</span>
-                    <span className="text-[#8C949F] tracking-wider">{q.status}</span>
+              {queueShort.map((q) => {
+                const leadActor = q.assignedAgentIds[0] ? resolveActorRef(q.assignedAgentIds[0]) : null;
+                const leadColor = leadActor?.accentColor || '#8C949F';
+
+                return (
+                  <div
+                    key={q.id}
+                    onClick={() => setActiveModalJobId(q.id)}
+                    style={{ borderLeftColor: getPrioColor(q.priority) }}
+                    className="p-2.5 bg-[#101216] border-l-2 hover:bg-[#161A20] cursor-pointer transition-colors"
+                  >
+                    <div className="flex items-center gap-2 font-mono-code text-[11px]">
+                      <span style={{ color: getPrioColor(q.priority) }} className="font-semibold">{q.priority}</span>
+                      <span className="text-[#5C646E]">{q.id}</span>
+                      <span className="flex-1 min-w-0 text-[12px] text-[#D7DCE2] font-sans truncate">{q.title}</span>
+                      <span className="text-[#8C949F] tracking-wider">{q.status}</span>
+                    </div>
+                    <div className="flex items-center gap-2 mt-1.5 font-mono-code text-[11px] text-[#5C646E]">
+                      <span className="truncate">{q.repository}</span>
+                      <span style={{ color: leadColor }}>
+                        {q.assignedAgentIds.map(id => resolveActorRef(id).displayName).join(' → ')}
+                      </span>
+                      <span className="flex-1 text-right">{q.estimatedTime || '—'}</span>
+                    </div>
                   </div>
-                  <div className="flex items-center gap-2 mt-1.5 font-mono-code text-[11px] text-[#5C646E]">
-                    <span className="truncate">{q.repo}</span>
-                    <span style={{ color: AGENT_COLOR_MAP[q.chain[0]] }}>{q.chain.join(' → ')}</span>
-                    <span className="flex-1 text-right">{q.time}</span>
-                  </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           </div>
 

@@ -27,7 +27,7 @@ export const JobModal: React.FC = () => {
 
         {/* Modal Content */}
         <div className="flex-1 overflow-y-auto">
-          <JobDetailView />
+          <JobDetailView jobId={activeModalJobId} />
         </div>
       </div>
     </div>

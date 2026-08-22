@@ -1,5 +1,5 @@
 import React, { useEffect } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams } from 'react-router-dom';
 import { AgentPortrait } from '../../features/agents/AgentPortrait';
 import { AgentContextMeter } from '../../features/agents/AgentContextMeter';
 import { AgentActivityList } from '../../features/agents/AgentActivityList';
@@ -8,17 +8,12 @@ import { AgentMetricsGrid } from '../../features/agents/AgentMetricsGrid';
 import { AgentRunsTable } from '../../features/agents/AgentRunsTable';
 import { MessageDispatcher } from '../../features/messaging/MessageDispatcher';
 import { useConsoleStore } from '../../stores/useConsoleStore';
-import { AGENTS_MAP } from '../../api/mockData';
+import { useAgent } from '../../api/hooks';
 
 export const AgentDetailRoute: React.FC = () => {
   const { agentId } = useParams<{ agentId: string }>();
-  const navigate = useNavigate();
   const { setSelectedAgentId } = useConsoleStore();
-
-  const activeKey = Object.keys(AGENTS_MAP).find(
-    (k) => k.toLowerCase() === (agentId || '').toLowerCase()
-  );
-  const agent = activeKey ? AGENTS_MAP[activeKey] : AGENTS_MAP.Claude;
+  const { agent, loading } = useAgent(agentId);
 
   useEffect(() => {
     if (agentId) {
@@ -26,7 +21,24 @@ export const AgentDetailRoute: React.FC = () => {
     }
   }, [agentId, setSelectedAgentId]);
 
+  if (loading && !agent) {
+    return (
+      <div className="p-8 text-center font-mono-code text-[12px] text-[#5C646E]">
+        Loading agent details for [{agentId}]...
+      </div>
+    );
+  }
+
+  if (!agent) {
+    return (
+      <div className="p-8 text-center font-mono-code text-[12px] text-[#E3A008]">
+        Agent [{agentId}] not found in registry.
+      </div>
+    );
+  }
+
   const isRunning = agent.status === 'RUNNING';
+  const accentColor = agent.presentation?.accentColor || '#8C949F';
 
   return (
     <div className="flex flex-col select-none bg-[#0A0B0D]">
@@ -34,10 +46,17 @@ export const AgentDetailRoute: React.FC = () => {
       <div className="flex flex-col xl:flex-row gap-6 p-5 border-b border-[#1F242B] bg-[#0C0E11]">
         {/* Left 3D Large Portrait Showcase */}
         <div className="flex flex-col items-center xl:items-start flex-shrink-0">
-          <AgentPortrait agent={agent} size="lg" />
+          <AgentPortrait
+            displayName={agent.displayName}
+            presentation={agent.presentation}
+            status={agent.status}
+            phase={agent.phase}
+            crawlCode={agent.crawlCode}
+            size="lg"
+          />
           <div className="mt-2.5 w-full flex justify-between font-mono-code text-[11px] text-[#5C646E]">
             <span>{agent.model}</span>
-            <span style={{ color: agent.color }}>{agent.traceId}</span>
+            <span style={{ color: accentColor }}>{agent.traceId || `trc ${agent.id}·active`}</span>
           </div>
         </div>
 
@@ -46,7 +65,7 @@ export const AgentDetailRoute: React.FC = () => {
           {/* Header Title & Status */}
           <div className="flex items-center gap-3">
             <h2 className="text-[26px] font-semibold text-[#E6E9ED]">
-              {agent.name}
+              {agent.displayName}
             </h2>
             <span
               style={{

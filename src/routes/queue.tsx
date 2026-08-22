@@ -1,10 +1,13 @@
 import React from 'react';
 import { QueueTable } from '../features/jobs/QueueTable';
 import { useConsoleStore } from '../stores/useConsoleStore';
-import { AGENT_COLOR_MAP } from '../api/mockData';
+import { useJobs, usePipeline } from '../api/hooks';
+import { resolveActorRef } from '../api/mock/actors';
 
 export const QueueRoute: React.FC = () => {
-  const { queue, pipeline, setActiveModalJobId, liveMotion } = useConsoleStore();
+  const { setActiveModalJobId, liveMotion } = useConsoleStore();
+  const { jobs } = useJobs();
+  const { pipeline } = usePipeline();
 
   const getStateColor = (state: string) => {
     switch (state) {
@@ -30,11 +33,13 @@ export const QueueRoute: React.FC = () => {
           {pipeline.map((p, idx) => {
             const isRunning = p.state === 'RUNNING';
             const isBlocked = p.state === 'BLOCKED';
-            const agentCol = AGENT_COLOR_MAP[p.agent] || '#8C949F';
+            const actor = p.agentId ? resolveActorRef(p.agentId) : null;
+            const agentCol = actor?.accentColor || '#8C949F';
             const stateCol = getStateColor(p.state);
+            const agentName = p.agentName || actor?.displayName || '—';
 
             return (
-              <div key={idx}>
+              <div key={p.id || idx}>
                 <div
                   onClick={() => setActiveModalJobId(p.id)}
                   style={{
@@ -60,9 +65,9 @@ export const QueueRoute: React.FC = () => {
                       style={{ borderColor: agentCol }}
                       className="w-3.5 h-3.5 border flex items-center justify-center font-mono-code text-[10px] clip-hex"
                     >
-                      {p.agent[0]}
+                      {agentName[0]}
                     </span>
-                    {p.agent}
+                    {agentName}
                   </span>
                   <span className="flex-1 min-w-0 text-[12px] text-[#B7BEC7] truncate font-sans">
                     {p.task}
@@ -99,7 +104,7 @@ export const QueueRoute: React.FC = () => {
 
       {/* Main Queue Table */}
       <QueueTable
-        jobs={queue}
+        jobs={jobs}
         onSelectJob={(id) => setActiveModalJobId(id)}
         showFilters={true}
       />

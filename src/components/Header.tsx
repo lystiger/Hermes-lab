@@ -1,12 +1,13 @@
 import React from 'react';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
-import { useConsoleStore } from '../stores/useConsoleStore';
+import { useAgent, useAgents } from '../api/hooks';
 
 export const Header: React.FC = () => {
   const location = useLocation();
   const navigate = useNavigate();
-  const { agentId } = useParams();
-  const { activeAgent } = useConsoleStore();
+  const { agentId } = useParams<{ agentId?: string }>();
+  const { agent } = useAgent(agentId);
+  const { agents } = useAgents();
 
   const pathname = location.pathname;
 
@@ -23,10 +24,10 @@ export const Header: React.FC = () => {
     subtitle = '8 jobs · serial per repository';
   } else if (pathname === '/agents') {
     title = 'Agents';
-    subtitle = '4 operators registered';
+    subtitle = `${agents.length} operators registered`;
   } else if (pathname.startsWith('/agents/')) {
-    title = activeAgent.name;
-    subtitle = `${activeAgent.model} · ${activeAgent.role}`;
+    title = agent?.displayName || agentId || 'Agent';
+    subtitle = agent ? `${agent.model} · ${agent.role}` : 'Operator Inspection';
     crumb = 'Agents';
     backPath = '/agents';
   } else if (pathname === '/usage') {

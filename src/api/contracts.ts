@@ -40,10 +40,19 @@ export interface LysStackApi {
   sendOperatorCommand(targetActorId: string, command: string): Promise<{ success: boolean; response: string }>;
   triggerJobAction(jobId: string, action: 'retry' | 'pause' | 'cancel' | 'promote'): Promise<boolean>;
 
-  // Phase 5 Operational Messaging & Threads
+  // Phase 5 / Phase 6 Operational Messaging, A2A & Threads
   getThreads(jobId?: string, participant?: string, limit?: number): Promise<Thread[]>;
   getThread(threadId: string): Promise<Thread | null>;
-  getMessages(threadId: string, limit?: number, after?: string): Promise<Message[]>;
-  getAgentInbox(agentId: string, state?: string, limit?: number): Promise<MailboxEntry[]>;
-  sendMessage(threadId: string, text: string, to?: string[], kind?: string, intent?: string): Promise<Message>;
+  getMessages(threadId: string, limit?: number, after?: string, conversationId?: string): Promise<Message[]>;
+  getAgentInbox(agentId: string, state?: string, limit?: number, conversationId?: string): Promise<MailboxEntry[]>;
+  sendMessage(
+    threadId: string,
+    text: string,
+    to?: string[],
+    kind?: string,
+    intent?: string,
+    conversationId?: string,
+    replyTo?: string,
+    correlationId?: string
+  ): Promise<Message>;
 }

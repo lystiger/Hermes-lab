@@ -218,11 +218,12 @@ export class MockLysStackApi implements LysStackApi {
     {
       id: "msg_mock_001",
       threadId: "thread_job_#142",
-      from: { id: "gemini", kind: "agent", displayName: "Gemini", accentColor: "#5B8CFF" },
-      to: [{ id: "claude", kind: "agent", displayName: "Claude", accentColor: "#D9A05B" }],
+      from: { id: "gemini", kind: "agent", displayName: "Gemini", accentColor: "#5B8CFF", subtitle: "Energetic Builder" },
+      to: [{ id: "claude", kind: "agent", displayName: "Claude", accentColor: "#D9A05B", subtitle: "Calm Hardener" }],
       kind: "handoff",
       intent: "review_request",
-      text: "BUILD implementation complete. Commit 8a21fc9. Please review scheduler/state changes.",
+      conversationId: "conv_sprint_142_review",
+      text: "BUILD implementation complete. Commit 8a21fc9. Please review scheduler mutex lock implementation.",
       jobId: "#142",
       phaseId: "phase-1-build",
       artifactRefs: [
@@ -234,27 +235,61 @@ export class MockLysStackApi implements LysStackApi {
     {
       id: "msg_mock_002",
       threadId: "thread_job_#142",
-      from: { id: "claude", kind: "agent", displayName: "Claude", accentColor: "#D9A05B" },
-      to: [{ id: "codex", kind: "agent", displayName: "Codex", accentColor: "#3FB950" }],
+      from: { id: "claude", kind: "agent", displayName: "Claude", accentColor: "#D9A05B", subtitle: "Calm Hardener" },
+      to: [{ id: "gemini", kind: "agent", displayName: "Gemini", accentColor: "#5B8CFF", subtitle: "Energetic Builder" }],
+      kind: "a2a",
+      intent: "correction_request",
+      conversationId: "conv_sprint_142_review",
+      replyTo: "msg_mock_001",
+      correlationId: "corr_142_01",
+      text: "Found state cleanup race in reset_state(). Please acquire mutex lock prior to state flush.",
+      jobId: "#142",
+      phaseId: "phase-2-harden",
+      createdAt: "2026-08-22T10:41:25Z"
+    },
+    {
+      id: "msg_mock_003",
+      threadId: "thread_job_#142",
+      from: { id: "gemini", kind: "agent", displayName: "Gemini", accentColor: "#5B8CFF", subtitle: "Energetic Builder" },
+      to: [{ id: "claude", kind: "agent", displayName: "Claude", accentColor: "#D9A05B", subtitle: "Calm Hardener" }],
+      kind: "a2a",
+      intent: "correction_result",
+      conversationId: "conv_sprint_142_review",
+      replyTo: "msg_mock_002",
+      correlationId: "corr_142_01",
+      text: "Resolved in commit 91cf33a. Mutex is now acquired prior to reset_state().",
+      jobId: "#142",
+      phaseId: "phase-1-build",
+      createdAt: "2026-08-22T10:41:40Z"
+    },
+    {
+      id: "msg_mock_004",
+      threadId: "thread_job_#142",
+      from: { id: "claude", kind: "agent", displayName: "Claude", accentColor: "#D9A05B", subtitle: "Calm Hardener" },
+      to: [{ id: "codex", kind: "agent", displayName: "Codex", accentColor: "#3FB950", subtitle: "Precision Verifier" }],
       kind: "handoff",
       intent: "verification_request",
-      text: "HARDEN complete. Found one race in state cleanup; fixed in 91cf33a.",
+      conversationId: "conv_sprint_142_review",
+      replyTo: "msg_mock_003",
+      text: "HARDEN complete. Race condition resolved and verified. Ready for verification suite.",
       jobId: "#142",
       phaseId: "phase-2-harden",
       artifactRefs: [
         { id: "art_m3", type: "git_commit", label: "HARDEN commit", ref: "91cf33a", trust: { status: "not_applicable", kind: "git_reference", scope: "target_repository", detail: "Git commit reference" } },
         { id: "art_m4", type: "handoff", label: "HARDEN handoff", ref: "HANDOFF_CLAUDE.md", trust: { status: "verified", kind: "path_containment", scope: "hermes_run_root", detail: "Contained within Hermes run root" } }
       ],
-      createdAt: "2026-08-22T10:41:45Z"
+      createdAt: "2026-08-22T10:41:55Z"
     },
     {
-      id: "msg_mock_003",
+      id: "msg_mock_005",
       threadId: "thread_job_#142",
-      from: { id: "codex", kind: "agent", displayName: "Codex", accentColor: "#3FB950" },
+      from: { id: "codex", kind: "agent", displayName: "Codex", accentColor: "#3FB950", subtitle: "Precision Verifier" },
       to: [{ id: "lysstack", kind: "runtime", displayName: "LysStack", accentColor: "#CBA35C" }],
       kind: "verification_result",
       intent: "verification_result",
-      text: "VERIFY passed: 42 tests passed, 0 failed.",
+      conversationId: "conv_sprint_142_review",
+      replyTo: "msg_mock_004",
+      text: "VERIFY passed: 42 tests passed, 0 failed, 0 regressions.",
       jobId: "#142",
       phaseId: "phase-3-verify",
       artifactRefs: [
@@ -280,8 +315,11 @@ export class MockLysStackApi implements LysStackApi {
     return found ? { ...found } : null;
   }
 
-  async getMessages(threadId: string, limit?: number, after?: string): Promise<Message[]> {
+  async getMessages(threadId: string, limit?: number, after?: string, conversationId?: string): Promise<Message[]> {
     let msgs = this.mockMessages.filter((m) => m.threadId === threadId || (threadId.includes(m.jobId || "---")));
+    if (conversationId) {
+      msgs = msgs.filter((m) => m.conversationId === conversationId);
+    }
     if (after) {
       const idx = msgs.findIndex((m) => m.id === after);
       if (idx !== -1) msgs = msgs.slice(idx + 1);
@@ -289,28 +327,42 @@ export class MockLysStackApi implements LysStackApi {
     return msgs.slice(0, limit || 50);
   }
 
-  async getAgentInbox(agentId: string, state?: string, limit?: number): Promise<MailboxEntry[]> {
+  async getAgentInbox(agentId: string, state?: string, limit?: number, conversationId?: string): Promise<MailboxEntry[]> {
     const norm = agentId.toLowerCase();
-    const entries: MailboxEntry[] = this.mockMessages
-      .filter((m) => m.to.some((t) => t.id === norm))
-      .map((m) => ({
-        messageId: m.id,
-        recipientId: norm,
-        state: "DELIVERED",
-        receivedAt: m.createdAt,
-        message: m
-      }));
+    let msgs = this.mockMessages.filter((m) => m.to.some((t) => t.id === norm));
+    if (conversationId) {
+      msgs = msgs.filter((m) => m.conversationId === conversationId);
+    }
+    const entries: MailboxEntry[] = msgs.map((m) => ({
+      messageId: m.id,
+      recipientId: norm,
+      state: "DELIVERED",
+      receivedAt: m.createdAt,
+      message: m
+    }));
     return entries.slice(0, limit || 50);
   }
 
-  async sendMessage(threadId: string, text: string, to?: string[], kind?: string, intent?: string): Promise<Message> {
+  async sendMessage(
+    threadId: string,
+    text: string,
+    to?: string[],
+    kind?: string,
+    intent?: string,
+    conversationId?: string,
+    replyTo?: string,
+    correlationId?: string
+  ): Promise<Message> {
     const newMsg: Message = {
       id: `msg_mock_${Date.now()}`,
       threadId,
-      from: { id: "operator", kind: "operator", displayName: "Operator", accentColor: "#E6E9ED" },
+      from: { id: "operator", kind: "operator", displayName: "Operator", accentColor: "#E6E9ED", subtitle: "Human Operator" },
       to: (to || ["lysstack"]).map((id) => resolveActorPresentation(id)),
       kind: kind || "operator",
       intent,
+      conversationId,
+      replyTo,
+      correlationId,
       text,
       createdAt: new Date().toISOString()
     };

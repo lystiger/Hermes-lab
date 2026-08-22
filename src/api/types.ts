@@ -46,6 +46,36 @@ export interface ActorRef {
   kind: ActorKind | string;
   displayName: string;
   accentColor?: string;
+  avatarUrl?: string;
+  subtitle?: string;
+}
+
+export interface PersonaVisual {
+  avatar?: string;
+  subtitle?: string;
+  accentColor?: string;
+  badgeText?: string;
+}
+
+export interface PersonaProfile {
+  name: string;
+  summary: string;
+  traits: string[];
+  speakingStyle: string[];
+  behavioralRules: string[];
+  relationships?: Record<string, string>;
+  systemPromptFragment?: string;
+  visual?: PersonaVisual;
+}
+
+export interface AgentProfile {
+  id: AgentId;
+  displayName: string;
+  provider?: string;
+  model?: string;
+  persona?: PersonaProfile;
+  capabilities?: string[];
+  metadata?: Record<string, any>;
 }
 
 export interface AgentPresentation {
@@ -57,6 +87,8 @@ export interface AgentPresentation {
   sigil?: string;
   code?: string;
   badge?: string;
+  subtitle?: string;
+  persona?: PersonaProfile;
 }
 
 export interface ActivityItem {
@@ -97,6 +129,7 @@ export interface AgentSummary {
   capabilities: string[];
   status: AgentStatus;
   phase?: PhaseName;
+  persona?: PersonaProfile;
   presentation?: AgentPresentation;
   currentTask?: string;
   activeTool?: string;
@@ -151,9 +184,12 @@ export interface Message {
   threadId: string;
   from: ActorRef;
   to: ActorRef[];
-  kind: string; // 'handoff' | 'review_request' | 'review_result' | 'verification_request' | 'verification_result' | 'status' | 'warning' | 'operator' | 'system'
+  kind: string; // 'handoff' | 'a2a' | 'review_request' | 'review_result' | 'correction_request' | 'correction_result' | 'verification_request' | 'verification_result' | 'status' | 'warning' | 'operator' | 'system'
   text: string;
   intent?: string;
+  conversationId?: string;
+  replyTo?: string;
+  correlationId?: string;
   jobId?: string;
   phaseId?: string;
   artifactRefs?: ArtifactRef[];
@@ -248,11 +284,13 @@ export interface JobDetail extends Job {
   executionGraph: PipelineStep[];
   changedFiles: ChangedFile[];
   testSummary?: {
+    total?: number;
     passed: number;
-    skipped: number;
+    skipped?: number;
     failed: number;
-    duration: string;
-    rawLog: string;
+    duration?: string;
+    durationMs?: number;
+    rawLog?: string;
   };
   retryHistory: JobRetryItem[];
   retriesUsed: number;
@@ -273,6 +311,12 @@ export interface PipelineStep {
   state: PipelineStepState;
   note?: string;
   mark?: string;
+  title?: string;
+  eta?: string;
+  duration?: string;
+  activeTool?: string;
+  tokens?: string;
+  attempt?: number;
 }
 
 export interface TraceEvent {
@@ -327,4 +371,15 @@ export interface OverviewTelemetry {
   tokensToday: string;
   estSpendToday: string;
   sprintBudgetUsedPct: number;
+}
+
+export interface SendMessageRequest {
+  threadId: string;
+  to?: string[];
+  kind?: string;
+  text: string;
+  intent?: string;
+  conversationId?: string;
+  replyTo?: string;
+  correlationId?: string;
 }

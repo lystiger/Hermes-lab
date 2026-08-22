@@ -29,6 +29,7 @@ interface BackendAgentDTO {
   phase?: string;
   currentTask?: string;
   activeTool?: string;
+  persona?: any;
   presentation?: {
     displayName: string;
     accentColor?: string;
@@ -36,6 +37,8 @@ interface BackendAgentDTO {
     characterCardUrl?: string;
     sigil?: string;
     code?: string;
+    subtitle?: string;
+    persona?: any;
   };
 }
 
@@ -95,13 +98,16 @@ export class HttpLysStackApi implements LysStackApi {
         phase: (dto.phase as any) || undefined,
         currentTask: dto.currentTask,
         activeTool: dto.activeTool,
+        persona: dto.persona || dto.presentation?.persona,
         presentation: {
           displayName: dto.presentation?.displayName || dto.displayName || actor.displayName,
           accentColor: dto.presentation?.accentColor || actor.accentColor,
           avatarUrl: dto.presentation?.avatarUrl || `/agents/${dto.id}.webp`,
           characterCardUrl: dto.presentation?.characterCardUrl || (['gemini', 'claude', 'codex'].includes(dto.id) ? `/agents/${dto.id}-card.webp` : undefined),
           sigil: dto.presentation?.sigil || dto.id.toUpperCase().slice(0, 4),
-          code: dto.presentation?.code || dto.id.toUpperCase().slice(0, 4)
+          code: dto.presentation?.code || dto.id.toUpperCase().slice(0, 4),
+          subtitle: dto.presentation?.subtitle || dto.persona?.visual?.subtitle || dto.persona?.summary,
+          persona: dto.persona || dto.presentation?.persona
         }
       };
     });
@@ -489,13 +495,15 @@ export class HttpLysStackApi implements LysStackApi {
     };
   }
 
-  async getMessages(threadId: string, limit?: number, after?: string): Promise<Message[]> {
+  async getMessages(threadId: string, limit?: number, after?: string, conversationId?: string): Promise<Message[]> {
     const params = new URLSearchParams();
     if (limit) params.set("limit", String(limit));
     if (after) params.set("after", after);
+    if (conversationId) params.set("conversationId", conversationId);
 
     const res = await fetch(`${this.baseUrl}/threads/${encodeURIComponent(threadId)}/messages?${params.toString()}`);
     if (!res.ok) {
+      if (res.status === 404) return [];
       throw new Error(`LysStack /threads/${threadId}/messages returned HTTP ${res.status}: ${res.statusText}`);
     }
     const data: any[] = await res.json();
@@ -508,7 +516,9 @@ export class HttpLysStackApi implements LysStackApi {
           id: m.from?.id,
           kind: m.from?.kind || "agent",
           displayName: m.from?.displayName || fromActor.displayName,
-          accentColor: m.from?.accentColor || fromActor.accentColor
+          accentColor: m.from?.accentColor || fromActor.accentColor,
+          avatarUrl: m.from?.avatarUrl || fromActor.avatarUrl,
+          subtitle: m.from?.subtitle || fromActor.subtitle
         },
         to: (m.to || []).map((to: any) => {
           const toActor = resolveActorPresentation(to.id || "unknown");
@@ -516,12 +526,17 @@ export class HttpLysStackApi implements LysStackApi {
             id: to.id,
             kind: to.kind || "agent",
             displayName: to.displayName || toActor.displayName,
-            accentColor: to.accentColor || toActor.accentColor
+            accentColor: to.accentColor || toActor.accentColor,
+            avatarUrl: to.avatarUrl || toActor.avatarUrl,
+            subtitle: to.subtitle || toActor.subtitle
           };
         }),
         kind: m.kind,
         text: m.text,
         intent: m.intent,
+        conversationId: m.conversationId,
+        replyTo: m.replyTo,
+        correlationId: m.correlationId,
         jobId: m.jobId,
         phaseId: m.phaseId,
         artifactRefs: m.artifactRefs || [],
@@ -531,10 +546,11 @@ export class HttpLysStackApi implements LysStackApi {
     });
   }
 
-  async getAgentInbox(agentId: string, state?: string, limit?: number): Promise<MailboxEntry[]> {
+  async getAgentInbox(agentId: string, state?: string, limit?: number, conversationId?: string): Promise<MailboxEntry[]> {
     const params = new URLSearchParams();
     if (state) params.set("state", state);
     if (limit) params.set("limit", String(limit));
+    if (conversationId) params.set("conversationId", conversationId);
 
     const res = await fetch(`${this.baseUrl}/agents/${encodeURIComponent(agentId)}/inbox?${params.toString()}`);
     if (!res.ok) {
@@ -551,7 +567,16 @@ export class HttpLysStackApi implements LysStackApi {
     }));
   }
 
-  async sendMessage(threadId: string, text: string, to?: string[], kind?: string, intent?: string): Promise<Message> {
+  async sendMessage(
+    threadId: string,
+    text: string,
+    to?: string[],
+    kind?: string,
+    intent?: string,
+    conversationId?: string,
+    replyTo?: string,
+    correlationId?: string
+  ): Promise<Message> {
     const res = await fetch(`${this.baseUrl}/messages`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -560,7 +585,10 @@ export class HttpLysStackApi implements LysStackApi {
         text,
         to,
         kind: kind || "operator",
-        intent
+        intent,
+        conversationId,
+        replyTo,
+        correlationId
       })
     });
     if (!res.ok) {
@@ -586,6 +614,9 @@ export class HttpLysStackApi implements LysStackApi {
       kind: m.kind,
       text: m.text,
       intent: m.intent,
+      conversationId: m.conversationId,
+      replyTo: m.replyTo,
+      correlationId: m.correlationId,
       jobId: m.jobId,
       phaseId: m.phaseId,
       artifactRefs: m.artifactRefs || [],

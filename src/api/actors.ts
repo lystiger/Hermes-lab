@@ -7,6 +7,12 @@ export const SYSTEM_ACTORS: Record<string, ActorRef> = {
     displayName: 'Hermes',
     accentColor: '#CBA35C'
   },
+  hermes_runner: {
+    id: 'hermes_runner',
+    kind: 'runtime',
+    displayName: 'Hermes Runner',
+    accentColor: '#CBA35C'
+  },
   herdr: {
     id: 'herdr',
     kind: 'runtime',
@@ -24,6 +30,13 @@ export const SYSTEM_ACTORS: Record<string, ActorRef> = {
     kind: 'system',
     displayName: 'LysControl Console',
     accentColor: '#CBA35C'
+  },
+  operator: {
+    id: 'operator',
+    kind: 'operator',
+    displayName: 'Operator',
+    accentColor: '#E6E9ED',
+    subtitle: 'Human Operator'
   },
   pytest: {
     id: 'pytest',
@@ -53,11 +66,22 @@ export function resolveActorPresentation(
       : agentRegistry[normalized];
 
     if (foundAgent) {
+      const avatarUrl =
+        foundAgent.presentation?.avatarUrl ||
+        foundAgent.persona?.visual?.avatar;
+      const subtitle =
+        foundAgent.presentation?.subtitle ||
+        foundAgent.persona?.visual?.subtitle ||
+        foundAgent.persona?.summary ||
+        foundAgent.role;
+
       return {
         id: foundAgent.id,
         kind: 'agent',
         displayName: foundAgent.displayName,
-        accentColor: foundAgent.presentation?.accentColor || '#8C949F'
+        accentColor: foundAgent.presentation?.accentColor || '#8C949F',
+        avatarUrl,
+        subtitle
       };
     }
   }
@@ -67,7 +91,7 @@ export function resolveActorPresentation(
     return SYSTEM_ACTORS[normalized];
   }
 
-  // 3. Generic unknown actor fallback
+  // 3. Generic unknown actor fallback (support any open string ID)
   return {
     id: normalized,
     kind: 'agent',

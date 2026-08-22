@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { useThreads, useMessages, useAgents } from '../../api/hooks';
 import { resolveActorPresentation } from '../../api/actors';
 import { lysStackApi } from '../../api/client';
@@ -23,10 +23,26 @@ export const OperationalThreadView: React.FC<OperationalThreadViewProps> = ({
   const { messages, loading: loadingMessages, refetch } = useMessages(targetThreadId);
   const { agents } = useAgents();
 
+  const [selectedConversationId, setSelectedConversationId] = useState<string>('all');
   const [selectedArtifact, setSelectedArtifact] = useState<ArtifactRef | null>(null);
   const [operatorText, setOperatorText] = useState('');
   const [isSending, setIsSending] = useState(false);
   const [targetRecipient, setTargetRecipient] = useState<string>(assignedAgentIds[0] || 'lysstack');
+  const [replyToMessageId, setReplyToMessageId] = useState<string | null>(null);
+
+  // Extract distinct conversation IDs present in the messages
+  const conversations = useMemo(() => {
+    const set = new Set<string>();
+    messages.forEach((m) => {
+      if (m.conversationId) set.add(m.conversationId);
+    });
+    return Array.from(set);
+  }, [messages]);
+
+  const filteredMessages = useMemo(() => {
+    if (selectedConversationId === 'all') return messages;
+    return messages.filter((m) => m.conversationId === selectedConversationId);
+  }, [messages, selectedConversationId]);
 
   const handleSendOperatorMessage = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -42,6 +58,7 @@ export const OperationalThreadView: React.FC<OperationalThreadViewProps> = ({
         'operator_note'
       );
       setOperatorText('');
+      setReplyToMessageId(null);
       refetch();
     } catch (err) {
       console.error('Failed to send operator message:', err);
@@ -81,13 +98,33 @@ export const OperationalThreadView: React.FC<OperationalThreadViewProps> = ({
   return (
     <div className="flex flex-col bg-[#0C0E12] border border-[#1F242B] p-4 select-none">
       {/* Header */}
-      <div className="flex items-center justify-between font-mono-code text-[11px] text-[#5C646E] mb-3 pb-2 border-b border-[#1A1E24]">
+      <div className="flex items-center justify-between flex-wrap gap-2 font-mono-code text-[11px] text-[#5C646E] mb-3 pb-2 border-b border-[#1A1E24]">
         <div className="flex items-center gap-2">
           <span className="tracking-wider text-[#E6E9ED] font-semibold">
             OPERATIONAL THREAD &amp; HANDOFFS
           </span>
           <span className="text-[#5C646E]">· {targetThreadId || 'No active thread'}</span>
         </div>
+
+        {/* Conversation Filter Selector */}
+        {conversations.length > 0 && (
+          <div className="flex items-center gap-1.5 text-[10px]">
+            <span className="text-[#5C646E]">CONV:</span>
+            <select
+              value={selectedConversationId}
+              onChange={(e) => setSelectedConversationId(e.target.value)}
+              className="bg-[#12151A] border border-[#242A36] text-[#E6E9ED] px-1.5 py-0.5 outline-none cursor-pointer"
+            >
+              <option value="all">All Messages ({messages.length})</option>
+              {conversations.map((cid) => (
+                <option key={cid} value={cid}>
+                  {cid}
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
+
         <span className="flex items-center gap-1.5 text-[#3FB950]">
           <span className="w-1.5 h-1.5 rounded-full bg-[#3FB950] animate-pulse" />
           live substrate
@@ -95,41 +132,81 @@ export const OperationalThreadView: React.FC<OperationalThreadViewProps> = ({
       </div>
 
       {/* Messages Feed */}
-      <div className="flex flex-col gap-3 min-h-[140px] max-h-[360px] overflow-y-auto pr-1">
-        {loadingMessages && messages.length === 0 ? (
+      <div className="flex flex-col gap-3 min-h-[140px] max-h-[380px] overflow-y-auto pr-1">
+        {loadingMessages && filteredMessages.length === 0 ? (
           <div className="py-6 text-center font-mono-code text-[11px] text-[#5C646E]">
             Loading operational messages...
           </div>
-        ) : messages.length === 0 ? (
+        ) : filteredMessages.length === 0 ? (
           <div className="py-6 text-center font-mono-code text-[11px] text-[#5C646E]">
             No operational messages or phase handoffs recorded for this job yet.
           </div>
         ) : (
-          messages.map((msg: Message) => {
+          filteredMessages.map((msg: Message) => {
             const senderPres = resolveActorPresentation(msg.from.id, agents);
             const senderCol = msg.from.accentColor || senderPres.accentColor || '#CBA35C';
             const isVerification = msg.kind === 'verification_result';
             const isWarning = msg.kind === 'warning';
+            const isA2A = msg.kind === 'a2a' || ['review_request', 'correction_request', 'correction_result', 'question', 'answer'].includes(msg.intent || '');
+            const isOperator = msg.kind === 'operator';
 
             return (
               <div
                 key={msg.id}
                 style={{
-                  borderLeftColor: isWarning ? '#F2555A' : isVerification ? '#3FB950' : senderCol
+                  borderLeftColor: isWarning
+                    ? '#F2555A'
+                    : isVerification
+                    ? '#3FB950'
+                    : isA2A
+                    ? '#5B8CFF'
+                    : isOperator
+                    ? '#E6E9ED'
+                    : senderCol
                 }}
-                className="p-3 bg-[#101318] border border-[#1A1E24] border-l-2 flex flex-col gap-1.5 transition-colors hover:border-[#2A3038]"
+                className={`p-3 bg-[#101318] border border-[#1A1E24] border-l-2 flex flex-col gap-1.5 transition-colors hover:border-[#2A3038] ${
+                  isA2A ? 'bg-[#10141D]' : ''
+                }`}
               >
                 {/* Meta Header */}
                 <div className="flex items-center justify-between flex-wrap gap-1 font-mono-code text-[11px]">
-                  <div className="flex items-center gap-1.5">
-                    {/* Sender Portrait/Badge */}
+                  <div className="flex items-center flex-wrap gap-1.5">
+                    {/* Avatar / Sigil */}
+                    {senderPres.avatarUrl ? (
+                      <img
+                        src={senderPres.avatarUrl}
+                        alt={msg.from.displayName}
+                        className="w-4 h-4 rounded-full object-cover border border-[#242A36]"
+                        onError={(e) => {
+                          // Fallback to text sigil if image fails
+                          (e.target as HTMLElement).style.display = 'none';
+                        }}
+                      />
+                    ) : (
+                      <span
+                        style={{ color: senderCol, borderColor: `${senderCol}44`, backgroundColor: `${senderCol}11` }}
+                        className="px-1 py-0.2 border text-[10px] font-bold"
+                      >
+                        {msg.from.displayName.charAt(0).toUpperCase()}
+                      </span>
+                    )}
+
+                    {/* Sender Name */}
                     <span
-                      style={{ color: senderCol, borderColor: `${senderCol}44`, backgroundColor: `${senderCol}11` }}
-                      className="px-1.5 py-0.2 border font-semibold"
+                      style={{ color: senderCol }}
+                      className="font-semibold"
                     >
                       {msg.from.displayName}
                     </span>
 
+                    {/* Persona Subtitle */}
+                    {senderPres.subtitle && (
+                      <span className="text-[9.5px] text-[#8C949F] px-1 py-0.2 bg-[#161B22] border border-[#242A36]">
+                        {senderPres.subtitle}
+                      </span>
+                    )}
+
+                    {/* Recipient Arrow */}
                     {msg.to && msg.to.length > 0 && (
                       <>
                         <span className="text-[#5C646E]">→</span>
@@ -143,9 +220,45 @@ export const OperationalThreadView: React.FC<OperationalThreadViewProps> = ({
                     <span className="ml-1 text-[10px] text-[#CBA35C] bg-[#CBA35C14] px-1.5 py-0.2 border border-[#CBA35C33]">
                       {msg.kind.toUpperCase()} {msg.intent ? `· ${msg.intent}` : ''}
                     </span>
+
+                    {/* Conversation Tag */}
+                    {msg.conversationId && (
+                      <span className="text-[9.5px] text-[#5B8CFF] bg-[#5B8CFF14] px-1.5 py-0.2 border border-[#5B8CFF33]">
+                        {msg.conversationId}
+                      </span>
+                    )}
+
+                    {/* Reply-To Badge */}
+                    {msg.replyTo && (
+                      <span className="text-[9.5px] text-[#8C949F] bg-[#161B22] px-1.5 py-0.2 border border-[#242A36]">
+                        ↳ reply: {msg.replyTo}
+                      </span>
+                    )}
+
+                    {/* Correlation ID */}
+                    {msg.correlationId && (
+                      <span className="text-[9.5px] text-[#5C646E]">
+                        corr:{msg.correlationId}
+                      </span>
+                    )}
                   </div>
 
-                  <span className="text-[#5C646E]">{formatTime(msg.createdAt)}</span>
+                  <div className="flex items-center gap-2">
+                    <span className="text-[#5C646E]">{formatTime(msg.createdAt)}</span>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setReplyToMessageId(msg.id);
+                        if (msg.from.id !== 'operator') {
+                          setTargetRecipient(msg.from.id);
+                        }
+                      }}
+                      className="text-[#5C646E] hover:text-[#CBA35C] text-[10px] cursor-pointer"
+                      title="Reply to this message"
+                    >
+                      reply
+                    </button>
+                  </div>
                 </div>
 
                 {/* Message Operational Body */}
@@ -181,21 +294,36 @@ export const OperationalThreadView: React.FC<OperationalThreadViewProps> = ({
       {/* Operator Send Action */}
       {targetThreadId && (
         <form onSubmit={handleSendOperatorMessage} className="mt-3 pt-3 border-t border-[#1A1E24] flex flex-col gap-2">
-          <div className="flex items-center gap-2">
-            <span className="font-mono-code text-[10px] text-[#5C646E]">OPERATOR DISPATCH:</span>
-            <select
-              value={targetRecipient}
-              onChange={(e) => setTargetRecipient(e.target.value)}
-              className="bg-[#12151A] border border-[#242A36] font-mono-code text-[10.5px] text-[#E6E9ED] px-2 py-0.5 outline-none cursor-pointer"
-            >
-              <option value="lysstack">LysStack Control Plane</option>
-              <option value="hermes_runner">Hermes Runner</option>
-              {assignedAgentIds.map((aid) => (
-                <option key={aid} value={aid}>
-                  Agent: {aid.toUpperCase()}
-                </option>
-              ))}
-            </select>
+          <div className="flex items-center justify-between flex-wrap gap-2">
+            <div className="flex items-center gap-2">
+              <span className="font-mono-code text-[10px] text-[#5C646E]">OPERATOR DISPATCH:</span>
+              <select
+                value={targetRecipient}
+                onChange={(e) => setTargetRecipient(e.target.value)}
+                className="bg-[#12151A] border border-[#242A36] font-mono-code text-[10.5px] text-[#E6E9ED] px-2 py-0.5 outline-none cursor-pointer"
+              >
+                <option value="lysstack">LysStack Control Plane</option>
+                <option value="hermes_runner">Hermes Runner</option>
+                {assignedAgentIds.map((aid) => (
+                  <option key={aid} value={aid}>
+                    Agent: {aid.toUpperCase()}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            {replyToMessageId && (
+              <div className="flex items-center gap-1 text-[10px] font-mono-code text-[#CBA35C]">
+                <span>Replying to {replyToMessageId}</span>
+                <button
+                  type="button"
+                  onClick={() => setReplyToMessageId(null)}
+                  className="text-[#5C646E] hover:text-[#F2555A] ml-1 cursor-pointer"
+                >
+                  ✕
+                </button>
+              </div>
+            )}
           </div>
 
           <div className="flex gap-2">

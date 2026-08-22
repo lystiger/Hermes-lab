@@ -32,6 +32,7 @@ from agents.errors import SprintRunnerError
 from agents.permissions import scoped_antigravity_permissions
 from agents.registry import default_registry
 from backends.registry import default_backend_registry
+from control_plane.event_publisher import default_publisher
 
 
 class HermesSprintRunner:
@@ -98,6 +99,7 @@ class HermesSprintRunner:
         self.run_dir = self.runs_root / f"{timestamp}_{self.sprint_id}"
         self.log_file = self.run_dir / "runner.log"
         self.summary_file = self.run_dir / "run_summary.json"
+        self.job_id = os.environ.get("HERMES_JOB_ID") or f"run_{timestamp}_{self.sprint_id}"
         self._backend_cache = {}
         
         self.logger = self._setup_logging()
@@ -776,6 +778,21 @@ class HermesSprintRunner:
         backend_name = self.resolve_backend_name(phase)
         self._get_backend(backend_name)
 
+        if default_publisher:
+            default_publisher.publish(
+                source_id=agent,
+                source_kind="agent",
+                kind="phase.started",
+                detail=f"Starting phase {phase_name} ({role}) with agent {agent}",
+                job_id=self.job_id,
+                metadata={
+                    "phase": phase_name,
+                    "role": role,
+                    "agent": agent,
+                    "order": phase_index,
+                },
+            )
+
         if not prompt_file.exists():
             raise SprintRunnerError("FAILED_MISSING_PROMPT", f"Prompt file not found: {prompt_file}")
 
@@ -855,6 +872,22 @@ class HermesSprintRunner:
             ),
         }
         self.run_summary["phases"].append(phase_result)
+
+        if default_publisher:
+            default_publisher.publish(
+                source_id=agent,
+                source_kind="agent",
+                kind="phase.completed",
+                detail=f"Phase {phase_name} completed successfully",
+                job_id=self.job_id,
+                metadata={
+                    "phase": phase_name,
+                    "role": role,
+                    "agent": agent,
+                    "commitSha": commit_sha,
+                    "changedFilesCount": len(changed_files),
+                },
+            )
 
     def run_tests_in_venv(self):
         self.logger.info("\n=== Running Controller Verification & Pytest Suite ===")
@@ -1067,6 +1100,30 @@ class HermesSprintRunner:
         return destination
 
     def execute(self):
+        if default_publisher:
+            default_publisher.publish(
+                source_id="hermes_runner",
+                source_kind="runtime",
+                kind="job.created",
+                detail=f"Sprint {self.sprint_id} initialized",
+                job_id=self.job_id,
+                metadata={
+                    "sprintId": self.sprint_id,
+                    "title": self.spec.get("name", f"Hermes Sprint {self.sprint_id}"),
+                    "repository": str(self.target_repo.name),
+                    "branch": self.spec.get("target_branch", f"hermes/{self.sprint_id}/integration"),
+                    "phases": self.spec.get("phases", []),
+                },
+            )
+            default_publisher.publish(
+                source_id="hermes_runner",
+                source_kind="runtime",
+                kind="job.started",
+                detail=f"Sprint {self.sprint_id} execution started",
+                job_id=self.job_id,
+                metadata={"sprintId": self.sprint_id},
+            )
+
         try:
             if self.dry_run:
                 self.preflight()
@@ -1084,8 +1141,30 @@ class HermesSprintRunner:
             self.run_summary["end_time"] = datetime.now().isoformat()
             self.run_summary["errors"].append({"code": e.code, "message": e.message})
             self.logger.error(f"FAIL-FAST TRIGGERED: [{e.code}] {e.message}")
+            if default_publisher:
+                default_publisher.publish(
+                    source_id="hermes_runner",
+                    source_kind="runtime",
+                    kind="job.failed",
+                    detail=f"Sprint {self.sprint_id} failed: [{e.code}] {e.message}",
+                    job_id=self.job_id,
+                    metadata={"sprintId": self.sprint_id, "error": e.message, "code": e.code},
+                )
         finally:
-            sprint_succeeded = self.run_summary["status"] == "READY_FOR_REVIEW"
+            sprint_succeeded = self.run_summary["status"] in {"READY_FOR_REVIEW", "DRY_RUN_READY"}
+            if sprint_succeeded and default_publisher:
+                default_publisher.publish(
+                    source_id="hermes_runner",
+                    source_kind="runtime",
+                    kind="job.completed",
+                    detail=f"Sprint {self.sprint_id} completed successfully",
+                    job_id=self.job_id,
+                    metadata={
+                        "sprintId": self.sprint_id,
+                        "integrationCommit": self.run_summary.get("integration_commit"),
+                    },
+                )
+
             for backend in self._backend_cache.values():
                 try:
                     backend.cleanup(success=sprint_succeeded)

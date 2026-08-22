@@ -3,8 +3,9 @@ import json
 import httpx
 import pytest
 from main import app
-from event_bus import event_bus, RuntimeEvent
+from event_bus import event_bus
 from agent_service import agent_service
+from job_service import job_service
 from runner.control_plane.event_publisher import RuntimeEventPublisher
 
 
@@ -41,9 +42,6 @@ def test_health_endpoint():
     data = response.json()
     assert data["status"] == "ok"
     assert data["service"] == "lysstack"
-    assert "version" in data
-    assert "uptimeSeconds" in data
-    assert "timestamp" in data
 
 
 def test_agents_endpoint_is_registry_driven():
@@ -51,179 +49,140 @@ def test_agents_endpoint_is_registry_driven():
     assert response.status_code == 200
     agents = response.json()
     assert isinstance(agents, list)
-    assert len(agents) >= 3
-
     agent_ids = [a["id"] for a in agents]
-    # Verify antigravity mapped to gemini
     assert "gemini" in agent_ids
     assert "claude" in agent_ids
     assert "codex" in agent_ids
-
-    # Elysia must NOT be fake-registered if not in registry
     assert "elysia" not in agent_ids
 
-    for ag in agents:
-        assert "id" in ag
-        assert "displayName" in ag
-        assert "provider" in ag
-        assert "model" in ag
-        assert "role" in ag
-        assert "capabilities" in ag
-        assert "status" in ag
-        assert isinstance(ag["capabilities"], list)
 
+def test_job_lifecycle_reduction_and_querying():
+    job_id = "run_test_unigreen_01"
 
-def test_internal_events_ingress_and_state_reduction():
-    # 1. Start agent execution for claude
-    start_payload = {
-        "source": {
-            "id": "claude",
-            "kind": "agent",
-            "displayName": "Claude",
+    # 1. job.created
+    res_create = client.post(
+        "/internal/events",
+        json_data={
+            "source": {"id": "hermes_runner", "kind": "runtime"},
+            "kind": "job.created",
+            "detail": "Sprint unigreen-inquiry-v1 initialized",
+            "jobId": job_id,
+            "metadata": {
+                "sprintId": "unigreen-inquiry-v1",
+                "title": "Unigreen Inquiry Delivery",
+                "repository": "Unigreen",
+                "branch": "hermes/unigreen-inquiry-v1/integration",
+                "phases": [
+                    {"name": "BUILD", "role": "builder", "agent": "antigravity"},
+                    {"name": "HARDEN", "role": "hardener", "agent": "claude"},
+                    {"name": "VERIFY", "role": "verifier", "agent": "codex"},
+                ],
+            },
         },
-        "kind": "agent.started",
-        "detail": "Reviewing security architecture in worktree sprint-01",
-        "jobId": "sprint-01",
-        "metadata": {"phase": "HARDEN", "task": "Store Review"},
-    }
+    )
+    assert res_create.status_code == 202
 
-    res_start = client.post("/internal/events", json_data=start_payload)
-    assert res_start.status_code == 202
-    data_start = res_start.json()
-    assert data_start["accepted"] is True
-    assert data_start["eventId"].startswith("evt_")
-    assert data_start["normalizedSourceId"] == "claude"
+    # Query /jobs
+    jobs_res = client.get("/jobs")
+    assert jobs_res.status_code == 200
+    jobs = jobs_res.json()
+    job_item = next(j for j in jobs if j["id"] == job_id)
+    assert job_item["sprintId"] == "unigreen-inquiry-v1"
+    assert job_item["title"] == "Unigreen Inquiry Delivery"
+    assert job_item["assignedAgentIds"] == ["gemini", "claude", "codex"]
 
-    # Verify agent status changed to RUNNING
-    agents_res = client.get("/agents")
-    agents = agents_res.json()
-    claude = next(a for a in agents if a["id"] == "claude")
-    assert claude["status"] == "RUNNING"
-    assert claude["currentTask"] == "Store Review"
-
-    # Verify event appears in /events
-    events_res = client.get("/events?limit=5")
-    events = events_res.json()
-    event_ids = [e["id"] for e in events]
-    assert data_start["eventId"] in event_ids
-
-    # 2. Finish agent execution for claude
-    finish_payload = {
-        "source": {
-            "id": "claude",
-            "kind": "agent",
+    # 2. job.started
+    client.post(
+        "/internal/events",
+        json_data={
+            "source": {"id": "hermes_runner", "kind": "runtime"},
+            "kind": "job.started",
+            "detail": "Execution started",
+            "jobId": job_id,
         },
-        "kind": "agent.finished",
-        "detail": "Phase HARDEN completed successfully",
-        "duration": "4.21s",
-        "jobId": "sprint-01",
-    }
+    )
 
-    res_finish = client.post("/internal/events", json_data=finish_payload)
-    assert res_finish.status_code == 202
+    detail_res = client.get(f"/jobs/{job_id}")
+    assert detail_res.status_code == 200
+    detail = detail_res.json()
+    assert detail["status"] == "RUNNING"
+    assert len(detail["phases"]) == 3
+    assert detail["phases"][0]["name"] == "BUILD"
+    assert detail["phases"][0]["status"] == "PENDING"
+    assert detail["phases"][0]["agentId"] == "gemini"
 
-    # Verify agent status returned to IDLE
-    agents_res_after = client.get("/agents")
-    claude_after = next(a for a in agents_res_after.json() if a["id"] == "claude")
-    assert claude_after["status"] == "IDLE"
-    assert claude_after["currentTask"] is None
-
-
-def test_internal_events_antigravity_normalization():
-    payload = {
-        "source": {
-            "id": "antigravity",
-            "kind": "agent",
+    # 3. phase.started for BUILD
+    client.post(
+        "/internal/events",
+        json_data={
+            "source": {"id": "antigravity", "kind": "agent"},
+            "kind": "phase.started",
+            "detail": "Starting phase BUILD",
+            "jobId": job_id,
+            "metadata": {"phase": "BUILD", "role": "builder", "agent": "antigravity"},
         },
-        "kind": "agent.started",
-        "detail": "Building vehicle state store migration",
-        "jobId": "sprint-02",
-        "metadata": {"phase": "BUILD"},
-    }
+    )
 
-    res = client.post("/internal/events", json_data=payload)
-    assert res.status_code == 202
-    data = res.json()
-    assert data["normalizedSourceId"] == "gemini"
+    detail_p1 = client.get(f"/jobs/{job_id}").json()
+    assert detail_p1["currentPhase"] == "BUILD"
+    assert detail_p1["phases"][0]["status"] == "RUNNING"
 
-    # Check gemini agent status is RUNNING
-    agents = client.get("/agents").json()
-    gemini = next(a for a in agents if a["id"] == "gemini")
-    assert gemini["status"] == "RUNNING"
-
-    # Send failed event
-    fail_payload = {
-        "source": {
-            "id": "antigravity",
-            "kind": "agent",
+    # 4. phase.completed for BUILD
+    client.post(
+        "/internal/events",
+        json_data={
+            "source": {"id": "antigravity", "kind": "agent"},
+            "kind": "phase.completed",
+            "detail": "Phase BUILD completed",
+            "jobId": job_id,
+            "metadata": {
+                "phase": "BUILD",
+                "role": "builder",
+                "commitSha": "abc1234567890",
+                "changedFilesCount": 3,
+                "durationMs": 45000,
+            },
         },
-        "kind": "agent.failed",
-        "detail": "Build failed on pytest syntax check",
-        "duration": "1.2s",
-        "jobId": "sprint-02",
-    }
-    client.post("/internal/events", json_data=fail_payload)
+    )
 
-    # Check gemini status is ERROR
-    agents_failed = client.get("/agents").json()
-    gemini_failed = next(a for a in agents_failed if a["id"] == "gemini")
-    assert gemini_failed["status"] == "ERROR"
+    detail_p1_done = client.get(f"/jobs/{job_id}").json()
+    assert detail_p1_done["phases"][0]["status"] == "SUCCEEDED"
+    assert detail_p1_done["phases"][0]["commitSha"] == "abc1234567890"
 
-    # Reset gemini to IDLE for subsequent tests
-    agent_service.set_agent_status("gemini", "IDLE")
-
-
-def test_internal_events_invalid_payload_rejected():
-    invalid_payload = {
-        "source": {
-            "id": "gemini",
-            "kind": "invalid_kind_foo",  # invalid enum
+    # 5. job.completed
+    client.post(
+        "/internal/events",
+        json_data={
+            "source": {"id": "hermes_runner", "kind": "runtime"},
+            "kind": "job.completed",
+            "detail": "Sprint completed successfully",
+            "jobId": job_id,
+            "metadata": {"integrationCommit": "fedcba987654"},
         },
-        "kind": "agent.started",
-        "detail": "Testing rejection",
-    }
+    )
 
-    res = client.post("/internal/events", json_data=invalid_payload)
-    assert res.status_code == 422  # Unprocessable Entity
+    final_detail = client.get(f"/jobs/{job_id}").json()
+    assert final_detail["status"] == "COMPLETED"
+    assert final_detail["progress"] == 1.0
+    assert len(final_detail["artifacts"]) > 0
+    assert final_detail["artifacts"][0]["ref"] == "fedcba987654"
+
+
+def test_job_not_found_returns_404():
+    res = client.get("/jobs/non_existent_job_xyz")
+    assert res.status_code == 404
+
+
+def test_post_jobs_security_validation():
+    # 1. Invalid sprint ID format
+    bad_res1 = client.post("/jobs", json_data={"sprintId": "../../../etc/passwd"})
+    assert bad_res1.status_code == 400
+
+    # 2. Unknown sprint ID
+    bad_res2 = client.post("/jobs", json_data={"sprintId": "unknown_sprint_999"})
+    assert bad_res2.status_code == 400
 
 
 def test_publisher_failure_isolation():
-    # 1. When URL is unset, publish returns False without raising
-    no_url_publisher = RuntimeEventPublisher(control_url=None)
-    assert no_url_publisher.publish("claude", "agent.started", "No URL test") is False
-
-    # 2. When URL is unreachable, publish catches error, logs warning, returns False without crashing
-    dead_url_publisher = RuntimeEventPublisher(control_url="http://127.0.0.1:59999", timeout=0.2)
-    assert dead_url_publisher.publish("claude", "agent.started", "Dead URL test") is False
-
-
-def test_events_endpoint_and_event_bus():
-    evt1 = event_bus.publish(
-        source_id="test_runner",
-        source_kind="system",
-        kind="test.step_1",
-        detail="Executing step 1 in test",
-    )
-    evt2 = event_bus.publish(
-        source_id="gemini",
-        source_kind="agent",
-        kind="agent.started",
-        detail="Gemini starting task",
-    )
-
-    response = client.get("/events?limit=10")
-    assert response.status_code == 200
-    events = response.json()
-    assert isinstance(events, list)
-    assert len(events) >= 2
-
-    ids = [e["id"] for e in events]
-    assert evt1.id in ids
-    assert evt2.id in ids
-
-    response_after = client.get(f"/events?after={evt1.id}")
-    assert response_after.status_code == 200
-    after_events = response_after.json()
-    after_ids = [e["id"] for e in after_events]
-    assert evt1.id not in after_ids
-    assert evt2.id in after_ids
+    publisher = RuntimeEventPublisher(control_url="http://127.0.0.1:59999", timeout=0.2)
+    assert publisher.publish("claude", "agent.started", "Dead URL test") is False

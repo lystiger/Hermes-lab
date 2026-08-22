@@ -4,7 +4,7 @@ import threading
 import time
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
-from typing import Any, Dict, Optional, Literal
+from typing import Any, Dict, List, Optional, Literal
 
 from fastapi import FastAPI, Request, Query, Header, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
@@ -14,6 +14,9 @@ from pydantic import BaseModel, Field
 from event_bus import event_bus, RuntimeEvent
 from agent_service import agent_service
 from agent_state_reducer import agent_state_reducer
+from job_service import job_service
+from job_state_reducer import job_state_reducer
+from job_launcher import job_launcher
 from normalization import normalize_agent_id
 
 
@@ -99,13 +102,13 @@ class InternalEventPayload(BaseModel):
 async def ingest_internal_event(payload: InternalEventPayload):
     """
     Ingests runtime execution telemetry events from Hermes sprint runners or external tools.
-    Updates the active agent state reducer and broadcasts to the canonical RuntimeEventBus.
+    Updates agent state reducer, job state reducer, and broadcasts to the canonical RuntimeEventBus.
     """
     raw_source_id = payload.source.id
     normalized_id = normalize_agent_id(raw_source_id)
     display_name = payload.source.displayName or normalized_id.capitalize()
 
-    # 1. Update active agent state reducer (Task 4)
+    # 1. Update active agent state reducer
     agent_state_reducer.apply(
         source_id=normalized_id,
         kind=payload.kind,
@@ -113,7 +116,17 @@ async def ingest_internal_event(payload: InternalEventPayload):
         metadata=payload.metadata,
     )
 
-    # 2. Publish to the canonical RuntimeEventBus (Task 3)
+    # 2. Update active job state reducer (Phase 4)
+    job_state_reducer.apply(
+        kind=payload.kind,
+        detail=payload.detail,
+        job_id=payload.jobId,
+        source_id=normalized_id,
+        duration=payload.duration,
+        metadata=payload.metadata,
+    )
+
+    # 3. Publish to the canonical RuntimeEventBus
     event = event_bus.publish(
         source_id=normalized_id,
         source_kind=payload.source.kind,
@@ -130,6 +143,7 @@ async def ingest_internal_event(payload: InternalEventPayload):
         "accepted": True,
         "eventId": event.id,
         "normalizedSourceId": normalized_id,
+        "jobId": payload.jobId,
     }
 
 
@@ -187,6 +201,79 @@ async def get_agents():
     return agent_service.get_all_agents()
 
 
+# -------------------------------------------------------------
+# Real Job & Queue Endpoints (Phase 4)
+# -------------------------------------------------------------
+
+@app.get("/jobs")
+async def get_jobs(
+    status_filter: Optional[str] = Query(default=None, alias="status"),
+    limit: int = Query(default=50, ge=1, le=100),
+):
+    """
+    Returns real sprint execution jobs tracked by the control plane.
+    """
+    return job_service.list_jobs(status=status_filter, limit=limit)
+
+
+@app.get("/jobs/{job_id}")
+async def get_job(job_id: str):
+    """
+    Returns detailed runtime execution state for a specific job.
+    """
+    job = job_service.get_job(job_id)
+    if not job:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Job '{job_id}' not found",
+        )
+    return job.to_dict()
+
+
+class CreateJobPayload(BaseModel):
+    sprintId: str = Field(..., min_length=1, max_length=100)
+    dryRun: bool = False
+    skipAgentExec: bool = False
+
+
+@app.post("/jobs", status_code=status.HTTP_202_ACCEPTED)
+async def create_job(payload: CreateJobPayload):
+    """
+    Safely triggers execution of a registered Hermes sprint definition.
+    Rejects unknown sprint IDs or arbitrary command injection.
+    """
+    try:
+        result = job_launcher.launch(
+            sprint_id=payload.sprintId,
+            dry_run=payload.dryRun,
+            skip_agent_exec=payload.skipAgentExec,
+        )
+        return result
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc),
+        )
+
+
+@app.post("/jobs/{job_id}/cancel")
+async def cancel_job(job_id: str):
+    """
+    Cleanly cancels an active job runner process.
+    """
+    success = job_launcher.cancel(job_id)
+    if not success:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Active job '{job_id}' not found or not cancellable",
+        )
+    return {"cancelled": True, "jobId": job_id}
+
+
+# -------------------------------------------------------------
+# Runtime Event Bus Endpoints
+# -------------------------------------------------------------
+
 @app.get("/events")
 async def get_events(
     limit: int = Query(default=100, ge=1, le=500),
@@ -207,7 +294,7 @@ async def stream_events(
 ):
     """
     Server-Sent Events (SSE) stream for real-time live runtime events.
-    Supports reconnect cursor via ?after=<id> or Last-Event-ID header.
+    Supports reconnect cursor via Last-Event-ID header (precedence) or ?after=<id>.
     """
     cursor_id = last_event_id or after
     queue: asyncio.Queue[RuntimeEvent] = asyncio.Queue(maxsize=100)

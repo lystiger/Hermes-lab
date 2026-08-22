@@ -26,7 +26,9 @@ client = ASGITestClient()
 def test_health():
     response = client.get("/health")
     assert response.status_code == 200
-    assert response.json() == {"status": "ok"}
+    data = response.json()
+    assert data["status"] == "ok"
+    assert data["service"] == "lysstack"
 
 
 def test_ready():
@@ -45,7 +47,7 @@ def test_info():
     response = client.get("/info")
     assert response.status_code == 200
     data = response.json()
-    assert data["name"] == "Hermes Lab"
+    assert "LysStack" in data["name"]
     assert data["version"] == "0.1.0"
     assert data["environment"] == "development"
 

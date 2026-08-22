@@ -1,23 +1,33 @@
-from dataclasses import dataclass, asdict, field
-from typing import Any, Dict, List, Optional
-from normalization import normalize_agent_id
+from dataclasses import dataclass, field, asdict
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Union
+import logging
+
+try:
+    from normalization import normalize_agent_id
+except ImportError:
+    normalize_agent_id = lambda x: str(x).lower()
+
+logger = logging.getLogger("hermes.persona")
 
 
 @dataclass
 class PersonaVisual:
     avatar: Optional[str] = None
     subtitle: Optional[str] = None
+    accentColor: Optional[str] = None
+    badgeText: Optional[str] = None
 
     def to_dict(self) -> Dict[str, Any]:
-        return asdict(self)
+        return {k: v for k, v in asdict(self).items() if v is not None}
 
     @classmethod
-    def from_dict(cls, data: Optional[Dict[str, Any]]) -> Optional["PersonaVisual"]:
-        if not data or not isinstance(data, dict):
-            return None
+    def from_dict(cls, data: Dict[str, Any]) -> "PersonaVisual":
         return cls(
-            avatar=data.get("avatar"),
+            avatar=data.get("avatar") or data.get("avatarUrl"),
             subtitle=data.get("subtitle"),
+            accentColor=data.get("accentColor") or data.get("accent_color"),
+            badgeText=data.get("badgeText") or data.get("badge_text"),
         )
 
 
@@ -25,38 +35,46 @@ class PersonaVisual:
 class PersonaProfile:
     name: str
     summary: str
-    traits: List[str] = field(default_factory=list)
-    speakingStyle: List[str] = field(default_factory=list)
-    behavioralRules: List[str] = field(default_factory=list)
+    traits: List[str]
+    speakingStyle: List[str]
+    behavioralRules: List[str]
     relationships: Dict[str, str] = field(default_factory=dict)
     systemPromptFragment: Optional[str] = None
     visual: Optional[PersonaVisual] = None
 
     def to_dict(self) -> Dict[str, Any]:
-        data = asdict(self)
+        data = {
+            "name": self.name,
+            "summary": self.summary,
+            "traits": self.traits,
+            "speakingStyle": self.speakingStyle,
+            "behavioralRules": self.behavioralRules,
+            "relationships": self.relationships,
+            "systemPromptFragment": self.systemPromptFragment,
+        }
         if self.visual:
             data["visual"] = self.visual.to_dict()
         return data
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "PersonaProfile":
-        visual_data = data.get("visual")
-        visual_obj = PersonaVisual.from_dict(visual_data) if isinstance(visual_data, dict) else None
+        vis = data.get("visual")
+        vis_obj = PersonaVisual.from_dict(vis) if isinstance(vis, dict) else None
         return cls(
-            name=data.get("name", "Unknown Operative"),
-            summary=data.get("summary", "Autonomous system agent."),
-            traits=data.get("traits") or [],
-            speakingStyle=data.get("speakingStyle") or [],
-            behavioralRules=data.get("behavioralRules") or [],
-            relationships=data.get("relationships") or {},
+            name=data.get("name", "Agent"),
+            summary=data.get("summary", ""),
+            traits=data.get("traits", []),
+            speakingStyle=data.get("speakingStyle", []),
+            behavioralRules=data.get("behavioralRules", []),
+            relationships=data.get("relationships", {}),
             systemPromptFragment=data.get("systemPromptFragment"),
-            visual=visual_obj,
+            visual=vis_obj,
         )
 
-    def render_prompt_section(self, agent_id: str, role: str) -> str:
+    def render_prompt_section(self, agent_id: str, role: str = "operative") -> str:
         """
-        Renders the agent identity and persona prompt section adhering to prompt precedence rules.
-        Controller and runtime constraints always take precedence over persona.
+        Renders the authoritative Agent Identity & Persona prompt section.
+        Precedence: Controller rules > Operator instructions > Phase tasks > Persona style.
         """
         lines = [
             "--- LYSSTACK AGENT IDENTITY ---",
@@ -64,18 +82,19 @@ class PersonaProfile:
             f"Role: {role}",
             "",
             "Persona Summary:",
-            self.summary,
+            self.summary or "Standard autonomous software engineering operative.",
+            "",
+            f"Traits: {', '.join(self.traits) if self.traits else 'disciplined, focused'}",
+            "",
+            "Speaking Style:",
         ]
+        for style in self.speakingStyle:
+            lines.append(f"- {style}")
 
-        if self.traits:
-            lines.append(f"\nTraits: {', '.join(self.traits)}")
-
-        if self.speakingStyle:
-            lines.append("\nSpeaking Style:")
-            for style in self.speakingStyle:
-                lines.append(f"- {style}")
-
-        lines.append("\nBehavioral Rules:")
+        lines.extend([
+            "",
+            "Behavioral Rules:",
+        ])
         for rule in self.behavioralRules:
             lines.append(f"- {rule}")
 
@@ -138,16 +157,22 @@ DEFAULT_PERSONAS: Dict[str, PersonaProfile] = {
         speakingStyle=[
             "Speaks enthusiastically and directly",
             "Asks directly for review or assistance when encountering ambiguities",
-            "May joke or complain casually when facing difficult refactors",
-            "Keeps statements technically truthful and anchored in code changes",
+            "Keeps prose brief, punchy, and constructive",
+            "Excited about new features and clean abstractions",
         ],
         behavioralRules=[
-            "Build rapidly and report implementation progress with clear commit references",
-            "Report hurdles and blockers immediately and honestly",
-            "Remain technically accurate and truthful at all times",
+            "Build robust implementations following specifications",
+            "Do not hide regressions or broken tests",
+            "Ask clarifying questions or request review promptly",
+            "CRITICAL: Controller rules, operator instructions, and workspace constraints strictly override persona style.",
+            "CRITICAL: Remain technically truthful; never misrepresent code state or test outcomes.",
         ],
-        relationships={"claude": "trusted architect and hardening peer", "codex": "verification authority"},
-        visual=PersonaVisual(avatar="/agents/gemini-card.webp", subtitle="Energetic Builder"),
+        visual=PersonaVisual(
+            avatar="/agents/gemini.webp",
+            subtitle="Energetic Builder",
+            accentColor="#5B8CFF",
+            badgeText="BUILD",
+        ),
     ),
     "claude": PersonaProfile(
         name="Claude",
@@ -163,35 +188,50 @@ DEFAULT_PERSONAS: Dict[str, PersonaProfile] = {
             "Enforce architectural consistency, concurrency safety, and error handling",
             "Provide explicit correction requests when flaws or regressions are found",
             "Remain constructive and focused on code quality and robustness",
+            "CRITICAL: Controller rules, operator instructions, and workspace constraints strictly override persona style.",
+            "CRITICAL: Remain technically truthful; never misrepresent code state or test outcomes.",
         ],
-        relationships={"gemini": "implementation partner", "codex": "verification partner"},
-        visual=PersonaVisual(avatar="/agents/claude-card.webp", subtitle="Calm Hardener"),
+        visual=PersonaVisual(
+            avatar="/agents/claude.webp",
+            subtitle="Calm Hardener",
+            accentColor="#D9A05B",
+            badgeText="HARDEN",
+        ),
     ),
     "codex": PersonaProfile(
         name="Codex",
-        summary="Focused, serious, elegant, and reserved verifier driven strictly by empirical evidence and invariants.",
-        traits=["focused", "serious", "elegant", "precise", "reserved", "verification-oriented", "evidence-driven"],
+        summary="Concise, focused, precision verifier who speaks in succinct, evidence-driven terms.",
+        traits=["succinct", "precise", "disciplined", "evidence-driven", "rigorous verifier"],
         speakingStyle=[
-            "Speaks concisely and with high mathematical/logical precision",
-            "Reserved and strictly focused on test results, coverage, and invariants",
-            "Evidence-driven with exact reproduction commands and failure outputs",
-            "Avoids conversational fluff",
+            "Speaks with precision and minimal prose",
+            "States test results, coverage, and regressions as hard evidence",
+            "Direct statements without fluff",
         ],
         behavioralRules=[
-            "Verify invariants, test coverage, and regression baselines rigorously",
-            "Never claim verification success without reproducible empirical evidence",
-            "Produce concise verification reports detailing test counts and failure traces",
+            "Verify edge cases, regression suites, and invariants rigorously",
+            "Never modify source files in verifier role",
+            "Report exact failure output and reproduction steps",
+            "CRITICAL: Controller rules, operator instructions, and workspace constraints strictly override persona style.",
+            "CRITICAL: Remain technically truthful; never misrepresent code state or test outcomes.",
         ],
-        relationships={"gemini": "builder whose code requires testing", "claude": "hardener whose fixes require validation"},
-        visual=PersonaVisual(avatar="/agents/codex-card.webp", subtitle="Precision Verifier"),
+        visual=PersonaVisual(
+            avatar="/agents/codex.webp",
+            subtitle="Precision Verifier",
+            accentColor="#4EC9A0",
+            badgeText="VERIFY",
+        ),
     ),
 }
 
 
-def resolve_agent_profile(agent_id: str, custom_override: Optional[Dict[str, Any]] = None) -> AgentProfile:
+def resolve_agent_profile(
+    agent_id: str,
+    custom_override: Optional[Union[Dict[str, Any], str, Path]] = None,
+) -> AgentProfile:
     """
     Dynamically resolves an AgentProfile for ANY agent ID (open strings).
-    Applies default persona if known, or provides a safe fallback profile for unknown/future agents.
+    Applies PersonaLoader if character card file/dict is provided,
+    default canonical persona if known, or safe fallback profile for unknown/future agents.
     """
     normalized = normalize_agent_id(agent_id)
 
@@ -218,19 +258,45 @@ def resolve_agent_profile(agent_id: str, custom_override: Optional[Dict[str, Any
         capabilities=["general-execution"],
     )
 
-    # Apply overrides if provided
-    if custom_override and isinstance(custom_override, dict):
-        if "displayName" in custom_override:
-            profile.displayName = custom_override["displayName"]
-        if "provider" in custom_override:
-            profile.provider = custom_override["provider"]
-        if "model" in custom_override:
-            profile.model = custom_override["model"]
-        if "capabilities" in custom_override and isinstance(custom_override["capabilities"], list):
-            profile.capabilities = custom_override["capabilities"]
-        if "metadata" in custom_override and isinstance(custom_override["metadata"], dict):
-            profile.metadata = custom_override["metadata"]
-        if "persona" in custom_override and isinstance(custom_override["persona"], dict):
-            profile.persona = PersonaProfile.from_dict(custom_override["persona"])
+    # 2. Check for character card file or custom dict override via PersonaLoader
+    if custom_override:
+        try:
+            from persona_loader import PersonaLoader
+            if isinstance(custom_override, (str, Path)):
+                # Path to character card file
+                loaded = PersonaLoader.load_from_file(custom_override, fallback_name=profile.displayName)
+                profile.persona = loaded
+                profile.displayName = loaded.name
+            elif isinstance(custom_override, dict):
+                # If dict contains character_card / card_file
+                if "character_card_file" in custom_override or "character_card_path" in custom_override:
+                    card_path = custom_override.get("character_card_file") or custom_override.get("character_card_path")
+                    loaded = PersonaLoader.load_from_file(card_path, fallback_name=profile.displayName)
+                    profile.persona = loaded
+                    profile.displayName = loaded.name
+                elif "character_card" in custom_override or "personality_card" in custom_override:
+                    card_data = custom_override.get("character_card") or custom_override.get("personality_card")
+                    if isinstance(card_data, dict):
+                        loaded = PersonaLoader.load_from_dict(card_data, fallback_name=profile.displayName)
+                        profile.persona = loaded
+                        profile.displayName = loaded.name
+                elif "persona" in custom_override and isinstance(custom_override["persona"], dict):
+                    loaded = PersonaLoader.load_from_dict(custom_override["persona"], fallback_name=profile.displayName)
+                    profile.persona = loaded
+                    profile.displayName = loaded.name
+
+                # Apply other standard field overrides
+                if "displayName" in custom_override:
+                    profile.displayName = custom_override["displayName"]
+                if "provider" in custom_override:
+                    profile.provider = custom_override["provider"]
+                if "model" in custom_override:
+                    profile.model = custom_override["model"]
+                if "capabilities" in custom_override and isinstance(custom_override["capabilities"], list):
+                    profile.capabilities = custom_override["capabilities"]
+                if "metadata" in custom_override and isinstance(custom_override["metadata"], dict):
+                    profile.metadata = custom_override["metadata"]
+        except Exception as e:
+            logger.warning(f"Error applying custom persona override for {agent_id}: {e}. Falling back to default.")
 
     return profile

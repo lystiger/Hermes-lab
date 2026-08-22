@@ -119,12 +119,67 @@ class ToolPolicy:
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "ToolPolicy":
+        allowed_tools_raw = data.get("allowed_tools")
+        if allowed_tools_raw is None:
+            allowed_tools_raw = data.get("allowedTools")
+        allowed_tools = (
+            [str(t).strip() for t in allowed_tools_raw if str(t).strip()]
+            if allowed_tools_raw is not None
+            else None
+        )
         return cls(
             allow_tools=bool(data.get("allow_tools", data.get("allowTools", True))),
-            allowed_tools=data.get("allowed_tools") or data.get("allowedTools"),
-            require_actor_capability=bool(data.get("require_actor_capability", True)),
-            read_only_only=bool(data.get("read_only_only", True)),
-            max_timeout_seconds=int(data.get("max_timeout_seconds", 120)),
+            allowed_tools=allowed_tools,
+            require_actor_capability=bool(data.get("require_actor_capability", data.get("requireActorCapability", True))),
+            read_only_only=bool(data.get("read_only_only", data.get("readOnlyOnly", data.get("read_only_tools_only", True)))),
+            max_timeout_seconds=int(data.get("max_timeout_seconds", data.get("maxTimeoutSeconds", data.get("max_tool_timeout_seconds", data.get("tool_timeout_seconds", 120))))),
+        )
+
+    @classmethod
+    def from_config(cls, job_config: Optional[Dict[str, Any]] = None) -> "ToolPolicy":
+        """
+        Derives and normalizes a single ToolPolicy from raw job_config / limits.
+        """
+        if not job_config or not isinstance(job_config, dict):
+            # Missing configuration fails closed on allowed_tools
+            return cls(allow_tools=True, allowed_tools=None)
+
+        # 1. Direct ToolPolicy instance or dict
+        tp = job_config.get("tool_policy")
+        limits = job_config.get("limits", {}) if isinstance(job_config.get("limits"), dict) else {}
+        if tp is None:
+            tp = limits.get("tool_policy")
+
+        if isinstance(tp, ToolPolicy):
+            return tp
+        elif isinstance(tp, dict):
+            return cls.from_dict(tp)
+
+        # 2. Extract and normalize from limits and top-level job_config
+        allow_tools = limits.get("allow_tools")
+        if allow_tools is None:
+            allow_tools = job_config.get("allow_tools", True)
+
+        allowed_tools_raw = limits.get("allowed_tools")
+        if allowed_tools_raw is None:
+            allowed_tools_raw = job_config.get("allowed_tools")
+
+        allowed_tools = (
+            [str(t).strip() for t in allowed_tools_raw if str(t).strip()]
+            if allowed_tools_raw is not None
+            else None
+        )
+
+        read_only_only = limits.get("read_only_tools_only", limits.get("read_only_only", job_config.get("read_only_only", True)))
+        max_timeout = limits.get("max_tool_timeout_seconds", limits.get("tool_timeout_seconds", job_config.get("max_tool_timeout_seconds", 120)))
+        require_caps = limits.get("require_actor_capability", job_config.get("require_actor_capability", True))
+
+        return cls(
+            allow_tools=bool(allow_tools),
+            allowed_tools=allowed_tools,
+            require_actor_capability=bool(require_caps),
+            read_only_only=bool(read_only_only),
+            max_timeout_seconds=int(max_timeout),
         )
 
 
@@ -164,6 +219,8 @@ class ToolRegistry:
     ) -> ToolInvocationResult:
         """
         Validates permission, actor capability, and executes tool safely under Hermes control.
+        Derives all policy constraints from a normalized ToolPolicy object:
+        raw config -> normalize ToolPolicy -> allow_tools -> allowed_tools -> read_only_only -> max_timeout -> require_actor_capability -> execute
         """
         tool_id = request.toolId
         req_id = request.id or "unknown"
@@ -204,11 +261,12 @@ class ToolRegistry:
                 )
             return ToolInvocationResult(requestId=req_id, toolId=tool_id, status="rejected", error=err)
 
-        # 2. Permission and tool policy checks
-        limits = job_config.get("limits", {}) if (job_config and isinstance(job_config.get("limits"), dict)) else {}
-        allow_tools = limits.get("allow_tools", job_config.get("allow_tools", True) if job_config else True)
-        if allow_tools is False:
-            err = "Tool execution is disabled by job policy (limits.allow_tools=false)."
+        # 2. Normalize ToolPolicy from raw config
+        policy_obj = ToolPolicy.from_config(job_config)
+
+        # 3. Policy constraint: allow_tools
+        if not policy_obj.allow_tools:
+            err = "Tool execution is disabled by job policy (allow_tools=false)."
             logger.warning(err)
             if publisher:
                 publisher.publish(
@@ -221,18 +279,8 @@ class ToolRegistry:
                 )
             return ToolInvocationResult(requestId=req_id, toolId=tool_id, status="rejected", error=err)
 
-        # 2b. allowed_tools allowlist check (require explicit allowed_tools when tools are enabled)
-        allowed_tools = limits.get("allowed_tools")
-        if allowed_tools is None and job_config and "allowed_tools" in job_config:
-            allowed_tools = job_config.get("allowed_tools")
-        if allowed_tools is None and (limits.get("tool_policy") or (job_config and "tool_policy" in job_config)):
-            tp = limits.get("tool_policy") or (job_config.get("tool_policy") if job_config else None)
-            if isinstance(tp, dict):
-                allowed_tools = tp.get("allowed_tools")
-            elif hasattr(tp, "allowed_tools"):
-                allowed_tools = tp.allowed_tools
-
-        if allowed_tools is None:
+        # 4. Policy constraint: allowed_tools
+        if policy_obj.allowed_tools is None:
             err = "Tool execution rejected: allowed_tools must be explicitly configured by controller policy."
             logger.warning(err)
             if publisher:
@@ -246,7 +294,7 @@ class ToolRegistry:
                 )
             return ToolInvocationResult(requestId=req_id, toolId=tool_id, status="rejected", error=err)
 
-        allowed_set = {t.strip() for t in allowed_tools}
+        allowed_set = {t.strip() for t in policy_obj.allowed_tools}
         if tool_id not in allowed_set:
             err = f"Tool '{tool_id}' is not permitted for this job (allowed: {list(allowed_set)})."
             logger.warning(err)
@@ -261,22 +309,7 @@ class ToolRegistry:
                 )
             return ToolInvocationResult(requestId=req_id, toolId=tool_id, status="rejected", error=err)
 
-        # 2c. Enforce ToolPolicy constraints
-        policy_obj = None
-        if job_config:
-            tp = job_config.get("tool_policy") or limits.get("tool_policy")
-            if isinstance(tp, ToolPolicy):
-                policy_obj = tp
-            elif isinstance(tp, dict):
-                policy_obj = ToolPolicy.from_dict(tp)
-        if not policy_obj:
-            policy_obj = ToolPolicy(
-                allow_tools=allow_tools,
-                allowed_tools=allowed_tools,
-                max_timeout_seconds=int(limits.get("max_tool_timeout_seconds", limits.get("tool_timeout_seconds", 120))),
-                read_only_only=bool(limits.get("read_only_tools_only", limits.get("read_only_only", True))),
-            )
-
+        # 5. Policy constraint: read_only_only
         if policy_obj.read_only_only:
             is_read_only = profile.metadata.get("readOnly", False) if profile.metadata else False
             if not is_read_only:
@@ -293,14 +326,14 @@ class ToolRegistry:
                     )
                 return ToolInvocationResult(requestId=req_id, toolId=tool_id, status="rejected", error=err)
 
-        # Enforce max timeout bounds
+        # 6. Policy constraint: max_timeout
         req_timeout = request.timeoutSeconds or profile.timeoutSeconds
         if req_timeout > policy_obj.max_timeout_seconds:
             req_timeout = policy_obj.max_timeout_seconds
         request.timeoutSeconds = req_timeout
 
-        # 3. Actor capability enforcement
-        if requester_id and profile.capabilities:
+        # 7. Policy constraint: require_actor_capability
+        if policy_obj.require_actor_capability and requester_id and profile.capabilities:
             cap_reg = capability_registry
             if not cap_reg:
                 from capabilities import default_capability_registry

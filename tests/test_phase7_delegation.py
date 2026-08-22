@@ -1123,6 +1123,37 @@ class TestPhase7_2_PolicyHardeningFailClosed(unittest.TestCase):
             self.assertEqual(res_configured.status, "success")
             self.assertIn("verification_ok", res_configured.output.get("stdout", ""))
 
+    def test_tool_policy_allow_tools_false_with_allowed_tools_rejects(self):
+        """
+        Regression test:
+        ToolPolicy(
+            allow_tools=False,
+            allowed_tools=["tool.git.inspect"]
+        ) -> REJECT
+        """
+        cap_reg = create_default_capability_registry()
+        treq = ToolInvocationRequest(
+            toolId="tool.git.inspect",
+            args={"operation": "status"},
+            requester={"id": "claude", "kind": "agent"},
+        )
+        policy = ToolPolicy(
+            allow_tools=False,
+            allowed_tools=["tool.git.inspect"],
+        )
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            tmp_repo = Path(tmp_dir)
+            subprocess.run(["git", "init", "-b", "main"], cwd=tmp_repo, check=True, capture_output=True)
+            res = default_tool_registry.execute(
+                request=treq,
+                worktree_dir=tmp_repo,
+                job_config={"limits": {"tool_policy": policy}},
+                capability_registry=cap_reg,
+            )
+            self.assertEqual(res.status, "rejected")
+            self.assertIn("disabled by job policy", res.error)
+            self.assertIn("allow_tools=false", res.error)
+
 
 if __name__ == "__main__":
     unittest.main()

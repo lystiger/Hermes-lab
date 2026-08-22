@@ -4,7 +4,7 @@ import { QueueTable } from '../features/jobs/QueueTable';
 import { Job } from '../api/types';
 
 describe('Job Queue & Arbitrary Agent Reference', () => {
-  it('renders a job with arbitrary/dynamic agent IDs without errors', () => {
+  it('renders a job with arbitrary/dynamic agent IDs without errors', async () => {
     const customJobs: Job[] = [
       {
         id: '#999',
@@ -20,7 +20,7 @@ describe('Job Queue & Arbitrary Agent Reference', () => {
 
     render(<QueueTable jobs={customJobs} showFilters={false} />);
 
-    expect(screen.getByText('#999')).toBeInTheDocument();
+    expect(await screen.findByText('#999')).toBeInTheDocument();
     expect(screen.getByText('Arbitrary Subagent Task')).toBeInTheDocument();
     expect(screen.getByText('company/core-repo')).toBeInTheDocument();
     expect(screen.getByText('P0')).toBeInTheDocument();

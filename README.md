@@ -9,7 +9,7 @@
 [![Vite](https://img.shields.io/badge/Vite-8.2-646CFF?style=flat-square&logo=vite&logoColor=white)](https://vitejs.dev/)
 [![Zustand](https://img.shields.io/badge/Zustand-5.0-brown?style=flat-square)](https://github.com/pmndrs/zustand)
 [![Tailwind CSS](https://img.shields.io/badge/TailwindCSS-4.3-38B2AC?style=flat-square&logo=tailwind-css&logoColor=white)](https://tailwindcss.com/)
-[![CI](https://img.shields.io/badge/CI-Passing-3FB950?style=flat-square)](https://github.com/lystiger/LysControl/actions)
+[![CI](https://github.com/lystiger/LysControl/actions/workflows/ci.yml/badge.svg)](https://github.com/lystiger/LysControl/actions/workflows/ci.yml)
 
 </div>
 

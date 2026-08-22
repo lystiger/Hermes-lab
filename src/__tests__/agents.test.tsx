@@ -1,8 +1,9 @@
 import { describe, it, expect } from 'vitest';
 import { render, screen } from '@testing-library/react';
-import { MemoryRouter } from 'react-router-dom';
+import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { AgentPortrait } from '../features/agents/AgentPortrait';
 import { AgentLaneCard } from '../features/agents/AgentLaneCard';
+import { AgentDetailRoute } from '../routes/agents/$agentId';
 import { AgentSummary } from '../api/types';
 
 describe('Agent UI & Portrait Fallbacks', () => {
@@ -44,6 +45,7 @@ describe('Agent UI & Portrait Fallbacks', () => {
         presentation={{
           displayName: 'Gemini',
           avatarUrl: '/agents/gemini.webp',
+          characterCardUrl: '/agents/gemini-card.webp',
           accentColor: '#5B8CFF',
           sigil: 'BUILD'
         }}
@@ -67,5 +69,31 @@ describe('Agent UI & Portrait Fallbacks', () => {
 
     expect(screen.getAllByText('S').length).toBeGreaterThanOrEqual(1);
     expect(screen.getByText('CUSTOM')).toBeInTheDocument();
+  });
+
+  it('renders [ VIEW DOSSIER ] trigger on Agent Detail when characterCardUrl is present', async () => {
+    render(
+      <MemoryRouter initialEntries={['/agents/claude']}>
+        <Routes>
+          <Route path="/agents/:agentId" element={<AgentDetailRoute />} />
+        </Routes>
+      </MemoryRouter>
+    );
+
+    expect(await screen.findByText('Claude')).toBeInTheDocument();
+    expect(screen.getByText('[ VIEW DOSSIER ]')).toBeInTheDocument();
+  });
+
+  it('renders Agent Detail without [ VIEW DOSSIER ] when characterCardUrl is not present', async () => {
+    render(
+      <MemoryRouter initialEntries={['/agents/unknown-subagent']}>
+        <Routes>
+          <Route path="/agents/:agentId" element={<AgentDetailRoute />} />
+        </Routes>
+      </MemoryRouter>
+    );
+
+    expect(await screen.findByText('Unknown-subagent')).toBeInTheDocument();
+    expect(screen.queryByText('[ VIEW DOSSIER ]')).not.toBeInTheDocument();
   });
 });

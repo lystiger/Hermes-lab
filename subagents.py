@@ -89,6 +89,20 @@ class SubagentManager:
                 )
             return False, err
 
+        if self.allow_subagents and (self.allowed_capabilities is None or len(self.allowed_capabilities) == 0):
+            err = "Subagent creation rejected: controller allowed_capabilities must be explicitly configured when subagents are enabled."
+            logger.warning(err)
+            if publisher:
+                publisher.publish(
+                    source_id="subagent_manager",
+                    source_kind="runtime",
+                    kind="delegation.rejected",
+                    detail=err,
+                    job_id=job_id,
+                    metadata={"reason": "missing_allowed_capabilities_policy", "parentAgentId": parent_agent_id},
+                )
+            return False, err
+
         if len(self._created_subagents) >= self.max_subagents_per_job:
             err = f"Subagent limit reached for job ({len(self._created_subagents)}/{self.max_subagents_per_job})."
             logger.warning(err)

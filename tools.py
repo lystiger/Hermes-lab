@@ -205,12 +205,82 @@ class ToolRegistry:
             return ToolInvocationResult(requestId=req_id, toolId=tool_id, status="rejected", error=err)
 
         # 2. Permission and tool policy checks
+        limits = job_config.get("limits", {}) if (job_config and isinstance(job_config.get("limits"), dict)) else {}
+        allow_tools = limits.get("allow_tools", job_config.get("allow_tools", True) if job_config else True)
+        if allow_tools is False:
+            err = "Tool execution is disabled by job policy (limits.allow_tools=false)."
+            logger.warning(err)
+            if publisher:
+                publisher.publish(
+                    source_id="hermes_runner",
+                    source_kind="runtime",
+                    kind="tool.rejected",
+                    detail=err,
+                    job_id=job_id or request.jobId,
+                    metadata={"requestId": req_id, "toolId": tool_id, "reason": "tools_disabled"},
+                )
+            return ToolInvocationResult(requestId=req_id, toolId=tool_id, status="rejected", error=err)
+
+        # 2b. allowed_tools allowlist check (require explicit allowed_tools when tools are enabled)
+        allowed_tools = limits.get("allowed_tools")
+        if allowed_tools is None and job_config and "allowed_tools" in job_config:
+            allowed_tools = job_config.get("allowed_tools")
+        if allowed_tools is None and (limits.get("tool_policy") or (job_config and "tool_policy" in job_config)):
+            tp = limits.get("tool_policy") or (job_config.get("tool_policy") if job_config else None)
+            if isinstance(tp, dict):
+                allowed_tools = tp.get("allowed_tools")
+            elif hasattr(tp, "allowed_tools"):
+                allowed_tools = tp.allowed_tools
+
+        if allowed_tools is None:
+            err = "Tool execution rejected: allowed_tools must be explicitly configured by controller policy."
+            logger.warning(err)
+            if publisher:
+                publisher.publish(
+                    source_id="hermes_runner",
+                    source_kind="runtime",
+                    kind="tool.rejected",
+                    detail=err,
+                    job_id=job_id or request.jobId,
+                    metadata={"requestId": req_id, "toolId": tool_id, "reason": "missing_allowed_tools_policy"},
+                )
+            return ToolInvocationResult(requestId=req_id, toolId=tool_id, status="rejected", error=err)
+
+        allowed_set = {t.strip() for t in allowed_tools}
+        if tool_id not in allowed_set:
+            err = f"Tool '{tool_id}' is not permitted for this job (allowed: {list(allowed_set)})."
+            logger.warning(err)
+            if publisher:
+                publisher.publish(
+                    source_id="hermes_runner",
+                    source_kind="runtime",
+                    kind="tool.rejected",
+                    detail=err,
+                    job_id=job_id or request.jobId,
+                    metadata={"requestId": req_id, "toolId": tool_id, "reason": "permission_denied"},
+                )
+            return ToolInvocationResult(requestId=req_id, toolId=tool_id, status="rejected", error=err)
+
+        # 2c. Enforce ToolPolicy constraints
+        policy_obj = None
         if job_config:
-            limits = job_config.get("limits", {}) if isinstance(job_config.get("limits"), dict) else {}
-            # 2a. Check if tools are enabled
-            allow_tools = limits.get("allow_tools")
-            if allow_tools is False:
-                err = "Tool execution is disabled by job policy (limits.allow_tools=false)."
+            tp = job_config.get("tool_policy") or limits.get("tool_policy")
+            if isinstance(tp, ToolPolicy):
+                policy_obj = tp
+            elif isinstance(tp, dict):
+                policy_obj = ToolPolicy.from_dict(tp)
+        if not policy_obj:
+            policy_obj = ToolPolicy(
+                allow_tools=allow_tools,
+                allowed_tools=allowed_tools,
+                max_timeout_seconds=int(limits.get("max_tool_timeout_seconds", limits.get("tool_timeout_seconds", 120))),
+                read_only_only=bool(limits.get("read_only_tools_only", limits.get("read_only_only", True))),
+            )
+
+        if policy_obj.read_only_only:
+            is_read_only = profile.metadata.get("readOnly", False) if profile.metadata else False
+            if not is_read_only:
+                err = f"Tool '{tool_id}' is not read-only and violates read_only_only tool policy."
                 logger.warning(err)
                 if publisher:
                     publisher.publish(
@@ -219,29 +289,15 @@ class ToolRegistry:
                         kind="tool.rejected",
                         detail=err,
                         job_id=job_id or request.jobId,
-                        metadata={"requestId": req_id, "toolId": tool_id, "reason": "tools_disabled"},
+                        metadata={"requestId": req_id, "toolId": tool_id, "reason": "read_only_policy_violation"},
                     )
                 return ToolInvocationResult(requestId=req_id, toolId=tool_id, status="rejected", error=err)
 
-            # 2b. allowed_tools allowlist check
-            allowed_tools = limits.get("allowed_tools")
-            if allowed_tools is None and "allowed_tools" in job_config:
-                allowed_tools = job_config.get("allowed_tools")
-            if allowed_tools is not None:
-                allowed_set = {t.strip() for t in allowed_tools}
-                if tool_id not in allowed_set:
-                    err = f"Tool '{tool_id}' is not permitted for this job (allowed: {list(allowed_set)})."
-                    logger.warning(err)
-                    if publisher:
-                        publisher.publish(
-                            source_id="hermes_runner",
-                            source_kind="runtime",
-                            kind="tool.rejected",
-                            detail=err,
-                            job_id=job_id or request.jobId,
-                            metadata={"requestId": req_id, "toolId": tool_id, "reason": "permission_denied"},
-                        )
-                    return ToolInvocationResult(requestId=req_id, toolId=tool_id, status="rejected", error=err)
+        # Enforce max timeout bounds
+        req_timeout = request.timeoutSeconds or profile.timeoutSeconds
+        if req_timeout > policy_obj.max_timeout_seconds:
+            req_timeout = policy_obj.max_timeout_seconds
+        request.timeoutSeconds = req_timeout
 
         # 3. Actor capability enforcement
         if requester_id and profile.capabilities:
@@ -451,8 +507,19 @@ def _handle_test_runner(
             if isinstance(v, dict) and "command" in v:
                 verification_cmds.append(v["command"])
 
+    limits = job_config.get("limits", {}) if (job_config and isinstance(job_config.get("limits"), dict)) else {}
+    allow_fallback = bool(
+        limits.get("allow_test_runner_fallback", False)
+        or limits.get("test_runner_allow_fallback", False)
+        or (job_config.get("allow_test_runner_fallback", False) if job_config else False)
+        or (job_config.get("test_runner_allow_fallback", False) if job_config else False)
+    )
+
     if not verification_cmds:
-        # Default verification fallback
+        if not allow_fallback:
+            err = "tool.test_runner rejected: no verification command configured in job specification and safe fallback is not enabled."
+            return ToolInvocationResult(requestId=req_id, toolId=tool_id, status="rejected", error=err)
+        # Default verification fallback when explicitly enabled
         target = args.get("target") or args.get("test_path")
         if target and isinstance(target, str) and not target.startswith("-"):
             cmd = ["pytest", target]

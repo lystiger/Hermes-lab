@@ -40,6 +40,7 @@ from delegation import (
 )
 from tools import (
     ToolProfile,
+    ToolPolicy,
     ToolInvocationRequest,
     ToolInvocationResult,
     ToolRegistry,
@@ -268,6 +269,7 @@ class TestPhase7ToolExecutionIntegration(unittest.TestCase):
 
             phase = {"name": "02_hardener", "role": "hardener", "agent": "claude", "worktree_dir": target_repo.name, "prompt_file": str(p2)}
             runner.spec["phases"] = [phase]
+            runner.spec["limits"]["allowed_tools"] = ["tool.git.inspect"]
             runner.worktree_root = target_repo.parent
 
             conv_id = "conv_tool_flow"
@@ -337,8 +339,9 @@ Claude received tool output.
         treq = ToolInvocationRequest(
             toolId="tool.git.inspect",
             args={"operation": "push"},  # Forbidden mutating operation
+            requester={"id": "claude", "kind": "agent"},
         )
-        res = default_tool_registry.execute(treq)
+        res = default_tool_registry.execute(treq, job_config={"limits": {"allowed_tools": ["tool.git.inspect"]}})
         self.assertEqual(res.status, "rejected")
         self.assertIn("not permitted", res.error)
 
@@ -346,8 +349,9 @@ Claude received tool output.
         treq = ToolInvocationRequest(
             toolId="tool.arbitrary.malicious",
             args={"cmd": "rm -rf /"},
+            requester={"id": "claude", "kind": "agent"},
         )
-        res = default_tool_registry.execute(treq)
+        res = default_tool_registry.execute(treq, job_config={"limits": {"allowed_tools": ["tool.arbitrary.malicious"]}})
         self.assertEqual(res.status, "rejected")
         self.assertIn("not registered", res.error)
 
@@ -359,7 +363,7 @@ class TestPhase7SubagentsBoundedManagement(unittest.TestCase):
     """
 
     def test_subagent_manager_limits_and_lifecycle(self):
-        manager = SubagentManager(allow_subagents=True, max_subagents_per_job=2, max_depth=1)
+        manager = SubagentManager(allow_subagents=True, max_subagents_per_job=2, max_depth=1, allowed_capabilities=["review.code", "review.concurrency", "general-execution"])
 
         # 1. Create first subagent
         sub1 = manager.create_subagent(parent_agent_id="claude", task="Inspect race condition", capabilities=["review.code"])
@@ -492,9 +496,10 @@ class TestPhase7SubagentExecutionIntegration(unittest.TestCase):
             runner.worktree_root = tmp_root / "worktrees"
             (runner.worktree_root / "worker").mkdir(parents=True, exist_ok=True)
 
-            # Enable subagents
-            runner.limits["delegation"] = {"allow_subagents": True, "max_subagents_per_job": 2, "max_depth": 1}
+            # Enable subagents with explicit allowed_capabilities
+            runner.limits["delegation"] = {"allow_subagents": True, "max_subagents_per_job": 2, "max_depth": 1, "allowed_capabilities": ["specialized.memory_inspection"]}
             runner.subagent_manager.allow_subagents = True
+            runner.subagent_manager.allowed_capabilities = {"specialized.memory_inspection"}
 
             phase = {"name": "02_hardener", "role": "hardener", "agent": "claude", "worktree_dir": "worker", "prompt_file": str(p1)}
             runner.spec["phases"] = [phase]
@@ -592,7 +597,7 @@ class TestPhase7_1_RuntimePolicyPatches(unittest.TestCase):
         self.assertIsInstance(default_registry.get("subagent_custom_1", parent_provider="claude"), ClaudeAdapter)
 
         # 2. SubagentProfile stores provider
-        manager = SubagentManager(allow_subagents=True, max_subagents_per_job=3, max_depth=2)
+        manager = SubagentManager(allow_subagents=True, max_subagents_per_job=3, max_depth=2, allowed_capabilities=["general-execution"])
         sub1 = manager.create_subagent(parent_agent_id="claude", task="Subtask 1")
         self.assertEqual(sub1.provider, "claude")
 
@@ -677,6 +682,7 @@ class TestPhase7_1_RuntimePolicyPatches(unittest.TestCase):
             allow_subagents=True,
             max_subagents_per_job=5,
             max_depth=2,
+            allowed_capabilities=["general-execution"],
         )
 
         # 1. Root agent (parent_depth=0) creates depth 1 subagent
@@ -731,6 +737,7 @@ class TestPhase7_1_RuntimePolicyPatches(unittest.TestCase):
         )
         res_gemini = default_tool_registry.execute(
             request=treq_gemini,
+            job_config={"limits": {"allowed_tools": ["tool.git.inspect"]}},
             capability_registry=cap_reg,
         )
         self.assertEqual(res_gemini.status, "rejected")
@@ -749,6 +756,7 @@ class TestPhase7_1_RuntimePolicyPatches(unittest.TestCase):
             res_claude = default_tool_registry.execute(
                 request=treq_claude,
                 worktree_dir=tmp_repo,
+                job_config={"limits": {"allowed_tools": ["tool.git.inspect"]}},
                 capability_registry=cap_reg,
             )
             self.assertEqual(res_claude.status, "success")
@@ -764,6 +772,7 @@ class TestPhase7_1_RuntimePolicyPatches(unittest.TestCase):
             res_test = default_tool_registry.execute(
                 request=treq_test,
                 worktree_dir=tmp_wt,
+                job_config={"limits": {"allowed_tools": ["tool.test_runner"], "allow_test_runner_fallback": True}},
                 capability_registry=cap_reg,
             )
             # Capability check passed (failed only because test file does not exist, not rejected)
@@ -809,6 +818,7 @@ class TestPhase7_1_RuntimePolicyPatches(unittest.TestCase):
             res_flag = default_tool_registry.execute(
                 request=treq_flag,
                 worktree_dir=tmp_repo,
+                job_config={"limits": {"allowed_tools": ["tool.git.inspect"]}},
                 capability_registry=cap_reg,
             )
             self.assertEqual(res_flag.status, "rejected")
@@ -856,6 +866,7 @@ class TestPhase7_1_RuntimePolicyPatches(unittest.TestCase):
                 "prompt_file": str(p1),
             }
             runner.spec["phases"] = [phase]
+            runner.spec["limits"]["allowed_tools"] = ["tool.git.inspect"]
 
             conv_id = "conv_tool_continuation_e2e"
             runner._record_message(
@@ -934,6 +945,183 @@ Verified diff contains mutex guard.
             self.assertEqual(review_msg["from"]["id"], "claude")
             self.assertEqual(review_msg["to"][0]["id"], "operator")
             self.assertIn("mutex guard confirmed present", review_msg["text"])
+
+
+class TestPhase7_2_PolicyHardeningFailClosed(unittest.TestCase):
+    """
+    Phase 7.2 fail-closed policy hardening regression tests:
+    1. If subagents enabled: require controller allowed_capabilities.
+    2. If tools enabled: require explicit allowed_tools.
+    3. Actually enforce ToolPolicy: max timeout & read-only constraint.
+    4. tool.test_runner: configured commands only, unless safe fallback explicitly enabled.
+    5. Missing-policy fail-closed behavior tests.
+    """
+
+    def test_subagents_enabled_without_allowed_capabilities_fails_closed(self):
+        mock_pub = MagicMock()
+
+        # 1. allow_subagents=True but allowed_capabilities is None -> REJECTED
+        manager_none = SubagentManager(allow_subagents=True, allowed_capabilities=None)
+        sub_none = manager_none.create_subagent(
+            parent_agent_id="claude",
+            task="Task without allowed_capabilities config",
+            publisher=mock_pub,
+            job_id="job_fc_1",
+        )
+        self.assertIsNone(sub_none)
+        mock_pub.publish.assert_any_call(
+            source_id="subagent_manager",
+            source_kind="runtime",
+            kind="delegation.rejected",
+            detail="Subagent creation rejected: controller allowed_capabilities must be explicitly configured when subagents are enabled.",
+            job_id="job_fc_1",
+            metadata={"reason": "missing_allowed_capabilities_policy", "parentAgentId": "claude"},
+        )
+
+        # 2. allow_subagents=True but allowed_capabilities is empty list -> REJECTED
+        manager_empty = SubagentManager(allow_subagents=True, allowed_capabilities=[])
+        sub_empty = manager_empty.create_subagent(
+            parent_agent_id="claude",
+            task="Task with empty allowed_capabilities config",
+            publisher=mock_pub,
+            job_id="job_fc_2",
+        )
+        self.assertIsNone(sub_empty)
+
+        # 3. Explicit allowed_capabilities -> ALLOWED
+        manager_valid = SubagentManager(allow_subagents=True, allowed_capabilities=["review.code"])
+        sub_valid = manager_valid.create_subagent(
+            parent_agent_id="claude",
+            task="Valid task",
+            capabilities=["review.code"],
+        )
+        self.assertIsNotNone(sub_valid)
+
+    def test_tools_enabled_without_explicit_allowed_tools_fails_closed(self):
+        mock_pub = MagicMock()
+        treq = ToolInvocationRequest(
+            toolId="tool.git.inspect",
+            args={"operation": "status"},
+            requester={"id": "claude", "kind": "agent"},
+        )
+
+        # 1. No job_config (missing allowed_tools) -> REJECTED
+        res_no_config = default_tool_registry.execute(request=treq, publisher=mock_pub, job_id="job_tc_1")
+        self.assertEqual(res_no_config.status, "rejected")
+        self.assertIn("allowed_tools must be explicitly configured", res_no_config.error)
+        mock_pub.publish.assert_any_call(
+            source_id="hermes_runner",
+            source_kind="runtime",
+            kind="tool.rejected",
+            detail="Tool execution rejected: allowed_tools must be explicitly configured by controller policy.",
+            job_id="job_tc_1",
+            metadata={"requestId": treq.id, "toolId": "tool.git.inspect", "reason": "missing_allowed_tools_policy"},
+        )
+
+        # 2. job_config with empty limits (missing allowed_tools) -> REJECTED
+        res_empty_limits = default_tool_registry.execute(request=treq, job_config={"limits": {}})
+        self.assertEqual(res_empty_limits.status, "rejected")
+        self.assertIn("allowed_tools must be explicitly configured", res_empty_limits.error)
+
+        # 3. Explicit allowed_tools provided -> ALLOWED
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            tmp_repo = Path(tmp_dir)
+            subprocess.run(["git", "init", "-b", "main"], cwd=tmp_repo, check=True, capture_output=True)
+            res_valid = default_tool_registry.execute(
+                request=treq,
+                worktree_dir=tmp_repo,
+                job_config={"limits": {"allowed_tools": ["tool.git.inspect"]}},
+            )
+            self.assertEqual(res_valid.status, "success")
+
+    def test_tool_policy_enforces_max_timeout_and_read_only_constraints(self):
+        cap_reg = create_default_capability_registry()
+
+        # 1. Max timeout clamped by ToolPolicy
+        treq_long = ToolInvocationRequest(
+            toolId="tool.git.inspect",
+            args={"operation": "status"},
+            timeoutSeconds=9999,
+            requester={"id": "claude", "kind": "agent"},
+        )
+        policy = ToolPolicy(allowed_tools=["tool.git.inspect"], max_timeout_seconds=25)
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            tmp_repo = Path(tmp_dir)
+            subprocess.run(["git", "init", "-b", "main"], cwd=tmp_repo, check=True, capture_output=True)
+            res = default_tool_registry.execute(
+                request=treq_long,
+                worktree_dir=tmp_repo,
+                job_config={"limits": {"tool_policy": policy}},
+                capability_registry=cap_reg,
+            )
+            self.assertEqual(res.status, "success")
+            self.assertEqual(treq_long.timeoutSeconds, 25)
+
+        # 2. Non-read-only tool rejected when read_only_only is True
+        mutating_profile = ToolProfile(
+            id="tool.custom.mutating",
+            displayName="Mutating Tool",
+            capabilities=["testing.unit"],
+            metadata={"readOnly": False},
+        )
+        default_tool_registry.register_tool(mutating_profile, lambda req, wt, jc: ToolInvocationResult(requestId=req.id, toolId=req.toolId, status="success"))
+
+        treq_mut = ToolInvocationRequest(
+            toolId="tool.custom.mutating",
+            args={},
+            requester={"id": "gemini", "kind": "agent"},
+        )
+        res_mut = default_tool_registry.execute(
+            request=treq_mut,
+            job_config={"limits": {"allowed_tools": ["tool.custom.mutating"], "read_only_tools_only": True}},
+            capability_registry=cap_reg,
+        )
+        self.assertEqual(res_mut.status, "rejected")
+        self.assertIn("violates read_only_only tool policy", res_mut.error)
+
+    def test_tool_test_runner_rejects_unconfigured_command_when_fallback_disabled(self):
+        cap_reg = create_default_capability_registry()
+        treq = ToolInvocationRequest(
+            toolId="tool.test_runner",
+            args={"target": "tests/test_foo.py"},
+            requester={"id": "gemini", "kind": "agent"},
+        )
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            tmp_wt = Path(tmp_dir)
+
+            # 1. No verification commands and fallback NOT enabled -> REJECTED
+            res_rejected = default_tool_registry.execute(
+                request=treq,
+                worktree_dir=tmp_wt,
+                job_config={"limits": {"allowed_tools": ["tool.test_runner"]}},
+                capability_registry=cap_reg,
+            )
+            self.assertEqual(res_rejected.status, "rejected")
+            self.assertIn("no verification command configured", res_rejected.error)
+
+            # 2. Fallback explicitly enabled -> safe fallback executed
+            res_fallback = default_tool_registry.execute(
+                request=treq,
+                worktree_dir=tmp_wt,
+                job_config={"limits": {"allowed_tools": ["tool.test_runner"], "allow_test_runner_fallback": True}},
+                capability_registry=cap_reg,
+            )
+            self.assertIn(res_fallback.status, ["success", "failed"])
+            self.assertNotEqual(res_fallback.status, "rejected")
+
+            # 3. Configured verification command in job_config -> executed configured command
+            res_configured = default_tool_registry.execute(
+                request=treq,
+                worktree_dir=tmp_wt,
+                job_config={
+                    "limits": {"allowed_tools": ["tool.test_runner"]},
+                    "verification": [{"name": "tests", "command": ["echo", "verification_ok"]}],
+                },
+                capability_registry=cap_reg,
+            )
+            self.assertEqual(res_configured.status, "success")
+            self.assertIn("verification_ok", res_configured.output.get("stdout", ""))
 
 
 if __name__ == "__main__":

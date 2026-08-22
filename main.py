@@ -181,6 +181,9 @@ class InternalMessagePayload(BaseModel):
     kind: str = Field(..., min_length=1, max_length=50)
     text: str = Field(..., min_length=1, max_length=5000)
     intent: Optional[str] = None
+    conversationId: Optional[str] = None
+    replyTo: Optional[str] = None
+    correlationId: Optional[str] = None
     jobId: Optional[str] = None
     phaseId: Optional[str] = None
     artifactRefs: Optional[List[Dict[str, Any]]] = None
@@ -196,6 +199,9 @@ async def ingest_internal_message(payload: InternalMessagePayload):
         kind=payload.kind,
         text=payload.text,
         intent=payload.intent,
+        conversation_id=payload.conversationId,
+        reply_to=payload.replyTo,
+        correlation_id=payload.correlationId,
         job_id=payload.jobId,
         phase_id=payload.phaseId,
         artifact_refs=payload.artifactRefs,
@@ -380,11 +386,12 @@ async def get_thread_messages(
     thread_id: str,
     limit: int = Query(default=50, ge=1, le=200),
     after: Optional[str] = Query(default=None),
+    conversation_id: Optional[str] = Query(default=None, alias="conversationId"),
 ):
     """
     Returns messages belonging to a specific operational thread in chronological order.
     """
-    messages = message_router.list_messages(thread_id=thread_id, limit=limit, after_id=after)
+    messages = message_router.list_messages(thread_id=thread_id, limit=limit, after_id=after, conversation_id=conversation_id)
     return [m.to_dict() for m in messages]
 
 
@@ -394,6 +401,9 @@ class SendOperatorMessagePayload(BaseModel):
     kind: str = Field(default="operator", min_length=1, max_length=50)
     text: str = Field(..., min_length=1, max_length=2000)
     intent: Optional[str] = None
+    conversationId: Optional[str] = None
+    replyTo: Optional[str] = None
+    correlationId: Optional[str] = None
 
 
 @app.post("/messages", status_code=status.HTTP_201_CREATED)
@@ -412,6 +422,9 @@ async def send_operator_message(payload: SendOperatorMessagePayload):
         kind=payload.kind,
         text=payload.text,
         intent=payload.intent,
+        conversation_id=payload.conversationId,
+        reply_to=payload.replyTo,
+        correlation_id=payload.correlationId,
     )
     return msg.to_dict()
 
@@ -424,6 +437,7 @@ async def get_agent_inbox(
     job_id: Optional[str] = Query(default=None, alias="jobId"),
     thread_id: Optional[str] = Query(default=None, alias="threadId"),
     chronological: bool = Query(default=False),
+    conversation_id: Optional[str] = Query(default=None, alias="conversationId"),
 ):
     """
     Returns mailbox entries targeted to the given agent with optional job/thread scoping.
@@ -435,6 +449,7 @@ async def get_agent_inbox(
         job_id=job_id,
         thread_id=thread_id,
         chronological=chronological,
+        conversation_id=conversation_id,
     )
     return [e.to_dict() for e in entries]
 

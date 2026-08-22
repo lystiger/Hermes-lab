@@ -8,6 +8,7 @@ if str(RUNNER_DIR) not in sys.path:
     sys.path.insert(0, str(RUNNER_DIR))
 
 from normalization import normalize_agent_id
+from persona import resolve_agent_profile
 
 try:
     from runner.agents.registry import default_registry
@@ -61,6 +62,8 @@ class AgentPresentationDTO:
     characterCardUrl: Optional[str] = None
     sigil: Optional[str] = None
     code: Optional[str] = None
+    subtitle: Optional[str] = None
+    persona: Optional[Dict[str, Any]] = None
 
 
 @dataclass
@@ -75,6 +78,7 @@ class AgentSummaryDTO:
     phase: Optional[str] = None
     currentTask: Optional[str] = None
     activeTool: Optional[str] = None
+    persona: Optional[Dict[str, Any]] = None
     presentation: Optional[AgentPresentationDTO] = None
 
     def to_dict(self) -> Dict[str, Any]:
@@ -86,7 +90,7 @@ class AgentSummaryDTO:
 
 class AgentService:
     """
-    Service that exposes dynamic agent registrations from the Hermes / LysStack registry.
+    Service that exposes dynamic agent registrations from the Hermes / LysStack registry with Persona profiles.
     """
 
     def __init__(self, registry=None):
@@ -109,19 +113,22 @@ class AgentService:
     def get_all_agents(self) -> List[Dict[str, Any]]:
         agents_list: List[Dict[str, Any]] = []
 
-        # 1. Fetch all registered adapter names from the registry (Task 6 & Task 7: strictly registry-driven)
         registered_names = list(self._registry.supported_agents) if self._registry else ["antigravity", "claude", "codex"]
 
         for raw_name in registered_names:
             normalized_id = normalize_agent_id(raw_name)
             meta = KNOWN_AGENT_METADATA.get(normalized_id, {})
+            agent_profile = resolve_agent_profile(normalized_id)
 
-            display_name = meta.get("displayName", normalized_id.capitalize())
+            display_name = meta.get("displayName", agent_profile.displayName)
             provider = meta.get("provider", "Dynamic Provider")
             model = meta.get("model", "unknown")
             role = meta.get("role", "Specialized Operative")
             capabilities = meta.get("capabilities", ["general-execution"])
             accent_color = meta.get("accentColor", "#8C949F")
+
+            avatar_url = agent_profile.persona.visual.avatar if (agent_profile.persona and agent_profile.persona.visual) else None
+            subtitle = agent_profile.persona.visual.subtitle if (agent_profile.persona and agent_profile.persona.visual) else None
 
             status = self._runtime_status.get(normalized_id, "IDLE")
             current_task = self._runtime_tasks.get(normalized_id)
@@ -136,11 +143,15 @@ class AgentService:
                 status=status,
                 phase=meta.get("sigil"),
                 currentTask=current_task,
+                persona=agent_profile.persona.to_dict() if agent_profile.persona else None,
                 presentation=AgentPresentationDTO(
                     displayName=display_name,
                     accentColor=accent_color,
+                    avatarUrl=avatar_url,
                     sigil=meta.get("sigil", normalized_id.upper()[:4]),
                     code=meta.get("code", normalized_id.upper()[:4]),
+                    subtitle=subtitle,
+                    persona=agent_profile.persona.to_dict() if agent_profile.persona else None,
                 ),
             )
             agents_list.append(dto.to_dict())

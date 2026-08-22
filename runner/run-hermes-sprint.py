@@ -41,11 +41,15 @@ if str(ROOT_DIR) not in sys.path:
 try:
     from artifact_registry import artifact_registry, ArtifactRef, ArtifactTrust
     from normalization import normalize_agent_id
+    from persona import resolve_agent_profile, PersonaProfile, AgentProfile
 except ImportError:
     artifact_registry = None
     ArtifactRef = None
     ArtifactTrust = None
     normalize_agent_id = lambda x: str(x).lower()
+    resolve_agent_profile = None
+    PersonaProfile = None
+    AgentProfile = None
 
 
 class HermesSprintRunner:
@@ -120,6 +124,25 @@ class HermesSprintRunner:
         self.messages_file = self.run_dir / "messages.jsonl"
         self.artifacts_file = self.run_dir / "artifacts.json"
         self._consumed_message_ids = set()
+        self.job_a2a_turns = 0
+        persona_spec = self.spec.get("persona")
+        if isinstance(persona_spec, dict):
+            self.persona_enabled = persona_spec.get("enabled", True)
+        elif persona_spec is not None:
+            self.persona_enabled = bool(persona_spec)
+        else:
+            sprint_id = str(self.spec.get("sprint_id", "")).lower()
+            spec_file_name = self.spec_path.name.lower()
+            self.persona_enabled = bool(
+                any("persona" in p for p in self.spec.get("phases", []))
+                or "persona" in self.spec
+                or "a2a" in self.spec
+                or "s06" in sprint_id
+                or "p6" in sprint_id
+                or "persona" in spec_file_name
+                or "a2a" in spec_file_name
+                or "s06" in spec_file_name
+            )
         
         self.logger = self._setup_logging()
         self.run_summary = {
@@ -305,6 +328,9 @@ class HermesSprintRunner:
         text,
         intent=None,
         phase_id=None,
+        conversation_id=None,
+        reply_to=None,
+        correlation_id=None,
         artifact_refs=None,
         metadata=None,
     ):
@@ -320,6 +346,9 @@ class HermesSprintRunner:
             "kind": kind,
             "text": text,
             "intent": intent,
+            "conversationId": conversation_id,
+            "replyTo": reply_to,
+            "correlationId": correlation_id,
             "jobId": self.job_id,
             "phaseId": phase_id,
             "artifactRefs": artifact_refs or [],
@@ -343,6 +372,9 @@ class HermesSprintRunner:
                 kind=kind,
                 text=text,
                 intent=intent,
+                conversation_id=conversation_id,
+                reply_to=reply_to,
+                correlation_id=correlation_id,
                 job_id=self.job_id,
                 phase_id=phase_id,
                 artifact_refs=artifact_refs,
@@ -383,6 +415,10 @@ class HermesSprintRunner:
             header = f"[from: {from_id}]\nkind: {kind}"
             if intent:
                 header += f"\nintent: {intent}"
+            if msg.get("conversationId"):
+                header += f"\nconversation: {msg.get('conversationId')}"
+            if msg.get("replyTo"):
+                header += f"\nreplyTo: {msg.get('replyTo')}"
             body = f"{header}\n\n{text}"
             if artifacts:
                 art_lines = ["\nArtifacts:"]
@@ -459,6 +495,12 @@ class HermesSprintRunner:
             header = f"[from: {from_id}]\nkind: {kind}"
             if intent:
                 header += f"\nintent: {intent}"
+            if msg.get("conversationId"):
+                header += f"\nconversation: {msg.get('conversationId')}"
+            if msg.get("replyTo"):
+                header += f"\nreplyTo: {msg.get('replyTo')}"
+            if msg.get("correlationId"):
+                header += f"\ncorrelationId: {msg.get('correlationId')}"
             body = f"{header}\n\n{text}"
             if artifacts:
                 art_lines = ["\nArtifacts:"]
@@ -471,19 +513,40 @@ class HermesSprintRunner:
         sections.append("--- END OPERATIONAL MESSAGES ---")
         return "\n\n".join(sections)
 
-    def build_effective_prompt(self, base_prompt, current_agent=None, mailbox_messages=None):
-        parts = [base_prompt]
+    def build_effective_prompt(self, base_prompt, current_agent=None, mailbox_messages=None, role=None):
+        parts = []
+
+        # 1. Agent Identity & Persona section
+        if current_agent and getattr(self, "persona_enabled", False) and resolve_agent_profile:
+            role_name = role or "operative"
+            try:
+                profile = resolve_agent_profile(current_agent)
+                if profile and profile.persona:
+                    identity_section = profile.persona.render_prompt_section(agent_id=profile.id, role=role_name)
+                    parts.append(identity_section)
+            except Exception as e:
+                self.logger.warning("Failed rendering persona section for %s: %s", current_agent, e)
+
+        # 2. Base phase prompt / Job instructions
+        parts.append(base_prompt)
+
+        # 3. Context bundle (if configured)
         if self.context_bundle:
             parts.append(self.context_bundle)
+
+        # 4. Operational thread history (handoffs, test results)
         thread_section = self.build_operational_thread_section(current_agent)
         if thread_section:
             parts.append(thread_section)
+
+        # 5. Mailbox / A2A messages
         if current_agent:
             if mailbox_messages is None:
                 mailbox_messages = self.fetch_pending_mailbox_messages(current_agent)
             mb_section = self.build_mailbox_messages_section(current_agent, mailbox_messages)
             if mb_section:
                 parts.append(mb_section)
+
         return "\n\n".join(parts)
 
     def _load_verification_spec(self):
@@ -1171,15 +1234,20 @@ class HermesSprintRunner:
                 "displayName": next_agent.capitalize(),
             }
 
+            conv_id = f"conv_phase_{phase_index}_{phase_name}"
             self._record_message(
                 from_actor=from_actor,
                 to_actors=[to_actor],
                 kind="handoff" if role != "verifier" else "verification_result",
                 text=msg_text,
                 intent=intent,
+                conversation_id=conv_id,
                 phase_id=f"phase-{phase_index}-{phase_name}",
                 artifact_refs=msg_artifacts,
             )
+
+            # Hermes A2A Multi-Agent Turn Scheduling (Phase 6)
+            self.schedule_a2a_turns(phase, wt_dir, conversation_id=conv_id)
 
             if default_publisher:
                 default_publisher.publish(
@@ -1224,6 +1292,123 @@ class HermesSprintRunner:
                     },
                 )
             raise
+
+    def schedule_a2a_turns(self, phase, wt_dir, conversation_id=None):
+        """
+        Hermes A2A Turn Scheduler (Phase 6):
+        Schedules bounded agent turns in response to structured A2A requests (e.g. review_request, correction_request).
+        Guarantees that agents never call each other directly; Hermes remains the sole execution authority.
+        """
+        a2a_config = self.limits.get("a2a", {}) if isinstance(self.limits.get("a2a"), dict) else {}
+        if not a2a_config.get("enabled", True):
+            return
+
+        max_phase_turns = a2a_config.get("max_turns_per_phase", 4)
+        max_job_turns = a2a_config.get("max_turns_per_job", 12)
+        phase_turns = 0
+
+        phases_by_agent = {p.get("agent"): p for p in self.spec.get("phases", [])}
+
+        while True:
+            # Check turn limits
+            if self.job_a2a_turns >= max_job_turns or phase_turns >= max_phase_turns:
+                self.logger.warning(
+                    "A2A conversation turn limit reached (job: %s/%s, phase: %s/%s). Halting A2A turns.",
+                    self.job_a2a_turns, max_job_turns, phase_turns, max_phase_turns,
+                )
+                if default_publisher:
+                    default_publisher.publish(
+                        source_id="hermes_runner",
+                        source_kind="runtime",
+                        kind="conversation.limit_reached",
+                        detail=f"A2A conversation turn limit reached ({self.job_a2a_turns} turns)",
+                        job_id=self.job_id,
+                        metadata={
+                            "conversationId": conversation_id,
+                            "jobTurns": self.job_a2a_turns,
+                            "maxJobTurns": max_job_turns,
+                            "phaseTurns": phase_turns,
+                            "maxPhaseTurns": max_phase_turns,
+                        },
+                    )
+                break
+
+            # Find unacknowledged A2A messages in this conversation requiring turn execution
+            consumed = getattr(self, "_consumed_message_ids", set())
+            pending_a2a = []
+
+            for msg in self.local_messages:
+                msg_id = msg.get("id")
+                if not msg_id or msg_id in consumed:
+                    continue
+                if conversation_id and msg.get("conversationId") != conversation_id:
+                    continue
+                kind = msg.get("kind")
+                intent = msg.get("intent")
+                # A2A conversation turns are triggered for explicit a2a messages or correction/question requests
+                if kind == "a2a" or intent in {"correction_request", "question"}:
+                    to_actors = msg.get("to", [])
+                    if to_actors:
+                        to_id = to_actors[0].get("id") if isinstance(to_actors[0], dict) else str(to_actors[0])
+                        if to_id in phases_by_agent:
+                            pending_a2a.append(msg)
+
+            if not pending_a2a:
+                break
+
+            target_msg = pending_a2a[0]
+            to_actors = target_msg.get("to", [])
+            target_agent = to_actors[0].get("id") if isinstance(to_actors[0], dict) else str(to_actors[0])
+            target_phase = phases_by_agent[target_agent]
+            target_wt = self.worktree_root / target_phase.get("worktree_dir", "integration")
+
+            self.job_a2a_turns += 1
+            phase_turns += 1
+
+            self.logger.info(
+                "Hermes scheduling A2A turn #%s for %s in conversation %s (replying to %s)",
+                self.job_a2a_turns, target_agent, conversation_id, target_msg.get("id"),
+            )
+
+            if default_publisher:
+                default_publisher.publish(
+                    source_id="hermes_runner",
+                    source_kind="runtime",
+                    kind="conversation.turn",
+                    detail=f"Scheduling A2A turn #{self.job_a2a_turns} for {target_agent}",
+                    job_id=self.job_id,
+                    metadata={
+                        "conversationId": conversation_id,
+                        "turn": self.job_a2a_turns,
+                        "targetAgent": target_agent,
+                        "replyTo": target_msg.get("id"),
+                        "intent": target_msg.get("intent"),
+                    },
+                )
+
+            # Fetch pending mailbox messages specifically for target agent
+            target_mailbox = self.fetch_pending_mailbox_messages(target_agent)
+            target_consumed_ids = [m["id"] for m in target_mailbox if "id" in m]
+
+            # Execute target agent
+            if not self.skip_agent_exec and not self.dry_run:
+                try:
+                    result = self.execute_agent(
+                        target_phase,
+                        target_wt,
+                        mailbox_messages=target_mailbox,
+                    )
+                except Exception as e:
+                    self.logger.warning("Error during A2A turn for %s: %s", target_agent, e)
+                    break
+            else:
+                result = None
+
+            # Acknowledge consumed messages
+            for mid in target_consumed_ids:
+                if default_publisher and default_publisher.enabled:
+                    default_publisher.acknowledge_message(target_agent, mid)
+                self._consumed_message_ids.add(mid)
 
     def run_tests_in_venv(self):
         self.logger.info("\n=== Running Controller Verification & Pytest Suite ===")

@@ -121,6 +121,9 @@ class RuntimeEventPublisher:
         kind: str,
         text: str,
         intent: Optional[str] = None,
+        conversation_id: Optional[str] = None,
+        reply_to: Optional[str] = None,
+        correlation_id: Optional[str] = None,
         job_id: Optional[str] = None,
         phase_id: Optional[str] = None,
         artifact_refs: Optional[List[Dict[str, Any]]] = None,
@@ -133,6 +136,9 @@ class RuntimeEventPublisher:
             "kind": kind,
             "text": text,
             "intent": intent,
+            "conversationId": conversation_id,
+            "replyTo": reply_to,
+            "correlationId": correlation_id,
             "jobId": job_id,
             "phaseId": phase_id,
             "artifactRefs": artifact_refs or [],
@@ -154,6 +160,7 @@ class RuntimeEventPublisher:
         job_id: Optional[str] = None,
         thread_id: Optional[str] = None,
         limit: int = 50,
+        conversation_id: Optional[str] = None,
     ) -> List[Dict[str, Any]]:
         if not self.enabled:
             return []
@@ -164,6 +171,8 @@ class RuntimeEventPublisher:
             query_params.append(f"jobId={urllib.parse.quote(job_id)}")
         if thread_id:
             query_params.append(f"threadId={urllib.parse.quote(thread_id)}")
+        if conversation_id:
+            query_params.append(f"conversationId={urllib.parse.quote(conversation_id)}")
         query_params.append(f"limit={limit}")
         query_params.append("chronological=true")
 

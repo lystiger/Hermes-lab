@@ -2,7 +2,7 @@ from datetime import datetime, timezone
 import logging
 import threading
 import time
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, Optional, Set, Union
 from artifact_registry import ArtifactRef, artifact_registry
 from event_bus import event_bus
 from message_store import (
@@ -20,7 +20,7 @@ logger = logging.getLogger("hermes.message_router")
 class MessageRouter:
     """
     Control-plane service that governs operational messaging, thread lifecycles,
-    artifact association, and event broadcasting for LysStack.
+    structured A2A conversation turns, artifact association, and event broadcasting for LysStack.
     """
 
     def __init__(self, store=None, registry=None, bus=None):
@@ -28,6 +28,7 @@ class MessageRouter:
         self.registry = registry or artifact_registry
         self.bus = bus or event_bus
         self._msg_counter = 0
+        self._seen_conversations: Set[str] = set()
         self._lock = threading.Lock()
 
     def generate_message_id(self) -> str:
@@ -101,6 +102,9 @@ class MessageRouter:
         kind: str,
         text: str,
         intent: Optional[str] = None,
+        conversation_id: Optional[str] = None,
+        reply_to: Optional[str] = None,
+        correlation_id: Optional[str] = None,
         job_id: Optional[str] = None,
         phase_id: Optional[str] = None,
         artifact_refs: Optional[List[Union[Dict[str, Any], ArtifactRef]]] = None,
@@ -112,7 +116,6 @@ class MessageRouter:
         to_dtos = [self.build_actor_ref(to) for to in to_actors] if to_actors else []
 
         if not to_dtos:
-            # Default recipient: system or thread
             to_dtos = [ActorRefDTO(id="lysstack", kind="runtime", displayName="LysStack")]
 
         # Process artifact references
@@ -142,6 +145,9 @@ class MessageRouter:
             kind=kind,
             text=text,
             intent=intent,
+            conversationId=conversation_id,
+            replyTo=reply_to,
+            correlationId=correlation_id,
             jobId=job_id,
             phaseId=phase_id,
             artifactRefs=resolved_artifacts,
@@ -163,6 +169,9 @@ class MessageRouter:
             metadata={
                 "messageId": stored.id,
                 "threadId": stored.threadId,
+                "conversationId": stored.conversationId,
+                "replyTo": stored.replyTo,
+                "correlationId": stored.correlationId,
                 "jobId": stored.jobId,
                 "phaseId": stored.phaseId,
                 "kind": stored.kind,
@@ -174,6 +183,51 @@ class MessageRouter:
             },
             accent_color=from_dto.accentColor,
         )
+
+        # Emit conversation lifecycle events
+        if conversation_id:
+            with self._lock:
+                is_first_in_conv = conversation_id not in self._seen_conversations
+                self._seen_conversations.add(conversation_id)
+
+            if is_first_in_conv:
+                self.bus.publish(
+                    source_id=from_dto.id,
+                    source_kind=from_dto.kind,
+                    source_name=from_dto.displayName,
+                    kind="conversation.started",
+                    detail=f"Conversation started: {conversation_id} by {from_dto.displayName}",
+                    job_id=job_id,
+                    metadata={
+                        "conversationId": conversation_id,
+                        "threadId": thread_id,
+                        "jobId": job_id,
+                        "firstMessageId": stored.id,
+                        "from": from_dto.to_dict(),
+                        "to": [t.to_dict() for t in to_dtos],
+                    },
+                )
+
+            # Turn event
+            self.bus.publish(
+                source_id=from_dto.id,
+                source_kind=from_dto.kind,
+                source_name=from_dto.displayName,
+                kind="conversation.turn",
+                detail=f"Conversation turn in {conversation_id}: {from_dto.displayName} [{intent or kind}]",
+                job_id=job_id,
+                metadata={
+                    "conversationId": conversation_id,
+                    "threadId": thread_id,
+                    "jobId": job_id,
+                    "messageId": stored.id,
+                    "from": from_dto.to_dict(),
+                    "to": [t.to_dict() for t in to_dtos],
+                    "intent": intent,
+                    "replyTo": reply_to,
+                    "correlationId": correlation_id,
+                },
+            )
 
         return stored
 
@@ -193,8 +247,14 @@ class MessageRouter:
         thread_id: str,
         limit: int = 50,
         after_id: Optional[str] = None,
+        conversation_id: Optional[str] = None,
     ) -> List[MessageDTO]:
-        return self.store.list_messages(thread_id=thread_id, limit=limit, after_id=after_id)
+        return self.store.list_messages(
+            thread_id=thread_id,
+            limit=limit,
+            after_id=after_id,
+            conversation_id=conversation_id,
+        )
 
     def list_inbox(
         self,
@@ -204,6 +264,7 @@ class MessageRouter:
         job_id: Optional[str] = None,
         thread_id: Optional[str] = None,
         chronological: bool = False,
+        conversation_id: Optional[str] = None,
     ) -> List[MailboxEntryDTO]:
         return self.store.list_inbox(
             recipient_id=recipient_id,
@@ -212,6 +273,7 @@ class MessageRouter:
             job_id=job_id,
             thread_id=thread_id,
             chronological=chronological,
+            conversation_id=conversation_id,
         )
 
     def acknowledge(self, message_id: str, recipient_id: str) -> bool:

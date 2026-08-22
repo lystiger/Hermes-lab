@@ -48,6 +48,9 @@ class MessageDTO:
     kind: str
     text: str
     intent: Optional[str] = None
+    conversationId: Optional[str] = None
+    replyTo: Optional[str] = None
+    correlationId: Optional[str] = None
     jobId: Optional[str] = None
     phaseId: Optional[str] = None
     artifactRefs: List[ArtifactRef] = field(default_factory=list)
@@ -63,6 +66,9 @@ class MessageDTO:
             "kind": self.kind,
             "text": self.text,
             "intent": self.intent,
+            "conversationId": self.conversationId,
+            "replyTo": self.replyTo,
+            "correlationId": self.correlationId,
             "jobId": self.jobId,
             "phaseId": self.phaseId,
             "artifactRefs": [a.to_dict() for a in self.artifactRefs],
@@ -92,6 +98,9 @@ class MessageDTO:
             kind=data.get("kind", "status"),
             text=data.get("text", ""),
             intent=data.get("intent"),
+            conversationId=data.get("conversationId"),
+            replyTo=data.get("replyTo"),
+            correlationId=data.get("correlationId"),
             jobId=data.get("jobId"),
             phaseId=data.get("phaseId"),
             artifactRefs=artifact_refs,
@@ -138,35 +147,46 @@ class MailboxEntryDTO:
     messageId: str
     recipientId: str
     state: str  # "PENDING" | "DELIVERED" | "ACKNOWLEDGED"
-    receivedAt: str
+    receivedAt: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
     acknowledgedAt: Optional[str] = None
     message: Optional[MessageDTO] = None
 
     def to_dict(self) -> Dict[str, Any]:
-        res = {
+        return {
             "messageId": self.messageId,
             "recipientId": self.recipientId,
             "state": self.state,
             "receivedAt": self.receivedAt,
             "acknowledgedAt": self.acknowledgedAt,
+            "message": self.message.to_dict() if self.message else None,
         }
-        if self.message:
-            res["message"] = self.message.to_dict()
-        return res
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> "MailboxEntryDTO":
+        msg_data = data.get("message")
+        msg_obj = MessageDTO.from_dict(msg_data) if isinstance(msg_data, dict) else None
+        return cls(
+            messageId=data.get("messageId", ""),
+            recipientId=data.get("recipientId", ""),
+            state=data.get("state", "DELIVERED"),
+            receivedAt=data.get("receivedAt") or datetime.now(timezone.utc).isoformat(),
+            acknowledgedAt=data.get("acknowledgedAt"),
+            message=msg_obj,
+        )
 
 
 class MessageStore:
     """
-    In-memory indexed and persistent store for LysStack operational threads, messages, and mailboxes.
+    In-memory and JSONL-persisted store for operational threads, messages, and mailboxes.
     """
 
     def __init__(self):
         self._lock = threading.Lock()
         self._threads: Dict[str, ThreadDTO] = {}
         self._messages: Dict[str, MessageDTO] = {}
-        self._thread_messages: Dict[str, List[str]] = {}
-        self._job_threads: Dict[str, List[str]] = {}
-        self._inboxes: Dict[str, List[MailboxEntryDTO]] = {}
+        self._thread_messages: Dict[str, List[str]] = {}  # threadId -> list of messageIds
+        self._job_threads: Dict[str, List[str]] = {}      # jobId -> list of threadIds
+        self._inboxes: Dict[str, List[MailboxEntryDTO]] = {}  # recipientId -> list of mailbox entries
 
     def create_thread(self, thread: ThreadDTO) -> ThreadDTO:
         with self._lock:
@@ -191,10 +211,11 @@ class MessageStore:
         limit: int = 50,
     ) -> List[ThreadDTO]:
         with self._lock:
-            threads = list(self._threads.values())
-
-        if job_id:
-            threads = [t for t in threads if t.jobId == job_id]
+            if job_id:
+                thread_ids = self._job_threads.get(job_id, [])
+                threads = [self._threads[tid] for tid in thread_ids if tid in self._threads]
+            else:
+                threads = list(self._threads.values())
 
         if participant:
             norm_part = normalize_agent_id(participant)
@@ -275,10 +296,14 @@ class MessageStore:
         thread_id: str,
         limit: int = 50,
         after_id: Optional[str] = None,
+        conversation_id: Optional[str] = None,
     ) -> List[MessageDTO]:
         with self._lock:
             msg_ids = list(self._thread_messages.get(thread_id, []))
             messages = [self._messages[mid] for mid in msg_ids if mid in self._messages]
+
+        if conversation_id:
+            messages = [m for m in messages if m.conversationId == conversation_id]
 
         if after_id:
             try:
@@ -300,6 +325,7 @@ class MessageStore:
         job_id: Optional[str] = None,
         thread_id: Optional[str] = None,
         chronological: bool = False,
+        conversation_id: Optional[str] = None,
     ) -> List[MailboxEntryDTO]:
         norm_id = normalize_agent_id(recipient_id)
         with self._lock:
@@ -326,6 +352,9 @@ class MessageStore:
 
         if thread_id:
             entries = [e for e in entries if e.message and e.message.threadId == thread_id]
+
+        if conversation_id:
+            entries = [e for e in entries if e.message and e.message.conversationId == conversation_id]
 
         if chronological:
             entries.sort(key=lambda e: e.receivedAt or "")
@@ -361,19 +390,19 @@ class MessageStore:
                 if not msg_file.exists():
                     continue
 
-                try:
-                    with open(msg_file, "r", encoding="utf-8") as f:
-                        for line in f:
-                            line = line.strip()
-                            if not line:
-                                continue
-                            data = json.loads(line)
-                            msg = MessageDTO.from_dict(data)
-                            self.append_message(msg)
-                except Exception as exc:
-                    logger.debug("Failed recovering messages from %s: %s", msg_file, exc)
-        except Exception as exc:
-            logger.warning("Failed during startup message recovery: %s", exc)
+                with open(msg_file, "r", encoding="utf-8") as f:
+                    for line in f:
+                        line = line.strip()
+                        if not line:
+                            continue
+                        try:
+                            msg_dict = json.loads(line)
+                            msg_dto = MessageDTO.from_dict(msg_dict)
+                            self.append_message(msg_dto)
+                        except Exception as parse_err:
+                            logger.warning("Failed parsing message line in %s: %s", msg_file, parse_err)
+        except Exception as e:
+            logger.warning("Failed recovering messages from runs: %s", e)
 
 
 message_store = MessageStore()

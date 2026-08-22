@@ -101,6 +101,21 @@ export const AgentDetailRoute: React.FC = () => {
             {agent.model} · {agent.provider} · {agent.role}
           </div>
 
+          {/* Capabilities Badges (Phase 7) */}
+          {agent.capabilities && agent.capabilities.length > 0 && (
+            <div className="mt-2.5 flex flex-wrap items-center gap-1.5 font-mono-code text-[10px]">
+              <span className="text-[#5C646E]">CAPABILITIES:</span>
+              {agent.capabilities.map((cap) => (
+                <span
+                  key={cap}
+                  className="px-1.5 py-0.5 bg-[#141820] border border-[#242A36] text-[#A5D6FF] tracking-wide"
+                >
+                  {cap}
+                </span>
+              ))}
+            </div>
+          )}
+
           {/* Context, Activity, Allowance 3-column row */}
           <div className="mt-5 flex flex-wrap gap-6">
             <AgentContextMeter agent={agent} />

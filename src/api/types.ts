@@ -383,3 +383,108 @@ export interface SendMessageRequest {
   replyTo?: string;
   correlationId?: string;
 }
+
+// Phase 7: Capability & Delegation Types
+export interface Capability {
+  id: string;
+  description?: string;
+  tags?: string[];
+  metadata?: Record<string, any>;
+}
+
+export interface CapabilityRef {
+  id: string;
+  proficiency?: number | string;
+  metadata?: Record<string, any>;
+}
+
+export interface DelegationRequest {
+  id?: string;
+  requester?: ActorRef;
+  task: string;
+  requiredCapabilities: string[];
+  preferredActors?: string[];
+  excludedActors?: string[];
+  jobId?: string;
+  threadId?: string;
+  conversationId?: string;
+  parentMessageId?: string;
+  parentTaskId?: string;
+  allowSubagent?: boolean;
+  allowTools?: boolean;
+  maxDepth?: number;
+  metadata?: Record<string, any>;
+}
+
+export interface DelegationDecision {
+  requestId: string;
+  selectedActorId?: string;
+  status: 'selected' | 'no_match' | 'rejected' | 'limit_reached' | string;
+  reason?: string;
+  rejectedReasons?: Record<string, string>;
+  requiredCapabilities: string[];
+  matchedCapabilities: string[];
+  missingCapabilities: string[];
+  metadata?: Record<string, any>;
+}
+
+export interface TaskAssignment {
+  taskId: string;
+  ownerActorId: string;
+  task: string;
+  status: 'queued' | 'running' | 'completed' | 'failed' | 'cancelled' | string;
+  delegatedBy?: string;
+  parentTaskId?: string;
+  requiredCapabilities?: string[];
+  jobId?: string;
+  threadId?: string;
+  conversationId?: string;
+  createdAt?: string;
+  completedAt?: string;
+  artifactRefs?: ArtifactRef[];
+  metadata?: Record<string, any>;
+}
+
+export interface ToolProfile {
+  id: string;
+  displayName: string;
+  capabilities: string[];
+  inputSchema?: Record<string, any>;
+  outputSchema?: Record<string, any>;
+  timeoutSeconds?: number;
+  metadata?: Record<string, any>;
+}
+
+export interface ToolInvocationRequest {
+  id?: string;
+  toolId: string;
+  args: Record<string, any>;
+  requester?: ActorRef;
+  jobId?: string;
+  threadId?: string;
+  conversationId?: string;
+  parentMessageId?: string;
+  timeoutSeconds?: number;
+  metadata?: Record<string, any>;
+}
+
+export interface ToolInvocationResult {
+  requestId: string;
+  toolId: string;
+  status: 'success' | 'failed' | 'rejected' | 'timeout' | string;
+  output?: any;
+  artifactRefs?: ArtifactRef[];
+  error?: string;
+  metadata?: Record<string, any>;
+}
+
+export interface SubagentProfile {
+  id: string;
+  parentAgentId: string;
+  capabilities: string[];
+  task: string;
+  displayName?: string;
+  depth?: number;
+  ephemeral?: boolean;
+  metadata?: Record<string, any>;
+}

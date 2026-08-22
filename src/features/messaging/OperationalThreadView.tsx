@@ -216,10 +216,38 @@ export const OperationalThreadView: React.FC<OperationalThreadViewProps> = ({
                       </>
                     )}
 
+                    {/* Tool Actor Indicator (Phase 7) */}
+                    {msg.from.kind === 'tool' || msg.kind === 'tool_result' ? (
+                      <span className="px-1 py-0.2 border border-[#388BFD66] bg-[#388BFD1A] text-[#79C0FF] text-[9.5px] font-bold">
+                        ⚙ TOOL
+                      </span>
+                    ) : null}
+
+                    {/* Subagent Indicator (Phase 7) */}
+                    {(msg.from.id.startsWith('subagent_') || msg.metadata?.subagent) && (
+                      <span className="px-1 py-0.2 border border-[#2EA04366] bg-[#2EA0431A] text-[#7EE787] text-[9.5px] font-bold">
+                        SUBAGENT {msg.metadata?.parentAgentId ? `(parent: ${msg.metadata.parentAgentId})` : ''}
+                      </span>
+                    )}
+
+                    {/* Delegation Indicator & Task Info (Phase 7) */}
+                    {(msg.kind === 'delegation' || msg.intent === 'task_request') && (
+                      <span className="px-1 py-0.2 border border-[#A371F766] bg-[#A371F71A] text-[#D2A8FF] text-[9.5px] font-bold">
+                        DELEGATION {msg.metadata?.delegatedBy ? `· by ${msg.metadata.delegatedBy}` : ''}
+                      </span>
+                    )}
+
                     {/* Kind & Intent Chips */}
                     <span className="ml-1 text-[10px] text-[#CBA35C] bg-[#CBA35C14] px-1.5 py-0.2 border border-[#CBA35C33]">
                       {msg.kind.toUpperCase()} {msg.intent ? `· ${msg.intent}` : ''}
                     </span>
+
+                    {/* Required Capabilities Badges (Phase 7) */}
+                    {Array.isArray(msg.metadata?.requiredCapabilities) && msg.metadata.requiredCapabilities.length > 0 && (
+                      <span className="flex items-center gap-1 text-[9px] text-[#A5D6FF] bg-[#141820] px-1.5 py-0.2 border border-[#242A36]">
+                        req: {msg.metadata.requiredCapabilities.join(', ')}
+                      </span>
+                    )}
 
                     {/* Conversation Tag */}
                     {msg.conversationId && (

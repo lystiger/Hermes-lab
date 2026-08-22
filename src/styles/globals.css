@@ -1,0 +1,137 @@
+@import "tailwindcss";
+
+@layer base {
+  :root {
+    --bg-primary: #0A0B0D;
+    --bg-secondary: #0C0E11;
+    --bg-tertiary: #101216;
+    --border-dim: #1F242B;
+    --border-highlight: #2A3038;
+    --gold-primary: #CBA35C;
+    --gold-hover: #E8CE9B;
+    --text-primary: #E6E9ED;
+    --text-muted: #8C949F;
+    --text-dim: #5C646E;
+    
+    --color-gem: #5B8CFF;
+    --color-cla: #D9A05B;
+    --color-cod: #4EC9A0;
+    --color-red: #F2555A;
+    --color-amber: #E3A008;
+    --color-green: #3FB950;
+  }
+
+  html, body {
+    margin: 0;
+    padding: 0;
+    background: #0A0B0D;
+    color: #E6E9ED;
+    font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Helvetica Neue', system-ui, sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  *::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+
+  *::-webkit-scrollbar-thumb {
+    background: #242A32;
+    border-radius: 0px;
+  }
+
+  *::-webkit-scrollbar-thumb:hover {
+    background: #3A4048;
+  }
+
+  *::-webkit-scrollbar-track {
+    background: #0C0E11;
+  }
+}
+
+/* 3D and Cyber Animations */
+@keyframes lys-spin {
+  from { transform: rotateX(58deg) rotateZ(0deg); }
+  to { transform: rotateX(58deg) rotateZ(360deg); }
+}
+
+@keyframes lys-spin-rev {
+  from { transform: rotateX(58deg) rotateZ(360deg); }
+  to { transform: rotateX(58deg) rotateZ(0deg); }
+}
+
+@keyframes lys-pulse {
+  0%, 100% { opacity: 0.25; transform: scale(1); }
+  50% { opacity: 0.9; transform: scale(1.7); }
+}
+
+@keyframes lys-scan {
+  0% { transform: translateY(-14px); opacity: 0; }
+  20% { opacity: 0.75; }
+  100% { transform: translateY(86px); opacity: 0; }
+}
+
+@keyframes lys-scan-mid {
+  0% { transform: translateY(-10px); opacity: 0; }
+  18% { opacity: 0.7; }
+  100% { transform: translateY(126px); opacity: 0; }
+}
+
+@keyframes lys-scan-tall {
+  0% { transform: translateY(-10px); opacity: 0; }
+  14% { opacity: 0.8; }
+  92% { opacity: 0.35; }
+  100% { transform: translateY(182px); opacity: 0; }
+}
+
+@keyframes lys-breathe {
+  0%, 100% { transform: translateY(0) scale(1); }
+  50% { transform: translateY(-1.5px) scale(1.012); }
+}
+
+@keyframes lys-breathe-quick {
+  0%, 100% { transform: translateY(0) scale(1); }
+  50% { transform: translateY(-2.5px) scale(1.02); }
+}
+
+@keyframes lys-breathe-slow {
+  0%, 100% { transform: translateY(0) scale(1); }
+  50% { transform: translateY(-1.2px) scale(1.008); }
+}
+
+@keyframes lys-blink {
+  0%, 92%, 100% { opacity: 1; }
+  95% { opacity: 0.15; }
+}
+
+@keyframes lys-crawl {
+  from { transform: translateY(0); }
+  to { transform: translateY(-50%); }
+}
+
+@keyframes lys-cube {
+  from { transform: rotateX(-24deg) rotateY(0deg); }
+  to { transform: rotateX(-24deg) rotateY(360deg); }
+}
+
+.font-mono-code {
+  font-family: ui-monospace, 'SF Mono', SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace;
+}
+
+.clip-hex {
+  clip-path: polygon(50% 0, 100% 26%, 100% 74%, 50% 100%, 0 74%, 0 26%);
+}
+
+.clip-armor {
+  clip-path: polygon(24% 0, 76% 0, 100% 30%, 100% 100%, 0 100%, 0 30%);
+}
+
+.bg-cyber-grid {
+  background-image: linear-gradient(to right, rgba(31, 36, 43, 0.4) 1px, transparent 1px),
+                    linear-gradient(to bottom, rgba(31, 36, 43, 0.4) 1px, transparent 1px);
+  background-size: 20px 20px;
+}
+
+.bg-striped-pattern {
+  background: repeating-linear-gradient(90deg, transparent 0 4px, #0A0B0D 4px 5px);
+}

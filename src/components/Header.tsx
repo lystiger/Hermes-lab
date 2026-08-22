@@ -84,9 +84,9 @@ export const Header: React.FC = () => {
       </div>
 
       <div className="flex items-center gap-4 font-mono-code text-[11px] text-[#8C949F]">
-        <span>queue eta <span className="text-[#E6E9ED]">~37 min</span></span>
+        <span>queue eta <span className={isRealApiMode ? 'text-[#8C949F]' : 'text-[#E6E9ED]'}>{isRealApiMode ? '—' : '~37 min'}</span></span>
         <span className="text-[#2A3038]">|</span>
-        <span>budget <span className="text-[#E3A008]">58%</span></span>
+        <span>budget <span className={isRealApiMode ? 'text-[#8C949F]' : 'text-[#E3A008]'}>{isRealApiMode ? '—' : '58%'}</span></span>
         <span className="text-[#2A3038]">|</span>
         <span
           style={{ color: statusColor }}

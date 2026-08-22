@@ -87,6 +87,43 @@ describe('HttpLysStackApi Contract Implementation', () => {
     expect(custom?.presentation?.accentColor).toBeDefined();
   });
 
+  it('returns truthful unobserved telemetry for getAgent in real mode (no fabricated stats)', async () => {
+    const mockBackendAgents = [
+      {
+        id: 'claude',
+        displayName: 'Claude',
+        provider: 'Anthropic API',
+        model: 'claude-sonnet-4-5',
+        role: 'Architecture',
+        capabilities: ['security-review'],
+        status: 'IDLE'
+      }
+    ];
+
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => mockBackendAgents
+    } as any);
+
+    const detail = await api.getAgent('claude');
+    expect(detail).not.toBeNull();
+    expect(detail?.id).toBe('claude');
+    // Verify no fabricated token numbers
+    expect(detail?.input).toBe('—');
+    expect(detail?.output).toBe('—');
+    expect(detail?.activity).toEqual([]);
+    expect(detail?.runs).toEqual([]);
+  });
+
+  it('truthfully reports that commands and job actions are unsupported in real mode', async () => {
+    const cmdResult = await api.sendOperatorCommand('claude', 'run lint');
+    expect(cmdResult.success).toBe(false);
+    expect(cmdResult.response).toContain('not available in real control-plane mode yet');
+
+    const actionResult = await api.triggerJobAction('#142', 'retry');
+    expect(actionResult).toBe(false);
+  });
+
   it('fetches events with limit and cursor', async () => {
     const mockEvents = [
       {
@@ -117,13 +154,16 @@ describe('HttpLysStackApi Contract Implementation', () => {
     expect(events[0].source.displayName).toBe('Claude');
   });
 
-  it('handles SSE streaming subscription and clean unsubscription', () => {
+  it('handles SSE streaming subscription with cursor and clean unsubscription', () => {
     let messageListener: any = null;
     let closed = false;
+    let openedUrl = '';
 
     // Mock EventSource
     class MockEventSource {
-      constructor(public url: string) {}
+      constructor(public url: string) {
+        openedUrl = url;
+      }
       addEventListener(type: string, listener: any) {
         if (type === 'trace') {
           messageListener = listener;
@@ -138,8 +178,9 @@ describe('HttpLysStackApi Contract Implementation', () => {
     (global as any).EventSource = MockEventSource;
 
     const handler = vi.fn();
-    const sub = api.subscribeEvents(handler);
+    const sub = api.subscribeEvents(handler, undefined, 'evt_050');
 
+    expect(openedUrl).toBe('http://localhost:8000/events/stream?after=evt_050');
     expect(messageListener).toBeDefined();
 
     // Dispatch simulated message event

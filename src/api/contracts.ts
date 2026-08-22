@@ -31,7 +31,8 @@ export interface LysStackApi {
   getTraceEvents(limit?: number, after?: string): Promise<TraceEvent[]>;
   subscribeEvents(
     handler: (event: TraceEvent) => void,
-    onError?: (err: Error) => void
+    onError?: (err: Error) => void,
+    initialCursor?: string
   ): EventSubscription;
   sendOperatorCommand(targetActorId: string, command: string): Promise<{ success: boolean; response: string }>;
   triggerJobAction(jobId: string, action: 'retry' | 'pause' | 'cancel' | 'promote'): Promise<boolean>;

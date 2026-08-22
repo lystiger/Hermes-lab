@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { lysStackApi, isRealApiMode } from './client';
+import { EventSubscription } from './contracts';
 import {
   AgentSummary,
   AgentDetail,
@@ -234,54 +235,65 @@ export function useEventStream() {
 
   useEffect(() => {
     let isSubscribed = true;
+    let eventSub: EventSubscription | null = null;
 
-    // 1. Initial Health Check
-    lysStackApi
-      .getHealth()
-      .then((health) => {
+    async function initStream() {
+      // 1. Initial Health Check
+      try {
+        const health = await lysStackApi.getHealth();
         if (isSubscribed) {
           setBackendHealth(health);
           setConnectionStatus('CONNECTED');
         }
-      })
-      .catch(() => {
-        if (isSubscribed && isRealApiMode) {
-          setConnectionStatus('DISCONNECTED');
-        }
-      });
-
-    // 2. Load initial events from API
-    lysStackApi
-      .getTraceEvents()
-      .then((initial) => {
-        if (isSubscribed) {
-          setInitialEvents(initial);
-        }
-      })
-      .catch(() => {
-        if (isSubscribed && isRealApiMode) {
-          setConnectionStatus('DISCONNECTED');
-        }
-      });
-
-    // 3. Subscribe to live stream
-    const sub = lysStackApi.subscribeEvents(
-      (evt: TraceEvent) => {
-        if (isSubscribed) {
-          addTraceEvent(evt);
-          setConnectionStatus('CONNECTED');
-        }
-      },
-      () => {
+      } catch {
         if (isSubscribed && isRealApiMode) {
           setConnectionStatus('DISCONNECTED');
         }
       }
-    );
+
+      // 2. Load historical events from API first (Task 9: Establish cursor before opening SSE)
+      let initialCursor: string | undefined;
+      try {
+        const history = await lysStackApi.getTraceEvents(100);
+        if (isSubscribed) {
+          setInitialEvents(history);
+          // Newest event is at index 0 (or find highest rawTs)
+          if (history.length > 0) {
+            initialCursor = history[0].id;
+          }
+        }
+      } catch {
+        if (isSubscribed && isRealApiMode) {
+          setConnectionStatus('DISCONNECTED');
+        }
+      }
+
+      // 3. Open SSE stream starting strictly after latest historical event
+      if (isSubscribed) {
+        eventSub = lysStackApi.subscribeEvents(
+          (evt: TraceEvent) => {
+            if (isSubscribed) {
+              addTraceEvent(evt);
+              setConnectionStatus('CONNECTED');
+            }
+          },
+          () => {
+            if (isSubscribed && isRealApiMode) {
+              setConnectionStatus('DISCONNECTED');
+            }
+          },
+          initialCursor
+        );
+      }
+    }
+
+    initStream();
 
     return () => {
       isSubscribed = false;
-      sub.unsubscribe();
+      if (eventSub) {
+        eventSub.unsubscribe();
+      }
     };
   }, [addTraceEvent, setInitialEvents, setConnectionStatus, setBackendHealth]);
 }

@@ -56,6 +56,7 @@ interface BackendTraceEventDTO {
 export class HttpLysStackApi implements LysStackApi {
   private baseUrl: string;
   private lastEventId: string | null = null;
+  private activeEventSource: EventSource | null = null;
 
   constructor(baseUrl = 'http://localhost:8000') {
     // Strip trailing slash if present
@@ -85,7 +86,7 @@ export class HttpLysStackApi implements LysStackApi {
         id: dto.id,
         displayName: dto.displayName || actor.displayName,
         provider: dto.provider || 'LysStack Agent',
-        model: dto.model || `${dto.id}-model`,
+        model: dto.model || 'unknown',
         role: dto.role || 'Specialized Operative',
         capabilities: dto.capabilities || ['execution'],
         status: (dto.status?.toUpperCase() as any) || 'IDLE',
@@ -111,32 +112,27 @@ export class HttpLysStackApi implements LysStackApi {
       return null;
     }
 
-    // Construct detailed representation for the agent
+    // Truthful representation in real mode (Task 11: no fabricated telemetry numbers)
     return {
       ...found,
-      input: '12.4k',
-      output: '3.8k',
-      cached: '1.2k',
-      remaining: '182.6k',
-      inPct: '6%',
-      outPct: '2%',
-      cachePct: '1%',
-      activity: [
-        { op: 'IDLE', path: 'ready for dispatch', meta: 'standby' }
-      ],
+      input: '—',
+      output: '—',
+      cached: '—',
+      remaining: '—',
+      inPct: '0%',
+      outPct: '0%',
+      cachePct: '0%',
+      activity: [],
       metrics: [
-        { label: 'JOBS COMPLETED', value: '14', sub: 'fleet lifetime' },
-        { label: 'AVG TOKENS/JOB', value: '24.1k', sub: 'recent' },
-        { label: 'SUCCESS RATE', value: '98.5%', sub: 'optimal', color: '#3FB950' }
+        { label: 'STATUS', value: found.status }
       ],
       runs: [],
       allowance: [
-        { label: 'session', value: '16.2k', pct: '8%', tag: 'EXACT' },
-        { label: 'fleet quota', value: 'unmetered', pct: '0%', tag: 'N/A' }
+        { label: 'fleet quota', value: 'Unavailable', pct: '0%', tag: 'N/A' }
       ],
-      capacity: 'Fleet Standard Capacity',
-      reset: 'daily',
-      resetNote: 'Observed from live LysStack orchestrator.'
+      capacity: 'Live capacity not exposed',
+      reset: '—',
+      resetNote: 'Detailed provider token telemetry will connect in Phase 4.'
     };
   }
 
@@ -174,14 +170,23 @@ export class HttpLysStackApi implements LysStackApi {
 
   subscribeEvents(
     handler: (event: TraceEvent) => void,
-    onError?: (err: Error) => void
+    onError?: (err: Error) => void,
+    initialCursor?: string
   ): EventSubscription {
+    // Avoid duplicate connections (Task 9, Task 10)
+    if (this.activeEventSource) {
+      this.activeEventSource.close();
+      this.activeEventSource = null;
+    }
+
+    const cursor = initialCursor || this.lastEventId;
     const url = new URL(`${this.baseUrl}/events/stream`);
-    if (this.lastEventId) {
-      url.searchParams.set('after', this.lastEventId);
+    if (cursor) {
+      url.searchParams.set('after', cursor);
     }
 
     const eventSource = new EventSource(url.toString());
+    this.activeEventSource = eventSource;
 
     const parseAndEmit = (rawEvent: MessageEvent) => {
       try {
@@ -223,6 +228,9 @@ export class HttpLysStackApi implements LysStackApi {
       unsubscribe: () => {
         eventSource.removeEventListener('trace', parseAndEmit);
         eventSource.close();
+        if (this.activeEventSource === eventSource) {
+          this.activeEventSource = null;
+        }
       }
     };
   }
@@ -343,15 +351,17 @@ export class HttpLysStackApi implements LysStackApi {
     };
   }
 
-  async sendOperatorCommand(targetActorId: string, command: string): Promise<{ success: boolean; response: string }> {
+  async sendOperatorCommand(targetActorId: string, _command: string): Promise<{ success: boolean; response: string }> {
+    // Truthful command handling (Task 12: explicit unsupported response in real mode)
     return {
-      success: true,
-      response: `[LysStack / ${targetActorId}] Dispatched: "${command}". Received by HttpLysStackApi.`
+      success: false,
+      response: `[LysStack / ${targetActorId}] Command execution is not available in real control-plane mode yet.`
     };
   }
 
   async triggerJobAction(jobId: string, action: 'retry' | 'pause' | 'cancel' | 'promote'): Promise<boolean> {
-    console.log(`[HttpLysStackApi] Action '${action}' on job ${jobId}`);
-    return true;
+    // Truthful action handling (Task 12: explicit unsupported response in real mode)
+    console.warn(`[HttpLysStackApi] Action '${action}' on job ${jobId} is not available in real control-plane mode yet.`);
+    return false;
   }
 }

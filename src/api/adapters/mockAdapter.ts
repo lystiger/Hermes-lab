@@ -146,7 +146,11 @@ export class MockLysStackApi implements LysStackApi {
     })).reverse();
   }
 
-  subscribeEvents(handler: (event: TraceEvent) => void): EventSubscription {
+  subscribeEvents(
+    handler: (event: TraceEvent) => void,
+    _onError?: (err: Error) => void,
+    _initialCursor?: string
+  ): EventSubscription {
     const agentList = Object.values(this.agents);
 
     const timer = setInterval(() => {

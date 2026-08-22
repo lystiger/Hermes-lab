@@ -4,6 +4,10 @@ import os
 import sys
 import tempfile
 import unittest
+import urllib.request
+import urllib.parse
+import threading
+import subprocess
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock
@@ -160,24 +164,35 @@ class TestPhase61ReplyToValidation(unittest.TestCase):
             {
                 "id": "msg_001",
                 "threadId": "thread_alpha",
+                "jobId": "job_101",
                 "conversationId": "conv_review",
                 "text": "Initial review request",
             },
             {
                 "id": "msg_002",
                 "threadId": "thread_alpha",
+                "jobId": "job_101",
                 "conversationId": "conv_review",
                 "text": "First correction",
             },
             {
                 "id": "msg_other_thread",
                 "threadId": "thread_beta",
+                "jobId": "job_101",
                 "conversationId": "conv_review",
                 "text": "Message from another thread",
             },
             {
+                "id": "msg_other_job",
+                "threadId": "thread_alpha",
+                "jobId": "job_999_other",
+                "conversationId": "conv_review",
+                "text": "Message from another job",
+            },
+            {
                 "id": "msg_other_conv",
                 "threadId": "thread_alpha",
+                "jobId": "job_101",
                 "conversationId": "conv_other",
                 "text": "Message from another conversation",
             },
@@ -189,6 +204,7 @@ class TestPhase61ReplyToValidation(unittest.TestCase):
             thread_id="thread_alpha",
             conversation_id="conv_review",
             known_messages=self.known_messages,
+            job_id="job_101",
             publisher=self.publisher,
         )
         self.assertTrue(is_valid)
@@ -200,6 +216,7 @@ class TestPhase61ReplyToValidation(unittest.TestCase):
             thread_id="thread_alpha",
             conversation_id="conv_review",
             known_messages=self.known_messages,
+            job_id="job_101",
             publisher=self.publisher,
         )
         self.assertFalse(is_valid)
@@ -212,6 +229,20 @@ class TestPhase61ReplyToValidation(unittest.TestCase):
             thread_id="thread_alpha",
             conversation_id="conv_review",
             known_messages=self.known_messages,
+            job_id="job_101",
+            publisher=self.publisher,
+        )
+        self.assertFalse(is_valid)
+        self.publisher.publish.assert_called_once()
+        self.assertEqual(self.publisher.publish.call_args[1]["kind"], "conversation.invalid_reply")
+
+    def test_cross_job_reply_to_rejected(self):
+        is_valid = validate_reply_to(
+            reply_to="msg_other_job",
+            thread_id="thread_alpha",
+            conversation_id="conv_review",
+            known_messages=self.known_messages,
+            job_id="job_101",
             publisher=self.publisher,
         )
         self.assertFalse(is_valid)
@@ -224,6 +255,7 @@ class TestPhase61ReplyToValidation(unittest.TestCase):
             thread_id="thread_alpha",
             conversation_id="conv_review",
             known_messages=self.known_messages,
+            job_id="job_101",
             publisher=self.publisher,
         )
         self.assertFalse(is_valid)
@@ -233,6 +265,156 @@ class TestPhase61ReplyToValidation(unittest.TestCase):
     def test_none_or_empty_reply_to_passes(self):
         self.assertTrue(validate_reply_to(None, "thread_alpha", "conv_review", self.known_messages))
         self.assertTrue(validate_reply_to("", "thread_alpha", "conv_review", self.known_messages))
+
+    def test_outgoing_message_with_invalid_reply_is_rejected_and_not_recorded(self):
+        mod = _get_runner_module()
+        HermesSprintRunner = mod.HermesSprintRunner
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            tmp_root = Path(tmp_dir)
+            p1 = tmp_root / "p1.md"
+            p1.write_text("Prompt 1", encoding="utf-8")
+
+            spec_path = ROOT_DIR / "sprints" / "lab-s04.json"
+            runner = HermesSprintRunner(spec_path=spec_path, skip_agent_exec=False)
+            runner.job_id = "job_inv_reply"
+            runner.thread_id = "thread_job_inv_reply"
+            runner.run_dir = tmp_root / "runs" / "test_inv"
+            runner.run_dir.mkdir(parents=True, exist_ok=True)
+            runner.messages_file = runner.run_dir / "messages.jsonl"
+            runner.worktree_root = tmp_root / "worktrees"
+            (runner.worktree_root / "worker").mkdir(parents=True, exist_ok=True)
+
+            phase1 = {"name": "01_builder", "role": "builder", "agent": "gemini", "worktree_dir": "worker", "prompt_file": str(p1)}
+            runner.spec["phases"] = [phase1]
+
+            conv_id = "conv_inv_test"
+            runner._record_message(
+                from_actor={"id": "claude", "kind": "agent", "displayName": "Claude"},
+                to_actors=[{"id": "gemini", "kind": "agent", "displayName": "Gemini"}],
+                kind="a2a",
+                intent="question",
+                text="Initial question",
+                conversation_id=conv_id,
+            )
+
+            # Gemini outputs structured reply referencing a NONEXISTENT replyTo
+            def stub_exec(phase, wt, mailbox_messages=None, active_a2a_turn=None):
+                return AgentTurnResult(
+                    execution_result=None,
+                    text="Output",
+                    outgoing_messages=[
+                        A2AOutput(
+                            intent="answer",
+                            to=["claude"],
+                            text="Bad reply reference",
+                            conversationId=conv_id,
+                            replyTo="msg_completely_fake_999",
+                        )
+                    ]
+                )
+
+            runner.execute_agent = stub_exec
+            runner.schedule_a2a_turns(phase1, runner.worktree_root / "worker", conversation_id=conv_id)
+
+            # The invalid outgoing reply MUST NOT have been recorded into local_messages
+            self.assertEqual(len(runner.local_messages), 1)  # Only the initial question exists
+
+
+class TestPhase61TypeErrorSafety(unittest.TestCase):
+    def test_internal_type_error_does_not_cause_double_execution(self):
+        mod = _get_runner_module()
+        HermesSprintRunner = mod.HermesSprintRunner
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            tmp_root = Path(tmp_dir)
+            p1 = tmp_root / "p1.md"
+            p1.write_text("Prompt 1", encoding="utf-8")
+
+            spec_path = ROOT_DIR / "sprints" / "lab-s04.json"
+            runner = HermesSprintRunner(spec_path=spec_path, skip_agent_exec=False)
+            runner.job_id = "job_type_err"
+            runner.thread_id = "thread_job_type_err"
+            runner.run_dir = tmp_root / "runs" / "test_err"
+            runner.run_dir.mkdir(parents=True, exist_ok=True)
+            runner.messages_file = runner.run_dir / "messages.jsonl"
+            runner.worktree_root = tmp_root / "worktrees"
+            (runner.worktree_root / "worker").mkdir(parents=True, exist_ok=True)
+
+            phase1 = {"name": "01_builder", "role": "builder", "agent": "gemini", "worktree_dir": "worker", "prompt_file": str(p1)}
+            runner.spec["phases"] = [phase1]
+
+            conv_id = "conv_err_test"
+            runner._record_message(
+                from_actor={"id": "claude", "kind": "agent", "displayName": "Claude"},
+                to_actors=[{"id": "gemini", "kind": "agent", "displayName": "Gemini"}],
+                kind="a2a",
+                intent="question",
+                text="Question",
+                conversation_id=conv_id,
+            )
+
+            call_count = 0
+
+            def failing_exec(phase, wt, mailbox_messages=None, active_a2a_turn=None):
+                nonlocal call_count
+                call_count += 1
+                # Raise an internal TypeError during agent execution
+                raise TypeError("Internal logic bug inside adapter")
+
+            runner.execute_agent = failing_exec
+            runner.schedule_a2a_turns(phase1, runner.worktree_root / "worker", conversation_id=conv_id)
+
+            # Execution was called exactly ONCE (not retried / double-run on TypeError)
+            self.assertEqual(call_count, 1)
+
+
+class TestPhase61TerminalIntentSemantics(unittest.TestCase):
+    def test_terminal_intent_does_not_trigger_automatic_further_turn(self):
+        mod = _get_runner_module()
+        HermesSprintRunner = mod.HermesSprintRunner
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            tmp_root = Path(tmp_dir)
+            p1 = tmp_root / "p1.md"
+            p1.write_text("Prompt 1", encoding="utf-8")
+
+            spec_path = ROOT_DIR / "sprints" / "lab-s04.json"
+            runner = HermesSprintRunner(spec_path=spec_path, skip_agent_exec=False)
+            runner.job_id = "job_term_test"
+            runner.thread_id = "thread_job_term_test"
+            runner.run_dir = tmp_root / "runs" / "test_term"
+            runner.run_dir.mkdir(parents=True, exist_ok=True)
+            runner.messages_file = runner.run_dir / "messages.jsonl"
+            runner.worktree_root = tmp_root / "worktrees"
+            (runner.worktree_root / "worker").mkdir(parents=True, exist_ok=True)
+
+            phase1 = {"name": "01_builder", "role": "builder", "agent": "gemini", "worktree_dir": "worker", "prompt_file": str(p1)}
+            runner.spec["phases"] = [phase1]
+
+            conv_id = "conv_term_test"
+            # Seed a terminal intent message (review_result)
+            runner._record_message(
+                from_actor={"id": "claude", "kind": "agent", "displayName": "Claude"},
+                to_actors=[{"id": "gemini", "kind": "agent", "displayName": "Gemini"}],
+                kind="a2a",
+                intent="review_result",
+                text="Review completed and approved.",
+                conversation_id=conv_id,
+            )
+
+            call_count = 0
+
+            def dummy_exec(phase, wt, mailbox_messages=None, active_a2a_turn=None):
+                nonlocal call_count
+                call_count += 1
+                return AgentTurnResult(execution_result=None, text="nothing", outgoing_messages=[])
+
+            runner.execute_agent = dummy_exec
+            runner.schedule_a2a_turns(phase1, runner.worktree_root / "worker", conversation_id=conv_id)
+
+            # Terminal intent message does NOT trigger an automatic turn
+            self.assertEqual(call_count, 0)
 
 
 class TestPhase61RealA2AEndToEndExecutionLoop(unittest.TestCase):
@@ -486,6 +668,70 @@ class TestPhase61RemoteMessageDiscovery(unittest.TestCase):
             finally:
                 mod.default_publisher = orig_pub
 
+    def test_remote_message_from_different_thread_is_ignored(self):
+        """Verify remote thread scoping: messages from thread_B are ignored when runner is in thread_A."""
+        mod = _get_runner_module()
+        HermesSprintRunner = mod.HermesSprintRunner
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            tmp_root = Path(tmp_dir)
+            p1 = tmp_root / "p1.md"
+            p1.write_text("P1", encoding="utf-8")
+
+            spec_path = ROOT_DIR / "sprints" / "lab-s04.json"
+            runner = HermesSprintRunner(spec_path=spec_path, skip_agent_exec=False)
+            runner.job_id = "job_thread_A"
+            runner.thread_id = "thread_job_thread_A"
+            runner.run_dir = tmp_root / "runs" / "test_th"
+            runner.run_dir.mkdir(parents=True, exist_ok=True)
+            runner.messages_file = runner.run_dir / "messages.jsonl"
+            runner.worktree_root = tmp_root / "worktrees"
+            (runner.worktree_root / "worker").mkdir(parents=True, exist_ok=True)
+
+            phase1 = {"name": "01_builder", "role": "builder", "agent": "gemini", "worktree_dir": "worker", "prompt_file": str(p1)}
+            runner.spec["phases"] = [phase1]
+
+            # Remote inbox has message belonging to ANOTHER thread
+            remote_msg = {
+                "id": "msg_cross_th_001",
+                "threadId": "thread_DIFFERENT_B",
+                "jobId": runner.job_id,
+                "from": {"id": "claude", "kind": "agent", "displayName": "Claude"},
+                "to": [{"id": "gemini", "kind": "agent", "displayName": "Gemini"}],
+                "kind": "a2a",
+                "intent": "question",
+                "text": "Question from another thread",
+                "conversationId": "conv_th_scope",
+            }
+            remote_inbox_entry = {
+                "messageId": "msg_cross_th_001",
+                "recipientId": "gemini",
+                "state": "DELIVERED",
+                "message": remote_msg,
+            }
+
+            mock_pub = MagicMock()
+            mock_pub.enabled = True
+            mock_pub.fetch_agent_inbox.side_effect = lambda agent_id, **kwargs: [remote_inbox_entry] if agent_id == "gemini" else []
+
+            orig_pub = mod.default_publisher
+            mod.default_publisher = mock_pub
+
+            executed_agents = []
+
+            def stub_exec(phase, wt, mailbox_messages=None, active_a2a_turn=None):
+                executed_agents.append(phase["agent"])
+                return AgentTurnResult(execution_result=None, text="Answer", outgoing_messages=[])
+
+            runner.execute_agent = stub_exec
+
+            try:
+                runner.schedule_a2a_turns(phase1, runner.worktree_root / "worker", conversation_id="conv_th_scope")
+                # Must NOT execute for cross-thread message
+                self.assertEqual(len(executed_agents), 0)
+            finally:
+                mod.default_publisher = orig_pub
+
 
 class TestPhase61NoCodeChangeConversationalTurn(unittest.TestCase):
     def test_pure_conversational_turn_succeeds_without_file_changes(self):
@@ -670,6 +916,177 @@ class TestPhase61PersonaLoaderRuntimeWiring(unittest.TestCase):
             self.assertIn("Speaks with clarity and warmth.", prompt_section)
             self.assertNotIn("sudo", prompt_section)
             self.assertNotIn("arbitrary_code_exec", prompt_section)
+
+
+class TestPhase61CrossProcessSmoke(unittest.TestCase):
+    """
+    Real cross-process smoke test:
+    Process A: Control Plane (FastAPI in background thread/process)
+    Process B: Hermes Runner spawned as separate subprocess with LYSSTACK_CONTROL_URL
+    """
+    @classmethod
+    def setUpClass(cls):
+        from uvicorn import Config, Server
+        import main
+        import socket
+        import time
+
+        # Find open port
+        sock = socket.socket()
+        sock.bind(("", 0))
+        cls.port = sock.getsockname()[1]
+        sock.close()
+
+        config = Config(app=main.app, host="127.0.0.1", port=cls.port, log_level="warning")
+        cls.server = Server(config=config)
+        cls.thread = threading.Thread(target=cls.server.run, daemon=True)
+        cls.thread.start()
+
+        cls.control_url = f"http://127.0.0.1:{cls.port}"
+        # Wait for server readiness
+        for _ in range(50):
+            try:
+                with urllib.request.urlopen(f"{cls.control_url}/health", timeout=1) as resp:
+                    if resp.status == 200:
+                        break
+            except Exception:
+                time.sleep(0.1)
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.server.should_exit = True
+
+    def test_real_cross_process_a2a_smoke_over_http(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            tmp_path = Path(tmp_dir)
+            target_repo = tmp_path / "repo"
+            target_repo.mkdir()
+            subprocess.run(["git", "init", "-b", "main"], cwd=target_repo, check=True, capture_output=True)
+            subprocess.run(["git", "config", "user.name", "Test"], cwd=target_repo, check=True)
+            subprocess.run(["git", "config", "user.email", "test@example.com"], cwd=target_repo, check=True)
+            (target_repo / "README.md").write_text("# Test\n", encoding="utf-8")
+            subprocess.run(["git", "add", "README.md"], cwd=target_repo, check=True)
+            subprocess.run(["git", "commit", "-m", "initial commit"], cwd=target_repo, check=True)
+
+            p1_prompt = tmp_path / "p1.md"
+            p1_prompt.write_text("Builder prompt\n", encoding="utf-8")
+            p2_prompt = tmp_path / "p2.md"
+            p2_prompt.write_text("Hardener prompt\n", encoding="utf-8")
+
+            job_id = "run_p61_smoke"
+            thread_id = f"thread_job_{job_id}"
+
+            sprint_spec = {
+                "sprint_id": "test-p61-smoke",
+                "name": "Phase 6.1 Cross Process A2A Smoke Sprint",
+                "target_repo": str(target_repo),
+                "target_branch": "hermes/test-p61/integration",
+                "worktree_root": str(tmp_path / "worktrees"),
+                "runs_root": str(tmp_path / "runs"),
+                "phases": [
+                    {
+                        "name": "01_builder",
+                        "role": "builder",
+                        "agent": "gemini",
+                        "worktree_dir": "wt_builder",
+                        "branch": "test-p61/builder",
+                        "prompt_file": str(p1_prompt),
+                        "expected_handoff": "HANDOFF_BUILD.md",
+                        "commit_message": "feat: build complete",
+                    },
+                    {
+                        "name": "02_hardener",
+                        "role": "hardener",
+                        "agent": "claude",
+                        "worktree_dir": "wt_hardener",
+                        "branch": "test-p61/hardener",
+                        "prompt_file": str(p2_prompt),
+                        "expected_handoff": "HANDOFF_HARDEN.md",
+                        "commit_message": "fix: harden complete",
+                    }
+                ],
+                "verification": [
+                    {
+                        "name": "check_target",
+                        "command": [sys.executable, "-c", "print('Verified OK')"],
+                        "timeout_seconds": 30
+                    }
+                ]
+            }
+
+            spec_file = tmp_path / "test-p61.json"
+            spec_file.write_text(json.dumps(sprint_spec, indent=2), encoding="utf-8")
+
+            # 1. Post initial Operator message targeted to Claude via Control Plane HTTP endpoint
+            op_payload = json.dumps({
+                "threadId": thread_id,
+                "to": ["claude"],
+                "kind": "operator",
+                "intent": "operator_note",
+                "text": "Please verify concurrency safety in state store."
+            }).encode("utf-8")
+            req = urllib.request.Request(
+                f"{self.control_url}/messages",
+                data=op_payload,
+                headers={"Content-Type": "application/json"},
+                method="POST",
+            )
+            with urllib.request.urlopen(req) as resp:
+                self.assertEqual(resp.status, 201)
+
+            # 2. Run runner in separate subprocess
+            runner_script = ROOT_DIR / "runner" / "run-hermes-sprint.py"
+            driver_code = f"""
+import sys
+import json
+from types import SimpleNamespace
+from pathlib import Path
+import importlib.util
+
+spec = importlib.util.spec_from_file_location("run_hermes_sprint", "{runner_script}")
+module = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(module)
+
+runner = module.HermesSprintRunner(
+    spec_path="{spec_file}",
+    skip_agent_exec=False
+)
+
+def simulated_agent(phase, wt_dir, mailbox_messages=None, active_a2a_turn=None):
+    agent_name = phase["agent"]
+    (wt_dir / f"file_{{agent_name}}.py").write_text("# code\\n", encoding="utf-8")
+    (wt_dir / phase["expected_handoff"]).write_text("# Handoff\\nSummary.\\n", encoding="utf-8")
+    return SimpleNamespace(runtime_metadata={{}})
+
+runner.execute_agent = simulated_agent
+success = runner.execute()
+sys.exit(0 if success else 1)
+"""
+            driver_file = tmp_path / "driver.py"
+            driver_file.write_text(driver_code, encoding="utf-8")
+
+            env = dict(os.environ)
+            env["LYSSTACK_CONTROL_URL"] = self.control_url
+            env["HERMES_JOB_ID"] = job_id
+
+            run_proc = subprocess.run(
+                [sys.executable, str(driver_file)],
+                cwd=str(ROOT_DIR),
+                env=env,
+                capture_output=True,
+                text=True,
+            )
+
+            self.assertEqual(run_proc.returncode, 0, f"Runner failed:\n{run_proc.stdout}\n{run_proc.stderr}")
+
+            # 3. Verify messages were delivered and recorded into Control Plane MessageStore
+            with urllib.request.urlopen(f"{self.control_url}/threads/{thread_id}/messages") as resp:
+                msgs = json.loads(resp.read().decode("utf-8"))
+                self.assertGreater(len(msgs), 0)
+                # Check for handoff message from builder
+                handoff_msg = next((m for m in msgs if m.get("intent") == "review_request"), None)
+                self.assertIsNotNone(handoff_msg)
+                self.assertEqual(handoff_msg["from"]["id"], "gemini")
 
 
 if __name__ == "__main__":

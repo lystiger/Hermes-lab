@@ -15,12 +15,12 @@ SCHEDULABLE_INTENTS = {
     "correction_request",
     "question",
     "verification_request",
+    "correction_result",
 }
 
 # Terminal or result intents: convey outcomes or answers without automatically requiring further turns
 TERMINAL_INTENTS = {
     "review_result",
-    "correction_result",
     "answer",
     "verification_result",
     "status",
@@ -300,7 +300,8 @@ def validate_reply_to(
     1. If reply_to is None or empty: valid (root message / historical).
     2. Referenced message must exist in known_messages.
     3. Referenced message must belong to the same threadId.
-    4. Referenced message must belong to the same conversationId if conversationId is set.
+    4. Referenced message must belong to the same jobId (if jobId is set).
+    5. Referenced message must belong to the same conversationId if conversationId is set.
     """
     if not reply_to:
         return True
@@ -335,6 +336,22 @@ def validate_reply_to(
                 detail=err_detail,
                 job_id=job_id,
                 metadata={"replyTo": reply_to, "targetThread": target_thread, "currentThread": thread_id},
+            )
+        return False
+
+    # Check job match
+    target_job = target.get("jobId")
+    if job_id and target_job and target_job != job_id:
+        err_detail = f"Invalid replyTo '{reply_to}': cross-job reference (target job: {target_job}, current: {job_id})"
+        logger.warning(err_detail)
+        if publisher:
+            publisher.publish(
+                source_id=agent_id or "hermes_runner",
+                source_kind="runtime",
+                kind="conversation.invalid_reply",
+                detail=err_detail,
+                job_id=job_id,
+                metadata={"replyTo": reply_to, "targetJob": target_job, "currentJob": job_id},
             )
         return False
 

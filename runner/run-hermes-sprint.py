@@ -1414,11 +1414,17 @@ class HermesSprintRunner:
             candidate_messages = []
             seen_ids = set()
 
-            # 1. Discover pending messages from Remote Control Plane inboxes (LysStack)
+            # 1. Discover pending messages from Remote Control Plane inboxes (LysStack) with thread/job scoping
             if default_publisher and default_publisher.enabled:
                 for ag_id in phases_by_agent:
                     try:
-                        remote_entries = default_publisher.fetch_agent_inbox(ag_id, state="DELIVERED")
+                        remote_entries = default_publisher.fetch_agent_inbox(
+                            agent_id=ag_id,
+                            state="DELIVERED",
+                            job_id=self.job_id,
+                            thread_id=self.thread_id,
+                            conversation_id=conversation_id,
+                        )
                         for entry in remote_entries:
                             r_msg = entry.get("message")
                             if isinstance(r_msg, dict):
@@ -1436,9 +1442,12 @@ class HermesSprintRunner:
                     candidate_messages.append(l_msg)
                     seen_ids.add(mid)
 
-            # 3. Filter candidate messages for the active conversation and schedulable criteria
+            # 3. Filter candidate messages for the active thread, job, and conversation
             pending_a2a = []
             for msg in candidate_messages:
+                # Must match thread
+                if msg.get("threadId") and msg.get("threadId") != self.thread_id:
+                    continue
                 # Must match job
                 if msg.get("jobId") and msg.get("jobId") not in (self.job_id, getattr(self, "sprint_id", None)):
                     continue
@@ -1448,10 +1457,10 @@ class HermesSprintRunner:
 
                 kind = msg.get("kind")
                 intent = msg.get("intent")
+                # Schedulable: explicitly schedulable request intents or A2A non-terminal messages
                 is_schedulable = (
-                    kind == "a2a"
-                    or (intent in {"correction_request", "question", "verification_request"})
-                    or (intent in SCHEDULABLE_INTENTS and kind != "handoff")
+                    intent in SCHEDULABLE_INTENTS
+                    or (kind == "a2a" and intent not in TERMINAL_INTENTS)
                 )
 
                 if is_schedulable:
@@ -1510,18 +1519,20 @@ class HermesSprintRunner:
             if target_msg.get("id") and target_msg["id"] not in target_consumed_ids:
                 target_consumed_ids.append(target_msg["id"])
 
-            # Execute target agent with active A2A turn context
+            # Execute target agent with active A2A turn context using inspect.signature (no TypeError double-run)
             turn_result = None
             if not self.skip_agent_exec and not self.dry_run:
                 try:
-                    try:
+                    import inspect
+                    sig = inspect.signature(self.execute_agent)
+                    if "active_a2a_turn" in sig.parameters:
                         turn_result = self.execute_agent(
                             target_phase,
                             target_wt,
                             mailbox_messages=target_mailbox,
                             active_a2a_turn=active_a2a_turn,
                         )
-                    except TypeError:
+                    else:
                         turn_result = self.execute_agent(
                             target_phase,
                             target_wt,
@@ -1539,7 +1550,7 @@ class HermesSprintRunner:
                 out_reply_to = out_msg.replyTo or target_msg.get("id")
                 out_corr_id = out_msg.correlationId or target_msg.get("correlationId")
 
-                # Validate replyTo graph consistency
+                # Validate replyTo graph consistency (reject invalid replyTo messages from scheduling)
                 if validate_reply_to:
                     is_valid_reply = validate_reply_to(
                         reply_to=out_reply_to,
@@ -1551,8 +1562,12 @@ class HermesSprintRunner:
                         agent_id=target_agent,
                     )
                     if not is_valid_reply:
-                        self.logger.warning("Sanitizing invalid replyTo %s on outgoing message from %s", out_reply_to, target_agent)
-                        out_reply_to = None
+                        self.logger.warning(
+                            "Rejecting outgoing A2A message with invalid replyTo %s from %s",
+                            out_reply_to,
+                            target_agent,
+                        )
+                        continue
 
                 self._record_message(
                     from_actor={"id": target_agent, "kind": "agent", "displayName": target_agent.capitalize()},

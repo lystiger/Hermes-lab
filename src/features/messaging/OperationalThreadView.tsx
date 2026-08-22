@@ -264,10 +264,34 @@ export const OperationalThreadView: React.FC<OperationalThreadViewProps> = ({
                   {selectedArtifact.ref}
                 </span>
               </div>
+              <div className="flex justify-between items-center border-b border-[#14171D] pb-1.5 pt-0.5">
+                <span className="text-[#5C646E]">Trust:</span>
+                <div>
+                  {selectedArtifact.trust?.status === "verified" && selectedArtifact.trust.kind === "path_containment" && (
+                    <span className="text-[10px] text-[#3FB950] bg-[#3FB95014] border border-[#3FB95044] px-1.5 py-0.5 font-semibold">
+                      VERIFIED · PATH CONTAINED
+                    </span>
+                  )}
+                  {(selectedArtifact.trust?.status === "not_applicable" || selectedArtifact.trust?.kind === "git_reference") && (
+                    <span className="text-[10px] text-[#CBA35C] bg-[#CBA35C14] border border-[#CBA35C44] px-1.5 py-0.5 font-semibold">
+                      GIT REFERENCE
+                    </span>
+                  )}
+                  {(!selectedArtifact.trust || selectedArtifact.trust.status === "unverified") && (
+                    <span className="text-[10px] text-[#F2555A] bg-[#F2555A14] border border-[#F2555A44] px-1.5 py-0.5 font-semibold">
+                      UNVERIFIED
+                    </span>
+                  )}
+                </div>
+              </div>
             </div>
 
-            <div className="mt-3 text-[10px] text-[#5C646E] text-right">
-              Trusted runtime artifact · Path contained by Hermes roots
+            <div className="mt-3 text-[10.5px] text-[#8C949F] text-right">
+              {selectedArtifact.trust?.status === "verified" && selectedArtifact.trust.kind === "path_containment"
+                ? `Verified runtime artifact · ${selectedArtifact.trust.detail || "Contained within Hermes run root"}`
+                : selectedArtifact.trust?.status === "not_applicable" || selectedArtifact.trust?.kind === "git_reference"
+                ? "Git commit reference"
+                : selectedArtifact.trust?.detail || "Runtime artifact reference · Verification unavailable"}
             </div>
           </div>
         </div>

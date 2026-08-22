@@ -127,6 +127,13 @@ export interface AgentDetail extends AgentSummary {
   traceId?: string;
 }
 
+export interface ArtifactTrust {
+  status: "verified" | "unverified" | "not_applicable";
+  kind: "path_containment" | "git_reference" | "none";
+  scope: "hermes_run_root" | "target_repository" | "external" | "unknown" | string;
+  detail?: string;
+}
+
 export interface ArtifactRef {
   id: string;
   type: string;
@@ -134,6 +141,7 @@ export interface ArtifactRef {
   ref: string;
   jobId?: string;
   phaseId?: string;
+  trust?: ArtifactTrust;
   metadata?: Record<string, any>;
   createdAt?: string;
 }

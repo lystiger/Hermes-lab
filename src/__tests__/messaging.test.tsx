@@ -6,7 +6,7 @@ import { JobDetailView } from '../features/jobs/JobDetailView';
 import { lysStackApi } from '../api/client';
 import { Thread, Message } from '../api/types';
 
-describe('Phase 5 Operational Messaging & Artifact Exchange UI', () => {
+describe('Phase 5.1 Operational Messaging & Truthful Artifact Trust UI', () => {
   const mockThread: Thread = {
     id: 'thread_job_run_20260822_s04',
     jobId: 'run_20260822_s04',
@@ -32,8 +32,42 @@ describe('Phase 5 Operational Messaging & Artifact Exchange UI', () => {
       jobId: 'run_20260822_s04',
       phaseId: 'phase-1-build',
       artifactRefs: [
-        { id: 'art_commit_1', type: 'git_commit', label: 'BUILD commit (8a21fc9)', ref: '8a21fc987654321' },
-        { id: 'art_handoff_1', type: 'handoff', label: 'BUILD handoff (HANDOFF_BUILD.md)', ref: 'handoffs/01_builder_gemini.md' }
+        {
+          id: 'art_commit_1',
+          type: 'git_commit',
+          label: 'BUILD commit (8a21fc9)',
+          ref: '8a21fc987654321',
+          trust: {
+            status: 'not_applicable',
+            kind: 'git_reference',
+            scope: 'target_repository',
+            detail: 'Git commit reference'
+          }
+        },
+        {
+          id: 'art_handoff_1',
+          type: 'handoff',
+          label: 'BUILD handoff (HANDOFF_BUILD.md)',
+          ref: 'handoffs/01_builder_gemini.md',
+          trust: {
+            status: 'verified',
+            kind: 'path_containment',
+            scope: 'hermes_run_root',
+            detail: 'Contained within Hermes run root'
+          }
+        },
+        {
+          id: 'art_unverified_1',
+          type: 'log',
+          label: 'External system log',
+          ref: '../../etc/shadow',
+          trust: {
+            status: 'unverified',
+            kind: 'path_containment',
+            scope: 'external',
+            detail: 'Path escapes allowed roots via traversal'
+          }
+        }
       ],
       createdAt: '2026-08-22T10:01:00Z'
     },
@@ -48,7 +82,18 @@ describe('Phase 5 Operational Messaging & Artifact Exchange UI', () => {
       jobId: 'run_20260822_s04',
       phaseId: 'phase-2-harden',
       artifactRefs: [
-        { id: 'art_commit_2', type: 'git_commit', label: 'HARDEN commit (91cf33a)', ref: '91cf33a12345678' }
+        {
+          id: 'art_commit_2',
+          type: 'git_commit',
+          label: 'HARDEN commit (91cf33a)',
+          ref: '91cf33a12345678',
+          trust: {
+            status: 'not_applicable',
+            kind: 'git_reference',
+            scope: 'target_repository',
+            detail: 'Git commit reference'
+          }
+        }
       ],
       createdAt: '2026-08-22T10:01:45Z'
     }
@@ -82,7 +127,7 @@ describe('Phase 5 Operational Messaging & Artifact Exchange UI', () => {
     expect(screen.getByText(/HANDOFF · verification_request/i)).toBeInTheDocument();
   });
 
-  it('renders compact artifact chips and opens safe inspection modal on click', async () => {
+  it('renders git commit reference without path containment claim', async () => {
     render(
       <OperationalThreadView
         jobId="run_20260822_s04"
@@ -100,7 +145,50 @@ describe('Phase 5 Operational Messaging & Artifact Exchange UI', () => {
     expect(screen.getByText(/ARTIFACT METADATA INSPECTION/i)).toBeInTheDocument();
     expect(screen.getByText(/8a21fc987654321/i)).toBeInTheDocument();
     expect(screen.getByText(/GIT_COMMIT/i)).toBeInTheDocument();
-    expect(screen.getByText(/Trusted runtime artifact/i)).toBeInTheDocument();
+    expect(screen.getByText(/GIT REFERENCE/i)).toBeInTheDocument();
+    expect(screen.getByText(/Git commit reference/i)).toBeInTheDocument();
+    expect(screen.queryByText(/Contained within Hermes run root/i)).not.toBeInTheDocument();
+  });
+
+  it('renders verified filesystem artifact with path containment wording', async () => {
+    render(
+      <OperationalThreadView
+        jobId="run_20260822_s04"
+        assignedAgentIds={['gemini', 'claude']}
+      />
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText(/BUILD handoff \(HANDOFF_BUILD.md\)/i)).toBeInTheDocument();
+    });
+
+    const handoffChip = screen.getByText(/BUILD handoff \(HANDOFF_BUILD.md\)/i);
+    fireEvent.click(handoffChip);
+
+    expect(screen.getByText(/ARTIFACT METADATA INSPECTION/i)).toBeInTheDocument();
+    expect(screen.getByText(/VERIFIED · PATH CONTAINED/i)).toBeInTheDocument();
+    expect(screen.getByText(/Verified runtime artifact · Contained within Hermes run root/i)).toBeInTheDocument();
+  });
+
+  it('renders unverified artifact without false trust claims', async () => {
+    render(
+      <OperationalThreadView
+        jobId="run_20260822_s04"
+        assignedAgentIds={['gemini', 'claude']}
+      />
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText(/External system log/i)).toBeInTheDocument();
+    });
+
+    const unverifiedChip = screen.getByText(/External system log/i);
+    fireEvent.click(unverifiedChip);
+
+    expect(screen.getByText(/ARTIFACT METADATA INSPECTION/i)).toBeInTheDocument();
+    expect(screen.getByText(/^UNVERIFIED$/i)).toBeInTheDocument();
+    expect(screen.getByText(/Path escapes allowed roots via traversal/i)).toBeInTheDocument();
+    expect(screen.queryByText(/Verified runtime artifact/i)).not.toBeInTheDocument();
   });
 
   it('submits operator dispatch message to thread', async () => {

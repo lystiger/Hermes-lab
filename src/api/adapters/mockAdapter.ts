@@ -226,8 +226,8 @@ export class MockLysStackApi implements LysStackApi {
       jobId: "#142",
       phaseId: "phase-1-build",
       artifactRefs: [
-        { id: "art_m1", type: "git_commit", label: "BUILD commit", ref: "8a21fc9" },
-        { id: "art_m2", type: "handoff", label: "BUILD handoff", ref: "HANDOFF_BUILD.md" }
+        { id: "art_m1", type: "git_commit", label: "BUILD commit", ref: "8a21fc9", trust: { status: "not_applicable", kind: "git_reference", scope: "target_repository", detail: "Git commit reference" } },
+        { id: "art_m2", type: "handoff", label: "BUILD handoff", ref: "HANDOFF_BUILD.md", trust: { status: "verified", kind: "path_containment", scope: "hermes_run_root", detail: "Contained within Hermes run root" } }
       ],
       createdAt: "2026-08-22T10:41:05Z"
     },
@@ -242,8 +242,8 @@ export class MockLysStackApi implements LysStackApi {
       jobId: "#142",
       phaseId: "phase-2-harden",
       artifactRefs: [
-        { id: "art_m3", type: "git_commit", label: "HARDEN commit", ref: "91cf33a" },
-        { id: "art_m4", type: "handoff", label: "HARDEN handoff", ref: "HANDOFF_CLAUDE.md" }
+        { id: "art_m3", type: "git_commit", label: "HARDEN commit", ref: "91cf33a", trust: { status: "not_applicable", kind: "git_reference", scope: "target_repository", detail: "Git commit reference" } },
+        { id: "art_m4", type: "handoff", label: "HARDEN handoff", ref: "HANDOFF_CLAUDE.md", trust: { status: "verified", kind: "path_containment", scope: "hermes_run_root", detail: "Contained within Hermes run root" } }
       ],
       createdAt: "2026-08-22T10:41:45Z"
     },
@@ -258,7 +258,7 @@ export class MockLysStackApi implements LysStackApi {
       jobId: "#142",
       phaseId: "phase-3-verify",
       artifactRefs: [
-        { id: "art_m5", type: "test_report", label: "Verification result", ref: "verification.json" }
+        { id: "art_m5", type: "test_report", label: "Verification result", ref: "verification.json", trust: { status: "verified", kind: "path_containment", scope: "hermes_run_root", detail: "Contained within Hermes run root" } }
       ],
       createdAt: "2026-08-22T10:42:17Z"
     }

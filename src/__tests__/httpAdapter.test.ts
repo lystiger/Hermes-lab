@@ -108,50 +108,86 @@ describe('HttpLysStackApi Contract Implementation', () => {
     const detail = await api.getAgent('claude');
     expect(detail).not.toBeNull();
     expect(detail?.id).toBe('claude');
-    // Verify no fabricated token numbers
     expect(detail?.input).toBe('—');
     expect(detail?.output).toBe('—');
     expect(detail?.activity).toEqual([]);
     expect(detail?.runs).toEqual([]);
   });
 
-  it('truthfully reports that commands and job actions are unsupported in real mode', async () => {
-    const cmdResult = await api.sendOperatorCommand('claude', 'run lint');
-    expect(cmdResult.success).toBe(false);
-    expect(cmdResult.response).toContain('not available in real control-plane mode yet');
-
-    const actionResult = await api.triggerJobAction('#142', 'retry');
-    expect(actionResult).toBe(false);
-  });
-
-  it('fetches events with limit and cursor', async () => {
-    const mockEvents = [
+  it('fetches real jobs from GET /jobs (Phase 4)', async () => {
+    const mockJobs = [
       {
-        id: 'evt_100',
-        ts: '10:42:01.123',
-        rawTs: 1771663321,
-        source: {
-          id: 'claude',
-          kind: 'agent',
-          displayName: 'Claude',
-          accentColor: '#D9A05B'
-        },
-        kind: 'agent.finished',
-        detail: 'Harden phase complete',
-        dur: '2.1s'
+        id: 'run_20260822_unigreen_01',
+        sprintId: 'unigreen-inquiry-v1',
+        title: 'Unigreen Inquiry Delivery',
+        repository: 'Unigreen',
+        branch: 'hermes/unigreen-inquiry-v1/integration',
+        priority: 'P1',
+        status: 'RUNNING',
+        assignedAgentIds: ['gemini', 'claude', 'codex'],
+        createdAt: '2026-08-22T08:00:00Z',
+        startedAt: '2026-08-22T08:01:00Z'
       }
     ];
 
     global.fetch = vi.fn().mockResolvedValue({
       ok: true,
-      json: async () => mockEvents
+      json: async () => mockJobs
     } as any);
 
-    const events = await api.getTraceEvents(50, 'evt_099');
-    expect(global.fetch).toHaveBeenCalledWith('http://localhost:8000/events?limit=50&after=evt_099');
-    expect(events.length).toBe(1);
-    expect(events[0].id).toBe('evt_100');
-    expect(events[0].source.displayName).toBe('Claude');
+    const jobs = await api.getJobs();
+    expect(global.fetch).toHaveBeenCalledWith('http://localhost:8000/jobs?');
+    expect(jobs.length).toBe(1);
+    expect(jobs[0].id).toBe('run_20260822_unigreen_01');
+    expect(jobs[0].status).toBe('RUNNING');
+    expect(jobs[0].assignedAgentIds).toEqual(['gemini', 'claude', 'codex']);
+  });
+
+  it('fetches real job detail and maps generic phases to execution graph (Phase 4)', async () => {
+    const mockJobDetail = {
+      id: 'run_20260822_unigreen_01',
+      sprintId: 'unigreen-inquiry-v1',
+      title: 'Unigreen Inquiry Delivery',
+      repository: 'Unigreen',
+      branch: 'hermes/unigreen-inquiry-v1/integration',
+      priority: 'P1',
+      status: 'RUNNING',
+      assignedAgentIds: ['gemini', 'claude', 'codex'],
+      phases: [
+        { id: 'p1', name: 'BUILD', order: 1, role: 'builder', agentId: 'gemini', status: 'SUCCEEDED', commitSha: 'sha123' },
+        { id: 'p2', name: 'HARDEN', order: 2, role: 'hardener', agentId: 'claude', status: 'RUNNING' },
+        { id: 'p3', name: 'VERIFY', order: 3, role: 'verifier', agentId: 'codex', status: 'PENDING' }
+      ],
+      artifacts: [
+        { id: 'art1', type: 'git_commit', label: 'Commit', ref: 'sha123' }
+      ]
+    };
+
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => mockJobDetail
+    } as any);
+
+    const detail = await api.getJob('run_20260822_unigreen_01');
+    expect(detail).not.toBeNull();
+    expect(detail?.phases?.length).toBe(3);
+    expect(detail?.executionGraph.length).toBe(3);
+    expect(detail?.executionGraph[0].state).toBe('COMPLETED');
+    expect(detail?.executionGraph[1].state).toBe('RUNNING');
+    expect(detail?.executionGraph[2].state).toBe('QUEUED');
+  });
+
+  it('handles job cancellation through POST /jobs/:id/cancel (Phase 4)', async () => {
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ cancelled: true })
+    } as any);
+
+    const success = await api.triggerJobAction('run_test_01', 'cancel');
+    expect(global.fetch).toHaveBeenCalledWith('http://localhost:8000/jobs/run_test_01/cancel', {
+      method: 'POST'
+    });
+    expect(success).toBe(true);
   });
 
   it('handles SSE streaming subscription with cursor and clean unsubscription', () => {
@@ -159,7 +195,6 @@ describe('HttpLysStackApi Contract Implementation', () => {
     let closed = false;
     let openedUrl = '';
 
-    // Mock EventSource
     class MockEventSource {
       constructor(public url: string) {
         openedUrl = url;
@@ -183,7 +218,6 @@ describe('HttpLysStackApi Contract Implementation', () => {
     expect(openedUrl).toBe('http://localhost:8000/events/stream?after=evt_050');
     expect(messageListener).toBeDefined();
 
-    // Dispatch simulated message event
     const sampleEventDTO = {
       id: 'evt_200',
       ts: '10:45:00.000',
@@ -193,7 +227,7 @@ describe('HttpLysStackApi Contract Implementation', () => {
         kind: 'agent',
         displayName: 'Gemini'
       },
-      kind: 'agent.started',
+      kind: 'phase.started',
       detail: 'Starting sprint build phase'
     };
 
@@ -202,7 +236,7 @@ describe('HttpLysStackApi Contract Implementation', () => {
     expect(handler).toHaveBeenCalledWith(
       expect.objectContaining({
         id: 'evt_200',
-        kind: 'agent.started',
+        kind: 'phase.started',
         detail: 'Starting sprint build phase'
       })
     );

@@ -126,11 +126,11 @@ export const OverviewRoute: React.FC = () => {
                   <div
                     key={q.id}
                     onClick={() => setActiveModalJobId(q.id)}
-                    style={{ borderLeftColor: getPrioColor(q.priority) }}
+                    style={{ borderLeftColor: getPrioColor(q.priority || 'P1') }}
                     className="p-2.5 bg-[#101216] border-l-2 hover:bg-[#161A20] cursor-pointer transition-colors"
                   >
                     <div className="flex items-center gap-2 font-mono-code text-[11px]">
-                      <span style={{ color: getPrioColor(q.priority) }} className="font-semibold">{q.priority}</span>
+                      <span style={{ color: getPrioColor(q.priority || 'P1') }} className="font-semibold">{q.priority || 'P1'}</span>
                       <span className="text-[#5C646E]">{q.id}</span>
                       <span className="flex-1 min-w-0 text-[12px] text-[#D7DCE2] font-sans truncate">{q.title}</span>
                       <span className="text-[#8C949F] tracking-wider">{q.status}</span>

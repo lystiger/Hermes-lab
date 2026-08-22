@@ -177,6 +177,7 @@ export const MOCK_ACTIVE_JOB_DETAIL: JobDetail = {
   startedAt: '10:38',
   budget: '80k',
   policy: 'serial · retry 3',
+  phases: [],
   executionGraph: MOCK_PIPELINE.slice(0, 4),
   changedFiles: MOCK_CHANGED_FILES,
   testSummary: {

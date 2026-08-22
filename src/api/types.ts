@@ -5,11 +5,29 @@ export type AgentStatus = 'RUNNING' | 'WAITING' | 'IDLE' | 'OFFLINE' | 'BUSY' | 
 
 export type Priority = 'P0' | 'P1' | 'P2' | 'P3';
 
-export type JobStatus = 'QUEUED' | 'CLAIMED' | 'RUNNING' | 'VERIFYING' | 'BLOCKED' | 'FAILED' | 'COMPLETED' | 'CANCELLED';
+export type JobStatus =
+  | 'QUEUED'
+  | 'PREPARING'
+  | 'RUNNING'
+  | 'BLOCKED'
+  | 'FAILED'
+  | 'COMPLETED'
+  | 'CANCELLED'
+  | 'CLAIMED'
+  | 'VERIFYING';
+
+export type PhaseStatus =
+  | 'PENDING'
+  | 'PREPARING'
+  | 'RUNNING'
+  | 'SUCCEEDED'
+  | 'FAILED'
+  | 'SKIPPED'
+  | 'CANCELLED';
 
 export type PipelineStepState = 'COMPLETED' | 'RUNNING' | 'QUEUED' | 'CLAIMED' | 'BLOCKED' | 'IDLE';
 
-export type PhaseName = 'BUILD' | 'HARDEN' | 'VERIFY' | 'COMPLETE' | 'REVIEW' | 'CUSTOM';
+export type PhaseName = string;
 
 export type ActorKind = 'agent' | 'system' | 'runtime' | 'tool';
 
@@ -109,21 +127,50 @@ export interface AgentDetail extends AgentSummary {
   traceId?: string;
 }
 
+export interface ArtifactRef {
+  id: string;
+  type: string;
+  label: string;
+  ref: string;
+}
+
+export interface JobPhase {
+  id: string;
+  name: string;
+  order: number;
+  role: string;
+  agentId?: AgentId;
+  agentName?: string;
+  status: PhaseStatus;
+  attempt?: number;
+  durationMs?: number;
+  startedAt?: string;
+  completedAt?: string;
+  commitSha?: string;
+  changedFilesCount?: number;
+  detail?: string;
+  meta?: string;
+}
+
 export interface Job {
   id: string;
-  priority: Priority;
+  sprintId?: string;
   title: string;
   repository: string;
   branch?: string;
+  priority?: Priority | string;
   status: JobStatus;
+  currentPhase?: string;
   assignedAgentIds: AgentId[];
   estimatedTokens?: string;
   estimatedTime?: string;
   createdAt?: string;
   startedAt?: string;
   completedAt?: string;
+  progress?: number;
   budget?: string;
   policy?: string;
+  phases?: JobPhase[];
 }
 
 export interface ChangedFile {
@@ -152,6 +199,7 @@ export interface JobTokenBreakdown {
 }
 
 export interface JobDetail extends Job {
+  phases?: JobPhase[];
   executionGraph: PipelineStep[];
   changedFiles: ChangedFile[];
   testSummary?: {
@@ -165,6 +213,8 @@ export interface JobDetail extends Job {
   retriesUsed: number;
   maxRetries: number;
   tokenBreakdown: JobTokenBreakdown[];
+  artifacts?: ArtifactRef[];
+  errors?: any[];
 }
 
 export interface PipelineStep {
@@ -201,7 +251,7 @@ export interface ProviderQuota {
   left: string;
   capacity: string;
   reset: string;
-  resetTag: 'EXACT' | 'EST' | 'N/A';
+  resetTag: string;
   conf: string;
   basis: string;
   opacity: string;
@@ -231,34 +281,4 @@ export interface OverviewTelemetry {
   tokensToday: string;
   estSpendToday: string;
   sprintBudgetUsedPct: number;
-}
-
-// Future-Proof Messaging Contracts (Contracts Only - No A2A implementation yet)
-export type ArtifactType = 'git_commit' | 'git_diff' | 'file' | 'test_report' | 'log' | 'generic';
-
-export interface ArtifactRef {
-  id: string;
-  type: ArtifactType;
-  ref: string;
-  label?: string;
-}
-
-export interface Message {
-  id: string;
-  threadId: string;
-  from: ActorRef;
-  to: ActorRef[];
-  text: string;
-  intent?: string;
-  jobId?: string;
-  artifactRefs?: ArtifactRef[];
-  createdAt: string;
-}
-
-export interface Thread {
-  id: string;
-  jobId?: string;
-  participants: ActorRef[];
-  createdAt: string;
-  updatedAt: string;
 }

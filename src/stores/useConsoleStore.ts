@@ -24,8 +24,9 @@ interface ConsoleUIState {
   connectionStatus: ConnectionStatus;
   backendHealth: HealthStatus | null;
 
-  // Reactive Runtime Agent Status Overlay
+  // Reactive Runtime State
   agentRuntimeStatuses: Record<string, AgentRuntimeState>;
+  jobRuntimeVersion: number;
 
   // Client UI Preferences & Selection
   selectedAgentId: string;
@@ -71,6 +72,7 @@ export const useConsoleStore = create<ConsoleUIState>((set, get) => ({
   connectionStatus: isRealApiMode ? 'CONNECTING' : 'CONNECTED',
   backendHealth: null,
   agentRuntimeStatuses: {},
+  jobRuntimeVersion: 0,
   selectedAgentId: 'claude',
   activeModalJobId: null,
   activeDossierAgent: null,
@@ -83,9 +85,9 @@ export const useConsoleStore = create<ConsoleUIState>((set, get) => ({
   tick: 0,
   clock: '10:42',
   elapsed: '08:41',
-  tokensToday: isRealApiMode ? '124K' : '284K',
-  jobTokens: '44.1k',
-  hardenTokens: '13.7k',
+  tokensToday: isRealApiMode ? '—' : '284K',
+  jobTokens: isRealApiMode ? '—' : '44.1k',
+  hardenTokens: isRealApiMode ? '—' : '13.7k',
   allEvents: [],
 
   setConnectionStatus: (connectionStatus) => set({ connectionStatus }),
@@ -121,7 +123,7 @@ export const useConsoleStore = create<ConsoleUIState>((set, get) => ({
         ? state.allEvents
         : [event, ...state.allEvents].slice(0, 150);
 
-      // 2. Reactively reduce agent status from live runtime events (Item 1)
+      // 2. Reactively reduce agent status from live runtime events
       let nextStatuses = state.agentRuntimeStatuses;
       const sourceId = event.source?.id?.toLowerCase();
 
@@ -153,9 +155,14 @@ export const useConsoleStore = create<ConsoleUIState>((set, get) => ({
         }
       }
 
+      // 3. Reactively bump job runtime version on job/phase events
+      const isJobEvent = event.kind.startsWith('job.') || event.kind.startsWith('phase.');
+      const nextJobVersion = isJobEvent ? state.jobRuntimeVersion + 1 : state.jobRuntimeVersion;
+
       return {
         allEvents: nextEvents,
-        agentRuntimeStatuses: nextStatuses
+        agentRuntimeStatuses: nextStatuses,
+        jobRuntimeVersion: nextJobVersion
       };
     }),
 

@@ -79,7 +79,6 @@ export class HttpLysStackApi implements LysStackApi {
     const data: BackendAgentDTO[] = await res.json();
 
     return data.map((dto) => {
-      // Resolve client presentation (e.g. portraits/cards if present)
       const actor = resolveActorPresentation(dto.id);
       
       return {
@@ -112,7 +111,6 @@ export class HttpLysStackApi implements LysStackApi {
       return null;
     }
 
-    // Truthful representation in real mode (Task 11: no fabricated telemetry numbers)
     return {
       ...found,
       input: '—',
@@ -134,6 +132,140 @@ export class HttpLysStackApi implements LysStackApi {
       reset: '—',
       resetNote: 'Detailed provider token telemetry will connect in Phase 4.'
     };
+  }
+
+  // --------------------------------------------------------------------------
+  // Real Job & Queue endpoints (Phase 4)
+  // --------------------------------------------------------------------------
+
+  async getJobs(status?: string): Promise<Job[]> {
+    const params = new URLSearchParams();
+    if (status) params.set('status', status);
+
+    const res = await fetch(`${this.baseUrl}/jobs?${params.toString()}`);
+    if (!res.ok) {
+      throw new Error(`LysStack /jobs returned HTTP ${res.status}: ${res.statusText}`);
+    }
+    const data: any[] = await res.json();
+
+    return data.map((j) => ({
+      id: j.id,
+      sprintId: j.sprintId,
+      title: j.title,
+      repository: j.repository,
+      branch: j.branch,
+      priority: j.priority || 'P1',
+      status: j.status,
+      currentPhase: j.currentPhase,
+      assignedAgentIds: j.assignedAgentIds || [],
+      createdAt: j.createdAt,
+      startedAt: j.startedAt,
+      completedAt: j.completedAt,
+      progress: j.progress,
+      estimatedTokens: '—',
+      estimatedTime: '—',
+      budget: '—',
+      policy: 'governed · serial'
+    }));
+  }
+
+  async getJob(id: string): Promise<JobDetail | null> {
+    const res = await fetch(`${this.baseUrl}/jobs/${encodeURIComponent(id)}`);
+    if (!res.ok) {
+      if (res.status === 404) return null;
+      throw new Error(`LysStack /jobs/${id} returned HTTP ${res.status}: ${res.statusText}`);
+    }
+    const data = await res.json();
+
+    const phases = data.phases || [];
+    const executionGraph: PipelineStep[] = phases.map((p: any) => {
+      const actor = p.agentId ? resolveActorPresentation(p.agentId) : null;
+      let state: any = 'QUEUED';
+      if (p.status === 'SUCCEEDED') state = 'COMPLETED';
+      else if (p.status === 'RUNNING') state = 'RUNNING';
+      else if (p.status === 'FAILED') state = 'BLOCKED';
+      else if (p.status === 'CANCELLED') state = 'BLOCKED';
+
+      return {
+        id: p.id || `phase-${p.order}`,
+        phase: p.name,
+        agentId: p.agentId,
+        agentName: actor?.displayName || p.agentId,
+        task: p.name,
+        meta: p.commitSha ? p.commitSha.slice(0, 7) : (p.status === 'SUCCEEDED' ? 'completed' : p.status.toLowerCase()),
+        state,
+        note: p.role
+      };
+    });
+
+    return {
+      id: data.id,
+      sprintId: data.sprintId,
+      title: data.title,
+      repository: data.repository,
+      branch: data.branch,
+      priority: data.priority || 'P1',
+      status: data.status,
+      currentPhase: data.currentPhase,
+      assignedAgentIds: data.assignedAgentIds || [],
+      createdAt: data.createdAt,
+      startedAt: data.startedAt,
+      completedAt: data.completedAt,
+      progress: data.progress,
+      phases,
+      executionGraph,
+      changedFiles: [],
+      retryHistory: data.retryHistory || [],
+      retriesUsed: 0,
+      maxRetries: 3,
+      tokenBreakdown: [],
+      artifacts: data.artifacts || [],
+      errors: data.errors || []
+    };
+  }
+
+  async getPipeline(): Promise<PipelineStep[]> {
+    try {
+      const jobs = await this.getJobs();
+      const activeJob = jobs.find((j) => j.status === 'RUNNING') || jobs[0];
+      if (!activeJob) {
+        return [];
+      }
+      const detail = await this.getJob(activeJob.id);
+      return detail?.executionGraph || [];
+    } catch {
+      return [];
+    }
+  }
+
+  async getTelemetry(): Promise<OverviewTelemetry> {
+    try {
+      const jobs = await this.getJobs();
+      const runningJobsCount = jobs.filter((j) => j.status === 'RUNNING').length;
+      const queuedJobsCount = jobs.filter((j) => ['QUEUED', 'PREPARING'].includes(j.status)).length;
+      const blockedJobsCount = jobs.filter((j) => j.status === 'BLOCKED').length;
+      const failed24hCount = jobs.filter((j) => j.status === 'FAILED').length;
+
+      return {
+        runningJobsCount,
+        queuedJobsCount,
+        blockedJobsCount,
+        failed24hCount,
+        tokensToday: '—',
+        estSpendToday: '—',
+        sprintBudgetUsedPct: 0
+      };
+    } catch {
+      return {
+        runningJobsCount: 0,
+        queuedJobsCount: 0,
+        blockedJobsCount: 0,
+        failed24hCount: 0,
+        tokensToday: '—',
+        estSpendToday: '—',
+        sprintBudgetUsedPct: 0
+      };
+    }
   }
 
   async getTraceEvents(limit = 100, after?: string): Promise<TraceEvent[]> {
@@ -173,7 +305,6 @@ export class HttpLysStackApi implements LysStackApi {
     onError?: (err: Error) => void,
     initialCursor?: string
   ): EventSubscription {
-    // Avoid duplicate connections (Task 9, Task 10)
     if (this.activeEventSource) {
       this.activeEventSource.close();
       this.activeEventSource = null;
@@ -236,81 +367,8 @@ export class HttpLysStackApi implements LysStackApi {
   }
 
   // --------------------------------------------------------------------------
-  // Simulated / Fallback endpoints for Phase 3 (Will transition in Phase 4)
+  // Quota & Projections (Phase 4 simulated until provider accounting)
   // --------------------------------------------------------------------------
-
-  async getJobs(): Promise<Job[]> {
-    return [
-      {
-        id: '#142',
-        priority: 'P1',
-        title: 'Redis State Migration',
-        repository: 'moveinmate/backend',
-        branch: 'feat/redis-state',
-        status: 'RUNNING',
-        assignedAgentIds: ['gemini', 'claude', 'codex'],
-        startedAt: '10:38',
-        budget: '80k',
-        policy: 'serial · retry 3'
-      },
-      {
-        id: '#143',
-        priority: 'P0',
-        title: 'Fix production CI — flaky worker teardown',
-        repository: 'unigreen/web',
-        assignedAgentIds: ['gemini', 'claude', 'codex'],
-        estimatedTokens: '~18–30k',
-        estimatedTime: '~12 min',
-        status: 'QUEUED',
-        createdAt: '10:35'
-      }
-    ];
-  }
-
-  async getJob(id: string): Promise<JobDetail | null> {
-    return {
-      id,
-      priority: 'P1',
-      title: 'Active LysStack Orchestration Task',
-      repository: 'moveinmate/backend',
-      branch: 'feat/redis-state',
-      status: 'RUNNING',
-      assignedAgentIds: ['gemini', 'claude', 'codex'],
-      startedAt: '10:38',
-      budget: '80k',
-      policy: 'serial · retry 3',
-      executionGraph: [
-        { id: '1', phase: 'BUILD', agentId: 'gemini', agentName: 'Gemini', task: 'Build', meta: '30.4k', state: 'COMPLETED' },
-        { id: '2', phase: 'HARDEN', agentId: 'claude', agentName: 'Claude', task: 'Harden', meta: '13.7k', state: 'RUNNING' },
-        { id: '3', phase: 'VERIFY', agentId: 'codex', agentName: 'Codex', task: 'Verify', meta: 'staged', state: 'QUEUED' }
-      ],
-      changedFiles: [],
-      retryHistory: [],
-      retriesUsed: 1,
-      maxRetries: 3,
-      tokenBreakdown: []
-    };
-  }
-
-  async getPipeline(): Promise<PipelineStep[]> {
-    return [
-      { id: '1', phase: 'BUILD', agentId: 'gemini', agentName: 'Gemini', task: 'Build', meta: '30.4k', state: 'COMPLETED' },
-      { id: '2', phase: 'HARDEN', agentId: 'claude', agentName: 'Claude', task: 'Harden', meta: '13.7k', state: 'RUNNING' },
-      { id: '3', phase: 'VERIFY', agentId: 'codex', agentName: 'Codex', task: 'Verify', meta: 'staged', state: 'QUEUED' }
-    ];
-  }
-
-  async getTelemetry(): Promise<OverviewTelemetry> {
-    return {
-      runningJobsCount: 1,
-      queuedJobsCount: 2,
-      blockedJobsCount: 0,
-      failed24hCount: 0,
-      tokensToday: '124K',
-      estSpendToday: '$3.40',
-      sprintBudgetUsedPct: 42
-    };
-  }
 
   async getProviderQuotas(): Promise<ProviderQuota[]> {
     return [
@@ -333,9 +391,7 @@ export class HttpLysStackApi implements LysStackApi {
   }
 
   async getProjections(): Promise<ProjectionItem[]> {
-    return [
-      { id: '1', task: 'CI Flaky Worker Fix', est: '~12 min', w: '70%', wLow: '30%', color: '#F2555A', conf: 'high' }
-    ];
+    return [];
   }
 
   async getSettings(): Promise<{ runtime: SettingItem[]; policy: SettingItem[] }> {
@@ -352,7 +408,6 @@ export class HttpLysStackApi implements LysStackApi {
   }
 
   async sendOperatorCommand(targetActorId: string, _command: string): Promise<{ success: boolean; response: string }> {
-    // Truthful command handling (Task 12: explicit unsupported response in real mode)
     return {
       success: false,
       response: `[LysStack / ${targetActorId}] Command execution is not available in real control-plane mode yet.`
@@ -360,7 +415,18 @@ export class HttpLysStackApi implements LysStackApi {
   }
 
   async triggerJobAction(jobId: string, action: 'retry' | 'pause' | 'cancel' | 'promote'): Promise<boolean> {
-    // Truthful action handling (Task 12: explicit unsupported response in real mode)
+    if (action === 'cancel') {
+      try {
+        const res = await fetch(`${this.baseUrl}/jobs/${encodeURIComponent(jobId)}/cancel`, {
+          method: 'POST'
+        });
+        return res.ok;
+      } catch (err) {
+        console.error('[HttpLysStackApi] Failed to cancel job:', err);
+        return false;
+      }
+    }
+
     console.warn(`[HttpLysStackApi] Action '${action}' on job ${jobId} is not available in real control-plane mode yet.`);
     return false;
   }

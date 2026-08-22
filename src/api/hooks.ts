@@ -140,6 +140,7 @@ export function useJobs() {
   const [jobs, setJobs] = useState<Job[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<Error | null>(null);
+  const { jobRuntimeVersion } = useConsoleStore();
 
   const fetchJobs = useCallback(async () => {
     try {
@@ -156,7 +157,7 @@ export function useJobs() {
 
   useEffect(() => {
     fetchJobs();
-  }, [fetchJobs]);
+  }, [fetchJobs, jobRuntimeVersion]);
 
   return { jobs, loading, error, refetch: fetchJobs };
 }
@@ -165,6 +166,7 @@ export function useJob(id: string | null) {
   const [job, setJob] = useState<JobDetail | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<Error | null>(null);
+  const { jobRuntimeVersion } = useConsoleStore();
 
   const fetchJob = useCallback(async (jobId: string) => {
     try {
@@ -185,15 +187,16 @@ export function useJob(id: string | null) {
     } else {
       setJob(null);
     }
-  }, [id, fetchJob]);
+  }, [id, fetchJob, jobRuntimeVersion]);
 
-  return { job, loading, error };
+  return { job, loading, error, refetch: () => id && fetchJob(id) };
 }
 
 export function usePipeline() {
   const [pipeline, setPipeline] = useState<PipelineStep[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<Error | null>(null);
+  const { jobRuntimeVersion } = useConsoleStore();
 
   const fetchPipeline = useCallback(async () => {
     try {
@@ -210,7 +213,7 @@ export function usePipeline() {
 
   useEffect(() => {
     fetchPipeline();
-  }, [fetchPipeline]);
+  }, [fetchPipeline, jobRuntimeVersion]);
 
   return { pipeline, loading, error, refetch: fetchPipeline };
 }

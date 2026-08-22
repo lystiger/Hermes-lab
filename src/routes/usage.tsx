@@ -3,12 +3,22 @@ import { TokenBudgetMeter } from '../features/telemetry/TokenBudgetMeter';
 import { ProviderQuotaList } from '../features/telemetry/ProviderQuotaList';
 import { QueueProjectionBar } from '../features/jobs/QueueProjectionBar';
 import { useAgents } from '../api/hooks';
+import { isRealApiMode } from '../api/client';
 
 export const UsageRoute: React.FC = () => {
   const { agents } = useAgents();
 
   return (
     <div className="flex flex-col pb-10 select-none bg-[#0A0B0D]">
+      {isRealApiMode && (
+        <div className="px-5 py-2.5 bg-[#0C0E11] border-b border-[#1F242B] flex items-center justify-between font-mono-code text-[11px]">
+          <span className="text-[#8C949F]">PROVIDER TELEMETRY &amp; QUOTAS</span>
+          <span className="text-[10px] tracking-wider text-[#CBA35C] border border-[rgba(203,163,92,0.3)] px-2 py-0.5 bg-[rgba(203,163,92,0.06)]">
+            [ SIMULATED DEMO · PHASE 4 MIGRATION ]
+          </span>
+        </div>
+      )}
+
       {/* 3-Column Top Grid: Context Windows, Run Budget, Provider Quotas */}
       <div className="grid grid-cols-1 lg:grid-cols-3 border-b border-[#1F242B]">
         {/* 1 · CONTEXT WINDOWS */}

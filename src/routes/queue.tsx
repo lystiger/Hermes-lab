@@ -3,6 +3,7 @@ import { QueueTable } from '../features/jobs/QueueTable';
 import { useConsoleStore } from '../stores/useConsoleStore';
 import { useJobs, usePipeline, useAgents } from '../api/hooks';
 import { resolveActorPresentation } from '../api/actors';
+import { isRealApiMode } from '../api/client';
 
 export const QueueRoute: React.FC = () => {
   const { setActiveModalJobId, liveMotion } = useConsoleStore();
@@ -25,9 +26,16 @@ export const QueueRoute: React.FC = () => {
     <div className="flex flex-col pb-10 select-none bg-[#0A0B0D]">
       {/* Execution Order Pipeline Section */}
       <div className="p-5 border-b border-[#1F242B] bg-[#0C0E11]">
-        <div className="flex items-center gap-3.5 mb-3 font-mono-code text-[11px]">
-          <span className="tracking-wider text-[#5C646E]">EXECUTION ORDER</span>
-          <span className="text-[#8C949F]">serial per repository · next handoff ~4 min</span>
+        <div className="flex items-center justify-between mb-3 font-mono-code text-[11px]">
+          <div className="flex items-center gap-3.5">
+            <span className="tracking-wider text-[#5C646E]">EXECUTION ORDER</span>
+            <span className="text-[#8C949F]">serial per repository · next handoff ~4 min</span>
+          </div>
+          {isRealApiMode && (
+            <span className="text-[10px] tracking-wider text-[#CBA35C] border border-[rgba(203,163,92,0.3)] px-2 py-0.5 bg-[rgba(203,163,92,0.06)]">
+              [ SIMULATED DEMO · PHASE 4 MIGRATION ]
+            </span>
+          )}
         </div>
 
         <div className="flex flex-col max-w-5xl">

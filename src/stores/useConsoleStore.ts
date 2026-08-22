@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { TraceEvent, AgentSummary, AgentDetail, ConnectionStatus, HealthStatus } from '../api/types';
+import { TraceEvent, AgentSummary, AgentDetail, ConnectionStatus, HealthStatus, AgentStatus } from '../api/types';
 import { isRealApiMode } from '../api/client';
 
 function pad(n: number, w: number): string {
@@ -14,10 +14,18 @@ export function fmtTs(sec: number): string {
   return `${pad(h, 2)}:${pad(m, 2)}:${pad(s, 2)}.${pad(ms, 3)}`;
 }
 
+interface AgentRuntimeState {
+  status: AgentStatus;
+  currentTask?: string;
+}
+
 interface ConsoleUIState {
   // Connection State to LysStack Backend
   connectionStatus: ConnectionStatus;
   backendHealth: HealthStatus | null;
+
+  // Reactive Runtime Agent Status Overlay
+  agentRuntimeStatuses: Record<string, AgentRuntimeState>;
 
   // Client UI Preferences & Selection
   selectedAgentId: string;
@@ -43,6 +51,7 @@ interface ConsoleUIState {
   // Actions
   setConnectionStatus: (status: ConnectionStatus) => void;
   setBackendHealth: (health: HealthStatus | null) => void;
+  updateAgentRuntimeStatus: (agentId: string, status: AgentStatus, currentTask?: string) => void;
   setSelectedAgentId: (id: string) => void;
   setActiveModalJobId: (id: string | null) => void;
   setActiveDossierAgent: (agent: AgentSummary | AgentDetail | null) => void;
@@ -61,6 +70,7 @@ const baseTs = 10 * 3600 + 42 * 60 + 16;
 export const useConsoleStore = create<ConsoleUIState>((set, get) => ({
   connectionStatus: isRealApiMode ? 'CONNECTING' : 'CONNECTED',
   backendHealth: null,
+  agentRuntimeStatuses: {},
   selectedAgentId: 'claude',
   activeModalJobId: null,
   activeDossierAgent: null,
@@ -80,6 +90,15 @@ export const useConsoleStore = create<ConsoleUIState>((set, get) => ({
 
   setConnectionStatus: (connectionStatus) => set({ connectionStatus }),
   setBackendHealth: (backendHealth) => set({ backendHealth }),
+  
+  updateAgentRuntimeStatus: (agentId, status, currentTask) =>
+    set((state) => ({
+      agentRuntimeStatuses: {
+        ...state.agentRuntimeStatuses,
+        [agentId.toLowerCase()]: { status, currentTask }
+      }
+    })),
+
   setSelectedAgentId: (id) => set({ selectedAgentId: id.toLowerCase() }),
   setActiveModalJobId: (id) => set({ activeModalJobId: id }),
   setActiveDossierAgent: (agent) => set({ activeDossierAgent: agent }),
@@ -96,12 +115,47 @@ export const useConsoleStore = create<ConsoleUIState>((set, get) => ({
 
   addTraceEvent: (event) =>
     set((state) => {
-      // Prevent duplicates by event id
-      if (state.allEvents.some((e) => e.id === event.id)) {
-        return state;
+      // 1. Deduplicate by event ID
+      const alreadyExists = state.allEvents.some((e) => e.id === event.id);
+      const nextEvents = alreadyExists
+        ? state.allEvents
+        : [event, ...state.allEvents].slice(0, 150);
+
+      // 2. Reactively reduce agent status from live runtime events (Item 1)
+      let nextStatuses = state.agentRuntimeStatuses;
+      const sourceId = event.source?.id?.toLowerCase();
+
+      if (sourceId && event.source.kind === 'agent') {
+        if (event.kind === 'agent.started') {
+          nextStatuses = {
+            ...nextStatuses,
+            [sourceId]: {
+              status: 'RUNNING',
+              currentTask: event.metadata?.task || event.metadata?.phase || event.detail
+            }
+          };
+        } else if (event.kind === 'agent.finished') {
+          nextStatuses = {
+            ...nextStatuses,
+            [sourceId]: {
+              status: 'IDLE',
+              currentTask: undefined
+            }
+          };
+        } else if (event.kind === 'agent.failed') {
+          nextStatuses = {
+            ...nextStatuses,
+            [sourceId]: {
+              status: 'ERROR',
+              currentTask: undefined
+            }
+          };
+        }
       }
+
       return {
-        allEvents: [event, ...state.allEvents].slice(0, 150)
+        allEvents: nextEvents,
+        agentRuntimeStatuses: nextStatuses
       };
     }),
 

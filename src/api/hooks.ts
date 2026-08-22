@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { lysStackApi, isRealApiMode } from './client';
 import { EventSubscription } from './contracts';
 import {
@@ -52,16 +52,16 @@ export function useHealth() {
 }
 
 export function useAgents() {
-  const [agents, setAgents] = useState<AgentSummary[]>([]);
+  const [baseAgents, setBaseAgents] = useState<AgentSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<Error | null>(null);
-  const { setConnectionStatus } = useConsoleStore();
+  const { setConnectionStatus, agentRuntimeStatuses } = useConsoleStore();
 
   const fetchAgents = useCallback(async () => {
     try {
       setLoading(true);
       const data = await lysStackApi.getAgents();
-      setAgents(data);
+      setBaseAgents(data);
       if (isRealApiMode) {
         setConnectionStatus('CONNECTED');
       }
@@ -80,19 +80,33 @@ export function useAgents() {
     fetchAgents();
   }, [fetchAgents]);
 
+  // Reactive overlay: updates dynamically whenever SSE events change active statuses (Item 1)
+  const agents = useMemo(() => {
+    return baseAgents.map((ag) => {
+      const liveOverlay = agentRuntimeStatuses[ag.id.toLowerCase()];
+      if (!liveOverlay) return ag;
+      return {
+        ...ag,
+        status: liveOverlay.status || ag.status,
+        currentTask: liveOverlay.currentTask !== undefined ? liveOverlay.currentTask : ag.currentTask
+      };
+    });
+  }, [baseAgents, agentRuntimeStatuses]);
+
   return { agents, loading, error, refetch: fetchAgents };
 }
 
 export function useAgent(id?: AgentId) {
-  const [agent, setAgent] = useState<AgentDetail | null>(null);
+  const [baseAgent, setBaseAgent] = useState<AgentDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<Error | null>(null);
+  const { agentRuntimeStatuses } = useConsoleStore();
 
   const fetchAgent = useCallback(async (targetId: AgentId) => {
     try {
       setLoading(true);
       const data = await lysStackApi.getAgent(targetId);
-      setAgent(data);
+      setBaseAgent(data);
       setError(null);
     } catch (err) {
       setError(err as Error);
@@ -106,6 +120,18 @@ export function useAgent(id?: AgentId) {
       fetchAgent(id);
     }
   }, [id, fetchAgent]);
+
+  // Reactive overlay for single agent inspection (Item 1)
+  const agent = useMemo(() => {
+    if (!baseAgent || !id) return baseAgent;
+    const liveOverlay = agentRuntimeStatuses[id.toLowerCase()];
+    if (!liveOverlay) return baseAgent;
+    return {
+      ...baseAgent,
+      status: liveOverlay.status || baseAgent.status,
+      currentTask: liveOverlay.currentTask !== undefined ? liveOverlay.currentTask : baseAgent.currentTask
+    };
+  }, [baseAgent, id, agentRuntimeStatuses]);
 
   return { agent, loading, error, refetch: () => id && fetchAgent(id) };
 }
@@ -251,15 +277,16 @@ export function useEventStream() {
         }
       }
 
-      // 2. Load historical events from API first (Task 9: Establish cursor before opening SSE)
+      // 2. Load historical events from API first (Task 9 & Item 2: Establish cursor = newest event ID)
       let initialCursor: string | undefined;
       try {
         const history = await lysStackApi.getTraceEvents(100);
         if (isSubscribed) {
           setInitialEvents(history);
-          // Newest event is at index 0 (or find highest rawTs)
           if (history.length > 0) {
-            initialCursor = history[0].id;
+            // Find newest event by highest raw timestamp (Item 2)
+            const newestEvent = history.reduce((prev, curr) => (curr.rawTs > prev.rawTs ? curr : prev));
+            initialCursor = newestEvent.id;
           }
         }
       } catch {
@@ -268,7 +295,7 @@ export function useEventStream() {
         }
       }
 
-      // 3. Open SSE stream starting strictly after latest historical event
+      // 3. Open SSE stream starting strictly after newest historical event
       if (isSubscribed) {
         eventSub = lysStackApi.subscribeEvents(
           (evt: TraceEvent) => {

@@ -209,7 +209,7 @@ async def stream_events(
     Server-Sent Events (SSE) stream for real-time live runtime events.
     Supports reconnect cursor via ?after=<id> or Last-Event-ID header.
     """
-    cursor_id = after or last_event_id
+    cursor_id = last_event_id or after
     queue: asyncio.Queue[RuntimeEvent] = asyncio.Queue(maxsize=100)
 
     # Subscribe queue to live event bus

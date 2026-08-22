@@ -1,20 +1,19 @@
 import json
 import logging
 import os
+import sys
+from pathlib import Path
 import urllib.error
 import urllib.request
 from typing import Any, Dict, Optional
 
+ROOT_DIR = Path(__file__).resolve().parent.parent.parent
+if str(ROOT_DIR) not in sys.path:
+    sys.path.insert(0, str(ROOT_DIR))
+
+from normalization import normalize_agent_id
+
 logger = logging.getLogger("hermes.event_publisher")
-
-
-def _normalize_id(agent_id: str) -> str:
-    if not agent_id:
-        return "unknown"
-    normalized = str(agent_id).strip().lower()
-    if normalized in {"antigravity", "gemini", "agy"}:
-        return "gemini"
-    return normalized
 
 
 class RuntimeEventPublisher:
@@ -27,7 +26,6 @@ class RuntimeEventPublisher:
     """
 
     def __init__(self, control_url: Optional[str] = None, timeout: float = 1.0):
-        # Read from constructor or environment variable LYSSTACK_CONTROL_URL
         url = control_url or os.environ.get("LYSSTACK_CONTROL_URL")
         self.control_url = url.rstrip("/") if url else None
         self.timeout = timeout
@@ -47,7 +45,7 @@ class RuntimeEventPublisher:
         if not self.control_url:
             return False
 
-        normalized_id = _normalize_id(source_id)
+        normalized_id = normalize_agent_id(source_id)
         display_name = source_name or normalized_id.capitalize()
 
         payload = {
@@ -98,5 +96,4 @@ class RuntimeEventPublisher:
             return False
 
 
-# Singleton runner event publisher configured via environment
 default_publisher = RuntimeEventPublisher()

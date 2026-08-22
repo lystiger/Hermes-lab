@@ -118,8 +118,10 @@ class ArtifactRegistry:
         # Filesystem-backed artifacts
         if art_type in {"handoff", "run_summary", "log", "stdout", "stderr", "file", "test_report", "verification_report"}:
             try:
-                # If ref is relative (e.g. handoffs/01_builder.md) and not absolute, check if it contains .. escape
-                if ".." in Path(artifact.ref).parts:
+                target_path = Path(artifact.ref)
+
+                # Check for traversal escape sequence
+                if ".." in target_path.parts:
                     return ArtifactTrust(
                         status="unverified",
                         kind="path_containment",
@@ -127,11 +129,44 @@ class ArtifactRegistry:
                         detail="Path escapes allowed roots via traversal",
                     )
 
-                target_path = Path(artifact.ref)
-                # If absolute, verify against allowed roots
+                # 1. Absolute path verification
                 if target_path.is_absolute():
                     resolved = target_path.resolve()
                     matched_root = next((r for r in self.allowed_roots if resolved == r or r in resolved.parents), None)
+                    if matched_root:
+                        scope = "hermes_run_root" if "run" in matched_root.name.lower() or "hermes-runs" in str(matched_root).lower() else "target_repository"
+                        detail_desc = "Contained within Hermes run root" if scope == "hermes_run_root" else "Contained within target repository"
+                        return ArtifactTrust(
+                            status="verified",
+                            kind="path_containment",
+                            scope=scope,
+                            detail=detail_desc,
+                        )
+                    elif self.allowed_roots:
+                        return ArtifactTrust(
+                            status="unverified",
+                            kind="path_containment",
+                            scope="external",
+                            detail="Path escapes allowed Hermes roots",
+                        )
+                    else:
+                        return ArtifactTrust(
+                            status="verified",
+                            kind="path_containment",
+                            scope="hermes_run_root",
+                            detail="Contained within Hermes run root",
+                        )
+
+                # 2. Canonical relative path verification against allowed roots
+                if self.allowed_roots:
+                    # Check which allowed root canonically contains this relative path
+                    matched_root = None
+                    for r in self.allowed_roots:
+                        candidate = (r / target_path).resolve()
+                        if candidate == r or r in candidate.parents:
+                            matched_root = r
+                            break
+
                     if matched_root:
                         scope = "hermes_run_root" if "run" in matched_root.name.lower() or "hermes-runs" in str(matched_root).lower() else "target_repository"
                         detail_desc = "Contained within Hermes run root" if scope == "hermes_run_root" else "Contained within target repository"
@@ -149,7 +184,7 @@ class ArtifactRegistry:
                             detail="Path escapes allowed Hermes roots",
                         )
                 else:
-                    # Relative path without escape
+                    # No allowed roots configured; valid relative path without traversal
                     return ArtifactTrust(
                         status="verified",
                         kind="path_containment",

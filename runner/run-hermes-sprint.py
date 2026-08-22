@@ -1045,10 +1045,7 @@ class HermesSprintRunner:
             )
             try:
                 if not self.skip_agent_exec and not self.dry_run:
-                    try:
-                        execution_result = self.execute_agent(phase, wt_dir, mailbox_messages=pending_mailbox_messages)
-                    except TypeError:
-                        execution_result = self.execute_agent(phase, wt_dir)
+                    execution_result = self.execute_agent(phase, wt_dir, mailbox_messages=pending_mailbox_messages)
                 else:
                     execution_result = None
                     self.logger.info(f"Skipping agent execution CLI (skip_agent_exec={self.skip_agent_exec}, dry_run={self.dry_run})")

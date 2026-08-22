@@ -100,7 +100,7 @@ export const MOCK_PIPELINE: PipelineStep[] = [
     agentName: 'Gemini',
     task: 'Move VehicleStateStore to Redis',
     meta: '30.4k · 06:12',
-    state: 'COMPLETE',
+    state: 'COMPLETED',
     note: 'implementation complete',
     mark: '✓'
   },
@@ -133,7 +133,7 @@ export const MOCK_PIPELINE: PipelineStep[] = [
     agentName: 'Elysia',
     task: 'Merge + report telemetry',
     meta: '',
-    state: 'idle',
+    state: 'IDLE',
     note: 'merge + report'
   },
   {

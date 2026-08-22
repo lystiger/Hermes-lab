@@ -5,7 +5,9 @@ export type AgentStatus = 'RUNNING' | 'WAITING' | 'IDLE' | 'OFFLINE' | 'BUSY' | 
 
 export type Priority = 'P0' | 'P1' | 'P2' | 'P3';
 
-export type JobStatus = 'QUEUED' | 'CLAIMED' | 'RUNNING' | 'VERIFYING' | 'BLOCKED' | 'FAILED' | 'COMPLETE' | 'COMPLETED' | 'CANCELLED';
+export type JobStatus = 'QUEUED' | 'CLAIMED' | 'RUNNING' | 'VERIFYING' | 'BLOCKED' | 'FAILED' | 'COMPLETED' | 'CANCELLED';
+
+export type PipelineStepState = 'COMPLETED' | 'RUNNING' | 'QUEUED' | 'CLAIMED' | 'BLOCKED' | 'IDLE';
 
 export type PhaseName = 'BUILD' | 'HARDEN' | 'VERIFY' | 'COMPLETE' | 'REVIEW' | 'CUSTOM';
 
@@ -21,6 +23,7 @@ export interface ActorRef {
 export interface AgentPresentation {
   displayName: string;
   avatarUrl?: string;
+  characterCardUrl?: string;
   accentColor?: string;
   animationProfile?: 'quick' | 'relaxed' | 'slow' | 'steady' | 'none';
   sigil?: string;
@@ -161,7 +164,7 @@ export interface PipelineStep {
   agentName?: string;
   task: string;
   meta: string;
-  state: 'COMPLETE' | 'RUNNING' | 'QUEUED' | 'CLAIMED' | 'BLOCKED' | 'idle';
+  state: PipelineStepState;
   note?: string;
   mark?: string;
 }

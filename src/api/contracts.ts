@@ -12,6 +12,10 @@ import {
   OverviewTelemetry
 } from './types';
 
+export interface EventSubscription {
+  unsubscribe(): void;
+}
+
 export interface LysStackApi {
   getAgents(): Promise<AgentSummary[]>;
   getAgent(id: AgentId): Promise<AgentDetail | null>;
@@ -23,6 +27,7 @@ export interface LysStackApi {
   getProjections(): Promise<ProjectionItem[]>;
   getSettings(): Promise<{ runtime: SettingItem[]; policy: SettingItem[] }>;
   getTraceEvents(limit?: number): Promise<TraceEvent[]>;
+  subscribeEvents(handler: (event: TraceEvent) => void): EventSubscription;
   sendOperatorCommand(targetActorId: string, command: string): Promise<{ success: boolean; response: string }>;
   triggerJobAction(jobId: string, action: 'retry' | 'pause' | 'cancel' | 'promote'): Promise<boolean>;
 }

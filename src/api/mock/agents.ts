@@ -20,6 +20,7 @@ export const MOCK_AGENTS: Record<AgentId, AgentDetail> = {
     presentation: {
       displayName: 'Gemini',
       avatarUrl: '/agents/gemini.webp',
+      characterCardUrl: '/agents/gemini-card.webp',
       accentColor: '#5B8CFF',
       animationProfile: 'quick',
       sigil: 'BUILD',
@@ -86,6 +87,7 @@ export const MOCK_AGENTS: Record<AgentId, AgentDetail> = {
     presentation: {
       displayName: 'Claude',
       avatarUrl: '/agents/claude.webp',
+      characterCardUrl: '/agents/claude-card.webp',
       accentColor: '#D9A05B',
       animationProfile: 'relaxed',
       sigil: 'HARDEN',
@@ -152,6 +154,7 @@ export const MOCK_AGENTS: Record<AgentId, AgentDetail> = {
     presentation: {
       displayName: 'Codex',
       avatarUrl: '/agents/codex.webp',
+      characterCardUrl: '/agents/codex-card.webp',
       accentColor: '#4EC9A0',
       animationProfile: 'slow',
       sigil: 'VERIFY',
@@ -202,7 +205,7 @@ export const MOCK_AGENTS: Record<AgentId, AgentDetail> = {
   elysia: {
     id: 'elysia',
     displayName: 'Elysia',
-    provider: 'LysControl Agent Fleet',
+    provider: 'Local Fleet Agent',
     model: 'lys-tactical-orchestrator-v1',
     role: 'Autonomous synthesis · tactical arbitration · dispatch',
     capabilities: ['orchestration', 'synthesis', 'dispatch', 'planning'],
@@ -236,7 +239,7 @@ export const MOCK_AGENTS: Record<AgentId, AgentDetail> = {
     traceId: 'trc 9f14·dispatch',
     capacity: 'unlimited local',
     reset: 'continuous',
-    resetNote: 'Local agent fleet controller.',
+    resetNote: 'Local agent fleet coordinator. Dispatches sub-tasks to build and harden operatives.',
     allowance: [
       { label: 'session', value: '42.8k', pct: '21%', tag: 'EXACT' },
       { label: 'routing quota', value: '100%', pct: '100%', tag: 'EXACT' },

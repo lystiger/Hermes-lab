@@ -1,4 +1,4 @@
-import { LysStackApi } from '../contracts';
+import { LysStackApi, EventSubscription } from '../contracts';
 import {
   AgentId,
   AgentSummary,
@@ -21,8 +21,8 @@ import {
   MOCK_RUNTIME_SETTINGS,
   MOCK_POLICY_SETTINGS
 } from '../mock/telemetry';
-import { RAW_SEED_EVENTS } from '../mock/events';
-import { resolveActorRef } from '../mock/actors';
+import { RAW_SEED_EVENTS, RAW_POOL_EVENTS } from '../mock/events';
+import { resolveActorPresentation } from '../actors';
 
 function fmtTs(sec: number): string {
   const h = Math.floor(sec / 3600);
@@ -37,6 +37,8 @@ export class MockLysStackApi implements LysStackApi {
   private agents: Record<AgentId, AgentDetail> = { ...MOCK_AGENTS };
   private jobs: Job[] = [...MOCK_JOBS];
   private pipeline: PipelineStep[] = [...MOCK_PIPELINE];
+  private simTick = 0;
+  private lastSimTs = 10 * 3600 + 42 * 60 + 47.4;
 
   async getAgents(): Promise<AgentSummary[]> {
     return Object.values(this.agents).map((detail) => ({
@@ -121,16 +123,48 @@ export class MockLysStackApi implements LysStackApi {
 
   async getTraceEvents(limit = 20): Promise<TraceEvent[]> {
     const baseTs = 10 * 3600 + 42 * 60 + 16;
+    const agentList = Object.values(this.agents);
+
     return RAW_SEED_EVENTS.slice(0, limit).map((e, idx) => ({
-      id: `evt-${idx}`,
+      id: `seed-${idx}`,
       ts: fmtTs(baseTs + e.t),
       rawTs: baseTs + e.t,
-      source: resolveActorRef(e.a),
+      source: resolveActorPresentation(e.a, agentList),
       kind: e.k,
       detail: e.d,
       dur: e.dur || '—',
       jobId: '#142'
     })).reverse();
+  }
+
+  subscribeEvents(handler: (event: TraceEvent) => void): EventSubscription {
+    const agentList = Object.values(this.agents);
+
+    const timer = setInterval(() => {
+      this.simTick += 1;
+      const p = RAW_POOL_EVENTS[this.simTick % RAW_POOL_EVENTS.length];
+      const ts = this.lastSimTs + 0.4 + ((this.simTick * 37) % 130) / 100;
+      this.lastSimTs = ts;
+
+      const event: TraceEvent = {
+        id: `mock-evt-${this.simTick}-${Date.now()}`,
+        ts: fmtTs(ts),
+        rawTs: ts,
+        source: resolveActorPresentation(p.a, agentList),
+        kind: p.k,
+        detail: p.d,
+        dur: p.dur || '—',
+        jobId: '#142'
+      };
+
+      handler(event);
+    }, 2000);
+
+    return {
+      unsubscribe: () => {
+        clearInterval(timer);
+      }
+    };
   }
 
   async sendOperatorCommand(targetActorId: string, command: string): Promise<{ success: boolean; response: string }> {

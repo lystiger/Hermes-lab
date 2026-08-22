@@ -11,9 +11,11 @@ import {
   ProjectionItem,
   SettingItem,
   OverviewTelemetry,
-  ActorRef
+  ActorRef,
+  TraceEvent
 } from './types';
-import { resolveActorRef } from './mock/actors';
+import { resolveActorPresentation } from './actors';
+import { useConsoleStore } from '../stores/useConsoleStore';
 
 export function useAgents() {
   const [agents, setAgents] = useState<AgentSummary[]>([]);
@@ -187,6 +189,34 @@ export function useSettings() {
   return { settings, loading };
 }
 
+export function useEventStream() {
+  const { addTraceEvent, setInitialEvents } = useConsoleStore();
+
+  useEffect(() => {
+    let isSubscribed = true;
+
+    // Load initial events from API
+    lysStackApi.getTraceEvents().then((initial) => {
+      if (isSubscribed) {
+        setInitialEvents(initial);
+      }
+    });
+
+    // Subscribe to live stream
+    const sub = lysStackApi.subscribeEvents((evt: TraceEvent) => {
+      if (isSubscribed) {
+        addTraceEvent(evt);
+      }
+    });
+
+    return () => {
+      isSubscribed = false;
+      sub.unsubscribe();
+    };
+  }, [addTraceEvent, setInitialEvents]);
+}
+
 export function useActorPresentation(actorIdentifier: string): ActorRef {
-  return resolveActorRef(actorIdentifier);
+  const { agents } = useAgents();
+  return resolveActorPresentation(actorIdentifier, agents);
 }

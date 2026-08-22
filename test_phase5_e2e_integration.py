@@ -13,15 +13,20 @@ ROOT_DIR = Path(__file__).resolve().parent
 
 class TestPhase5EndToEndIntegration(unittest.TestCase):
     """
-    End-to-End Cross-Process integration test for Phase 5.
+    End-to-End Cross-Process integration test for Phase 5.1.
     Process A: Uvicorn running LysStack Control Plane on a dynamic test port.
     Process B: Managed Hermes Runner executing a multi-phase sprint.
+    Verifies:
+      - Live operator message posted to control plane reaches target agent's effective prompt.
+      - Unrelated agent does not receive the message.
+      - Consumed message transitions from DELIVERED to ACKNOWLEDGED upon execution.
+      - Artifact trust is truthfully validated and persisted.
     """
 
     def setUp(self):
         self.tmp_dir = tempfile.TemporaryDirectory()
         self.tmp_path = Path(self.tmp_dir.name)
-        self.port = 8993
+        self.port = 8995
         self.control_url = f"http://127.0.0.1:{self.port}"
 
         # 1. Start Control Plane (Process A)
@@ -85,9 +90,12 @@ class TestPhase5EndToEndIntegration(unittest.TestCase):
         p2_prompt = self.tmp_path / "prompt_harden.md"
         p2_prompt.write_text("Hardener: Review feature and test.\n", encoding="utf-8")
 
+        job_id = "run_20260822_test_p51"
+        thread_id = f"thread_job_{job_id}"
+
         sprint_spec = {
             "sprint_id": "test-p5",
-            "name": "Phase 5 Multi-Agent Integration Sprint",
+            "name": "Phase 5.1 Multi-Agent Integration Sprint",
             "target_repo": str(target_repo),
             "target_branch": "hermes/test-p5/integration",
             "worktree_root": str(self.tmp_path / "worktrees"),
@@ -126,9 +134,33 @@ class TestPhase5EndToEndIntegration(unittest.TestCase):
         spec_file = self.tmp_path / "test-p5.json"
         spec_file.write_text(json.dumps(sprint_spec, indent=2), encoding="utf-8")
 
-        # 2. Run runner in Process B with simulated worker file changes and handoff files
+        # 2. Pre-send an Operator Message targeted specifically to Claude via Control API (Process A)
+        op_payload = json.dumps({
+            "threadId": thread_id,
+            "to": ["claude"],
+            "kind": "operator",
+            "intent": "operator_note",
+            "text": "Please inspect scheduler mutex contention before modifying state."
+        }).encode("utf-8")
+        req = urllib.request.Request(
+            f"{self.control_url}/messages",
+            data=op_payload,
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        with urllib.request.urlopen(req) as resp:
+            self.assertEqual(resp.status, 201)
+            op_msg_data = json.loads(resp.read().decode("utf-8"))
+            op_msg_id = op_msg_data["id"]
+
+        # Verify message is currently DELIVERED in Claude's inbox
+        with urllib.request.urlopen(f"{self.control_url}/agents/claude/inbox?state=DELIVERED") as resp:
+            inbox = json.loads(resp.read().decode("utf-8"))
+            self.assertTrue(any(e["messageId"] == op_msg_id for e in inbox))
+
+        # 3. Run runner in Process B
         runner_script = ROOT_DIR / "runner" / "run-hermes-sprint.py"
-        job_id = "run_20260822_test_p5"
+        captured_prompts_file = self.tmp_path / "captured_prompts.json"
 
         test_driver_code = f"""
 import sys
@@ -146,15 +178,30 @@ runner = module.HermesSprintRunner(
     skip_agent_exec=False
 )
 
-def simulated_agent(phase, wt_dir):
-    # Simulate modified code
-    (wt_dir / f"file_{{phase['agent']}}.py").write_text("# code from " + phase["agent"] + "\\n", encoding="utf-8")
-    # Simulate generated handoff
+captured_prompts = {{}}
+original_execute_agent = runner.execute_agent
+
+def simulated_agent(phase, wt_dir, mailbox_messages=None):
+    agent_name = phase["agent"]
+    prompt_file = runner.resolve_prompt_file(phase)
+    effective_prompt = runner.build_effective_prompt(
+        prompt_file.read_text(encoding="utf-8").strip(),
+        current_agent=agent_name,
+        mailbox_messages=mailbox_messages,
+    )
+    captured_prompts[agent_name] = effective_prompt
+
+    # Simulate modified code and handoff file
+    (wt_dir / f"file_{{agent_name}}.py").write_text("# code from " + agent_name + "\\n", encoding="utf-8")
     (wt_dir / phase["expected_handoff"]).write_text("# " + phase["name"] + " Handoff Evidence\\nSummary of changes.\\n", encoding="utf-8")
     return SimpleNamespace(runtime_metadata={{}})
 
 runner.execute_agent = simulated_agent
 success = runner.execute()
+
+with open("{captured_prompts_file}", "w", encoding="utf-8") as f:
+    json.dump(captured_prompts, f, indent=2)
+
 sys.exit(0 if success else 1)
 """
         driver_file = self.tmp_path / "driver.py"
@@ -174,51 +221,56 @@ sys.exit(0 if success else 1)
 
         self.assertEqual(run_proc.returncode, 0, f"Runner failed with output:\n{run_proc.stdout}\n{run_proc.stderr}")
 
-        # 3. Verify Thread & Messages on Process A via HTTP API
-        # A. GET /threads?jobId=...
-        req = urllib.request.urlopen(f"{self.control_url}/threads?jobId={job_id}")
-        threads = json.loads(req.read().decode("utf-8"))
-        self.assertEqual(len(threads), 1)
-        thread = threads[0]
-        thread_id = thread["id"]
-        self.assertEqual(thread["jobId"], job_id)
+        # 4. Verify Effective Prompts
+        self.assertTrue(captured_prompts_file.exists())
+        with open(captured_prompts_file, "r", encoding="utf-8") as f:
+            prompts = json.load(f)
 
-        # B. GET /threads/{thread_id}/messages
-        req = urllib.request.urlopen(f"{self.control_url}/threads/{thread_id}/messages")
-        messages = json.loads(req.read().decode("utf-8"))
-        self.assertTrue(len(messages) >= 3, f"Expected at least 3 messages (2 handoffs + 1 verify), got {len(messages)}")
+        # Gemini (Builder) prompt MUST NOT have Claude's operator message
+        gemini_prompt = prompts.get("gemini", "")
+        self.assertNotIn("Please inspect scheduler mutex contention", gemini_prompt)
 
-        # Check Message 1: Gemini -> Claude (BUILD Handoff)
-        m1 = messages[0]
-        self.assertEqual(m1["from"]["id"], "gemini")
-        self.assertEqual(m1["to"][0]["id"], "claude")
-        self.assertEqual(m1["kind"], "handoff")
-        self.assertEqual(m1["intent"], "review_request")
-        self.assertTrue(any(a["type"] == "git_commit" for a in m1["artifactRefs"]))
-        self.assertTrue(any(a["type"] == "handoff" for a in m1["artifactRefs"]))
+        # Claude (Hardener) prompt MUST have Gemini's handoff AND the Operator message
+        claude_prompt = prompts.get("claude", "")
+        self.assertIn("--- LYSSTACK OPERATIONAL THREAD ---", claude_prompt)
+        self.assertIn("[from: gemini]", claude_prompt)
+        self.assertIn("--- LYSSTACK OPERATIONAL MESSAGES FOR CLAUDE ---", claude_prompt)
+        self.assertIn("[from: operator]", claude_prompt)
+        self.assertIn("intent: operator_note", claude_prompt)
+        self.assertIn("Please inspect scheduler mutex contention before modifying state.", claude_prompt)
 
-        # Check Message 2: Claude -> Hermes (HARDEN Handoff)
-        m2 = messages[1]
-        self.assertEqual(m2["from"]["id"], "claude")
-        self.assertEqual(m2["kind"], "handoff")
-        self.assertEqual(m2["intent"], "verification_request")
+        # 5. Verify Operator Message transitioned to ACKNOWLEDGED in Control Plane (Process A)
+        with urllib.request.urlopen(f"{self.control_url}/agents/claude/inbox?state=ACKNOWLEDGED") as resp:
+            inbox_acked = json.loads(resp.read().decode("utf-8"))
+            acked_entry = next((e for e in inbox_acked if e["messageId"] == op_msg_id), None)
+            self.assertIsNotNone(acked_entry, "Operator message was not marked ACKNOWLEDGED in Claude's mailbox")
+            self.assertEqual(acked_entry["state"], "ACKNOWLEDGED")
 
-        # Check Message 3: Verification Result
-        m3 = messages[2]
-        self.assertEqual(m3["kind"], "verification_result")
-        self.assertEqual(m3["intent"], "verification_result")
-        self.assertIn("Verification passed", m3["text"])
-
-        # C. GET /agents/claude/inbox
-        req = urllib.request.urlopen(f"{self.control_url}/agents/claude/inbox")
-        inbox = json.loads(req.read().decode("utf-8"))
-        self.assertTrue(any(e["messageId"] == m1["id"] for e in inbox))
-
-        # D. Verify Disk Persistence
+        # 6. Verify Artifacts & Truthful Trust
         runs_dir = self.tmp_path / "runs"
         run_folder = next(runs_dir.glob("*_test-p5"))
-        self.assertTrue((run_folder / "messages.jsonl").exists())
-        self.assertTrue((run_folder / "artifacts.json").exists())
+        artifacts_path = run_folder / "artifacts.json"
+        self.assertTrue(artifacts_path.exists())
+
+        with open(artifacts_path, "r", encoding="utf-8") as f:
+            artifacts = json.load(f)
+
+        commit_arts = [a for a in artifacts if a.get("type") == "git_commit"]
+        handoff_arts = [a for a in artifacts if a.get("type") == "handoff"]
+
+        self.assertTrue(len(commit_arts) > 0)
+        self.assertTrue(len(handoff_arts) > 0)
+
+        # Git commits have status "not_applicable" and kind "git_reference"
+        for ca in commit_arts:
+            self.assertEqual(ca["trust"]["status"], "not_applicable")
+            self.assertEqual(ca["trust"]["kind"], "git_reference")
+
+        # Filesystem handoff artifacts have status "verified" and kind "path_containment"
+        for ha in handoff_arts:
+            self.assertEqual(ha["trust"]["status"], "verified")
+            self.assertEqual(ha["trust"]["kind"], "path_containment")
+            self.assertEqual(ha["trust"]["scope"], "hermes_run_root")
 
 
 if __name__ == "__main__":

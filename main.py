@@ -421,12 +421,36 @@ async def get_agent_inbox(
     agent_id: str,
     state: Optional[str] = Query(default=None),
     limit: int = Query(default=50, ge=1, le=100),
+    job_id: Optional[str] = Query(default=None, alias="jobId"),
+    thread_id: Optional[str] = Query(default=None, alias="threadId"),
+    chronological: bool = Query(default=False),
 ):
     """
-    Returns mailbox entries targeted to the given agent.
+    Returns mailbox entries targeted to the given agent with optional job/thread scoping.
     """
-    entries = message_router.list_inbox(recipient_id=agent_id, state=state, limit=limit)
+    entries = message_router.list_inbox(
+        recipient_id=agent_id,
+        state=state,
+        limit=limit,
+        job_id=job_id,
+        thread_id=thread_id,
+        chronological=chronological,
+    )
     return [e.to_dict() for e in entries]
+
+
+@app.post("/agents/{agent_id}/inbox/{message_id}/ack")
+async def acknowledge_inbox_message(agent_id: str, message_id: str):
+    """
+    Acknowledges consumption of a mailbox message by the intended agent runtime.
+    """
+    success = message_router.acknowledge(message_id=message_id, recipient_id=agent_id)
+    if not success:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Message {message_id} not found in {agent_id}'s inbox",
+        )
+    return {"acknowledged": True, "messageId": message_id, "recipientId": agent_id}
 
 
 # -------------------------------------------------------------

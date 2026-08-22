@@ -5,6 +5,7 @@ import sys
 from pathlib import Path
 import urllib.error
 import urllib.request
+import urllib.parse
 from typing import Any, Dict, List, Optional, Union
 
 ROOT_DIR = Path(__file__).resolve().parent.parent.parent
@@ -29,6 +30,10 @@ class RuntimeEventPublisher:
         url = control_url or os.environ.get("LYSSTACK_CONTROL_URL")
         self.control_url = url.rstrip("/") if url else None
         self.timeout = timeout
+
+    @property
+    def enabled(self) -> bool:
+        return bool(self.control_url)
 
     def _post_json(self, endpoint_path: str, payload: Dict[str, Any]) -> bool:
         if not self.control_url:
@@ -141,5 +146,58 @@ class RuntimeEventPublisher:
     ) -> bool:
         return self._post_json("/internal/artifacts", artifact)
 
+
+    def fetch_agent_inbox(
+        self,
+        agent_id: str,
+        state: Optional[str] = "DELIVERED",
+        job_id: Optional[str] = None,
+        thread_id: Optional[str] = None,
+        limit: int = 50,
+    ) -> List[Dict[str, Any]]:
+        if not self.enabled:
+            return []
+        query_params = []
+        if state:
+            query_params.append(f"state={urllib.parse.quote(state)}")
+        if job_id:
+            query_params.append(f"jobId={urllib.parse.quote(job_id)}")
+        if thread_id:
+            query_params.append(f"threadId={urllib.parse.quote(thread_id)}")
+        query_params.append(f"limit={limit}")
+        query_params.append("chronological=true")
+
+        query_str = "&".join(query_params)
+        url = f"{self.control_url}/agents/{urllib.parse.quote(agent_id)}/inbox?{query_str}"
+        try:
+            req = urllib.request.Request(url, headers={"User-Agent": "HermesRunner/1.0"})
+            with urllib.request.urlopen(req, timeout=self.timeout) as resp:
+                if resp.status == 200:
+                    data = json.loads(resp.read().decode("utf-8"))
+                    return data if isinstance(data, list) else []
+        except Exception as e:
+            logger.debug(f"Failed to fetch inbox for agent {agent_id}: {e}")
+        return []
+
+    def acknowledge_message(
+        self,
+        agent_id: str,
+        message_id: str,
+    ) -> bool:
+        if not self.enabled:
+            return False
+        url = f"{self.control_url}/agents/{urllib.parse.quote(agent_id)}/inbox/{urllib.parse.quote(message_id)}/ack"
+        try:
+            req = urllib.request.Request(
+                url,
+                data=b"{}",
+                headers={"Content-Type": "application/json", "User-Agent": "HermesRunner/1.0"},
+                method="POST",
+            )
+            with urllib.request.urlopen(req, timeout=self.timeout) as resp:
+                return resp.status == 200
+        except Exception as e:
+            logger.debug(f"Failed to acknowledge message {message_id} for agent {agent_id}: {e}")
+            return False
 
 default_publisher = RuntimeEventPublisher()

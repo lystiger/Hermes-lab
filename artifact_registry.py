@@ -22,6 +22,26 @@ VALID_ARTIFACT_TYPES: Set[str] = {
 
 
 @dataclass
+class ArtifactTrust:
+    status: str  # "verified" | "unverified" | "not_applicable"
+    kind: str    # "path_containment" | "git_reference" | "none"
+    scope: str   # "hermes_run_root" | "target_repository" | "external" | "unknown"
+    detail: Optional[str] = None
+
+    def to_dict(self) -> Dict[str, Any]:
+        return asdict(self)
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> "ArtifactTrust":
+        return cls(
+            status=data.get("status", "unverified"),
+            kind=data.get("kind", "none"),
+            scope=data.get("scope", "unknown"),
+            detail=data.get("detail"),
+        )
+
+
+@dataclass
 class ArtifactRef:
     id: str
     type: str  # One of VALID_ARTIFACT_TYPES or extensible string
@@ -29,14 +49,20 @@ class ArtifactRef:
     ref: str
     jobId: Optional[str] = None
     phaseId: Optional[str] = None
+    trust: Optional[ArtifactTrust] = None
     metadata: Dict[str, Any] = field(default_factory=dict)
     createdAt: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
 
     def to_dict(self) -> Dict[str, Any]:
-        return asdict(self)
+        data = asdict(self)
+        if self.trust:
+            data["trust"] = self.trust.to_dict()
+        return data
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "ArtifactRef":
+        trust_data = data.get("trust")
+        trust_obj = ArtifactTrust.from_dict(trust_data) if isinstance(trust_data, dict) else trust_data
         return cls(
             id=data.get("id", ""),
             type=data.get("type", "generic"),
@@ -44,6 +70,7 @@ class ArtifactRef:
             ref=data.get("ref", ""),
             jobId=data.get("jobId"),
             phaseId=data.get("phaseId"),
+            trust=trust_obj,
             metadata=data.get("metadata") or {},
             createdAt=data.get("createdAt") or datetime.now(timezone.utc).isoformat(),
         )
@@ -58,7 +85,7 @@ class ArtifactRegistry:
     def __init__(self, allowed_roots: Optional[List[Path]] = None):
         self._artifacts: Dict[str, ArtifactRef] = {}
         self._job_index: Dict[str, List[str]] = {}
-        self.allowed_roots = allowed_roots or []
+        self.allowed_roots = [r.resolve() for r in (allowed_roots or [])]
 
     def add_allowed_root(self, root: Path) -> None:
         resolved = root.resolve()
@@ -75,9 +102,81 @@ class ArtifactRegistry:
         except Exception:
             return False
 
+    def validate_artifact_trust(self, artifact: ArtifactRef) -> ArtifactTrust:
+        """Determines truthful trust status for an artifact reference without client-side speculation."""
+        art_type = artifact.type.lower() if artifact.type else "generic"
+
+        # Non-filesystem git commit / diff artifacts
+        if art_type in {"git_commit", "git_diff"}:
+            return ArtifactTrust(
+                status="not_applicable",
+                kind="git_reference",
+                scope="target_repository",
+                detail="Git commit reference",
+            )
+
+        # Filesystem-backed artifacts
+        if art_type in {"handoff", "run_summary", "log", "stdout", "stderr", "file", "test_report", "verification_report"}:
+            try:
+                # If ref is relative (e.g. handoffs/01_builder.md) and not absolute, check if it contains .. escape
+                if ".." in Path(artifact.ref).parts:
+                    return ArtifactTrust(
+                        status="unverified",
+                        kind="path_containment",
+                        scope="external",
+                        detail="Path escapes allowed roots via traversal",
+                    )
+
+                target_path = Path(artifact.ref)
+                # If absolute, verify against allowed roots
+                if target_path.is_absolute():
+                    resolved = target_path.resolve()
+                    matched_root = next((r for r in self.allowed_roots if resolved == r or r in resolved.parents), None)
+                    if matched_root:
+                        scope = "hermes_run_root" if "run" in matched_root.name.lower() or "hermes-runs" in str(matched_root).lower() else "target_repository"
+                        detail_desc = "Contained within Hermes run root" if scope == "hermes_run_root" else "Contained within target repository"
+                        return ArtifactTrust(
+                            status="verified",
+                            kind="path_containment",
+                            scope=scope,
+                            detail=detail_desc,
+                        )
+                    else:
+                        return ArtifactTrust(
+                            status="unverified",
+                            kind="path_containment",
+                            scope="external",
+                            detail="Path escapes allowed Hermes roots",
+                        )
+                else:
+                    # Relative path without escape
+                    return ArtifactTrust(
+                        status="verified",
+                        kind="path_containment",
+                        scope="hermes_run_root",
+                        detail="Contained within Hermes run root",
+                    )
+            except Exception as e:
+                return ArtifactTrust(
+                    status="unverified",
+                    kind="path_containment",
+                    scope="external",
+                    detail=f"Verification failed: {e}",
+                )
+
+        return ArtifactTrust(
+            status="unverified",
+            kind="none",
+            scope="unknown",
+            detail="Verification unavailable",
+        )
+
     def register(self, artifact: ArtifactRef) -> ArtifactRef:
         if not artifact.type:
             artifact.type = "generic"
+
+        if artifact.trust is None:
+            artifact.trust = self.validate_artifact_trust(artifact)
 
         self._artifacts[artifact.id] = artifact
         if artifact.jobId:

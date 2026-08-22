@@ -377,3 +377,220 @@ class TestRunnerMessagingIntegration(unittest.TestCase):
             msg2 = runner.local_messages[1]
             self.assertEqual(msg2["from"]["id"], "claude")
             self.assertEqual(msg2["intent"], "verification_request")
+
+
+class TestPhase51MailboxAndArtifactTrust(unittest.TestCase):
+    def setUp(self):
+        self.client = TestClient(app)
+        self.store = MessageStore()
+        self.registry = ArtifactRegistry()
+        self.bus = RuntimeEventBus()
+        self.router = MessageRouter(store=self.store, registry=self.registry, bus=self.bus)
+
+    def test_truthful_artifact_trust_validation(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            allowed_root = Path(tmp_dir) / "hermes-runs"
+            allowed_root.mkdir()
+            safe_file = allowed_root / "HANDOFF_BUILD.md"
+            safe_file.write_text("# Safe handoff", encoding="utf-8")
+
+            outside_dir = Path(tmp_dir) / "external"
+            outside_dir.mkdir()
+            outside_file = outside_dir / "secret.key"
+            outside_file.write_text("secret", encoding="utf-8")
+
+            registry = ArtifactRegistry(allowed_roots=[allowed_root])
+
+            # 1. Validated filesystem artifact contained in run root
+            art_safe = ArtifactRef(
+                id="art_safe",
+                type="handoff",
+                label="Handoff File",
+                ref=str(safe_file),
+            )
+            registry.register(art_safe)
+            self.assertEqual(art_safe.trust.status, "verified")
+            self.assertEqual(art_safe.trust.kind, "path_containment")
+            self.assertEqual(art_safe.trust.scope, "hermes_run_root")
+            self.assertIn("Hermes run root", art_safe.trust.detail)
+
+            # 2. Path traversal escape -> unverified
+            art_escape = ArtifactRef(
+                id="art_escape",
+                type="log",
+                label="Escape Log",
+                ref=str(allowed_root / ".." / "external" / "secret.key"),
+            )
+            registry.register(art_escape)
+            self.assertEqual(art_escape.trust.status, "unverified")
+            self.assertEqual(art_escape.trust.kind, "path_containment")
+
+            # 3. Relative path with .. traversal -> unverified
+            art_rel_escape = ArtifactRef(
+                id="art_rel_escape",
+                type="file",
+                label="Relative Traversal",
+                ref="../../etc/passwd",
+            )
+            registry.register(art_rel_escape)
+            self.assertEqual(art_rel_escape.trust.status, "unverified")
+
+            # 4. Git commit reference -> containment N/A, git_reference
+            art_commit = ArtifactRef(
+                id="art_commit",
+                type="git_commit",
+                label="Commit SHA",
+                ref="8a21fc9876543210",
+            )
+            registry.register(art_commit)
+            self.assertEqual(art_commit.trust.status, "not_applicable")
+            self.assertEqual(art_commit.trust.kind, "git_reference")
+            self.assertEqual(art_commit.trust.detail, "Git commit reference")
+
+    def test_operator_message_injected_into_target_agent_context(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            tmp_root = Path(tmp_dir)
+            spec_path = Path(__file__).resolve().parent.parent / "sprints" / "lab-s04.json"
+            runner = HermesSprintRunner(spec_path=spec_path, skip_agent_exec=True)
+            runner.job_id = "run_job_xyz"
+            runner.thread_id = "thread_job_run_job_xyz"
+            runner.run_dir = tmp_root / "runs" / "test_run"
+            runner.run_dir.mkdir(parents=True, exist_ok=True)
+            runner.messages_file = runner.run_dir / "messages.jsonl"
+            runner.artifacts_file = runner.run_dir / "artifacts.json"
+            runner.worktree_root = tmp_root / "worktrees"
+
+            # Pre-seed an operator message addressed to claude for this job
+            op_msg = {
+                "id": "msg_op_001",
+                "threadId": runner.thread_id,
+                "from": {"id": "operator", "kind": "operator", "displayName": "Operator"},
+                "to": [{"id": "claude", "kind": "agent", "displayName": "Claude"}],
+                "kind": "operator",
+                "intent": "operator_note",
+                "text": "Please inspect scheduler mutex contention before modifying state.",
+                "jobId": "run_job_xyz",
+                "createdAt": "2026-08-22T10:00:00Z",
+            }
+            runner.local_messages.append(op_msg)
+
+            # 1. Claude builds effective prompt -> message MUST be present
+            claude_prompt = runner.build_effective_prompt("Base prompt for Claude.", current_agent="claude")
+            self.assertIn("--- LYSSTACK OPERATIONAL MESSAGES FOR CLAUDE ---", claude_prompt)
+            self.assertIn("[from: operator]", claude_prompt)
+            self.assertIn("kind: operator", claude_prompt)
+            self.assertIn("intent: operator_note", claude_prompt)
+            self.assertIn("Please inspect scheduler mutex contention", claude_prompt)
+            self.assertIn("--- END OPERATIONAL MESSAGES ---", claude_prompt)
+
+            # 2. Another agent (e.g. codex) builds prompt -> message MUST NOT be injected
+            codex_prompt = runner.build_effective_prompt("Base prompt for Codex.", current_agent="codex")
+            self.assertNotIn("--- LYSSTACK OPERATIONAL MESSAGES FOR CODEX ---", codex_prompt)
+            self.assertNotIn("Please inspect scheduler mutex contention", codex_prompt)
+
+    def test_wrong_job_message_is_excluded(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            tmp_root = Path(tmp_dir)
+            spec_path = Path(__file__).resolve().parent.parent / "sprints" / "lab-s04.json"
+            runner = HermesSprintRunner(spec_path=spec_path, skip_agent_exec=True)
+            runner.job_id = "job_current"
+            runner.thread_id = "thread_job_current"
+
+            # Message belongs to different job
+            wrong_job_msg = {
+                "id": "msg_other_001",
+                "threadId": "thread_job_other",
+                "from": {"id": "operator", "kind": "operator", "displayName": "Operator"},
+                "to": [{"id": "claude", "kind": "agent", "displayName": "Claude"}],
+                "kind": "operator",
+                "text": "Instruction for completely different job",
+                "jobId": "job_other",
+                "createdAt": "2026-08-22T10:00:00Z",
+            }
+            runner.local_messages.append(wrong_job_msg)
+
+            claude_prompt = runner.build_effective_prompt("Base prompt", current_agent="claude")
+            self.assertNotIn("Instruction for completely different job", claude_prompt)
+
+    def test_mailbox_chronological_ordering(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            tmp_root = Path(tmp_dir)
+            spec_path = Path(__file__).resolve().parent.parent / "sprints" / "lab-s04.json"
+            runner = HermesSprintRunner(spec_path=spec_path, skip_agent_exec=True)
+            runner.job_id = "job_order"
+            runner.thread_id = "thread_job_order"
+
+            msg1 = {
+                "id": "msg_001",
+                "threadId": runner.thread_id,
+                "from": {"id": "operator", "kind": "operator"},
+                "to": [{"id": "claude"}],
+                "kind": "operator",
+                "text": "FIRST instruction",
+                "jobId": "job_order",
+                "createdAt": "2026-08-22T10:00:01Z",
+            }
+            msg2 = {
+                "id": "msg_002",
+                "threadId": runner.thread_id,
+                "from": {"id": "operator", "kind": "operator"},
+                "to": [{"id": "claude"}],
+                "kind": "operator",
+                "text": "SECOND guidance",
+                "jobId": "job_order",
+                "createdAt": "2026-08-22T10:00:02Z",
+            }
+            msg3 = {
+                "id": "msg_003",
+                "threadId": runner.thread_id,
+                "from": {"id": "operator", "kind": "operator"},
+                "to": [{"id": "claude"}],
+                "kind": "operator",
+                "text": "THIRD guidance",
+                "jobId": "job_order",
+                "createdAt": "2026-08-22T10:00:03Z",
+            }
+            # Insert in scrambled order
+            runner.local_messages.extend([msg3, msg1, msg2])
+
+            claude_prompt = runner.build_effective_prompt("Base prompt", current_agent="claude")
+            pos1 = claude_prompt.find("FIRST instruction")
+            pos2 = claude_prompt.find("SECOND guidance")
+            pos3 = claude_prompt.find("THIRD guidance")
+
+            self.assertTrue(pos1 != -1 and pos2 != -1 and pos3 != -1)
+            self.assertTrue(pos1 < pos2 < pos3, "Messages were not formatted in chronological order")
+
+    def test_acknowledgement_api_and_mailbox_state(self):
+        # 1. Post operator message via control API
+        msg_resp = self.client.post(
+            "/messages",
+            json={
+                "threadId": "thread_ack_test",
+                "to": ["claude"],
+                "kind": "operator",
+                "text": "Please check error handling",
+            },
+        )
+        self.assertEqual(msg_resp.status_code, 201)
+        msg_data = msg_resp.json()
+        msg_id = msg_data["id"]
+
+        # 2. Verify message in Claude inbox with DELIVERED state
+        inbox_resp = self.client.get("/agents/claude/inbox?state=DELIVERED")
+        self.assertEqual(inbox_resp.status_code, 200)
+        inbox = inbox_resp.json()
+        entry = next((e for e in inbox if e["messageId"] == msg_id), None)
+        self.assertIsNotNone(entry)
+        self.assertEqual(entry["state"], "DELIVERED")
+
+        # 3. Acknowledge message via POST /agents/claude/inbox/{msg_id}/ack
+        ack_resp = self.client.post(f"/agents/claude/inbox/{msg_id}/ack")
+        self.assertEqual(ack_resp.status_code, 200)
+        self.assertTrue(ack_resp.json()["acknowledged"])
+
+        # 4. Verify message in ACKNOWLEDGED state
+        acked_inbox = self.client.get("/agents/claude/inbox?state=ACKNOWLEDGED").json()
+        acked_entry = next((e for e in acked_inbox if e["messageId"] == msg_id), None)
+        self.assertIsNotNone(acked_entry)
+        self.assertEqual(acked_entry["state"], "ACKNOWLEDGED")

@@ -34,6 +34,19 @@ from agents.registry import default_registry
 from backends.registry import default_backend_registry
 from control_plane.event_publisher import default_publisher
 
+ROOT_DIR = SCRIPT_DIR.parent
+if str(ROOT_DIR) not in sys.path:
+    sys.path.insert(0, str(ROOT_DIR))
+
+try:
+    from artifact_registry import artifact_registry, ArtifactRef, ArtifactTrust
+    from normalization import normalize_agent_id
+except ImportError:
+    artifact_registry = None
+    ArtifactRef = None
+    ArtifactTrust = None
+    normalize_agent_id = lambda x: str(x).lower()
+
 
 class HermesSprintRunner:
     PHASE_ROLES = {"builder", "hardener", "verifier"}
@@ -105,7 +118,8 @@ class HermesSprintRunner:
         self.local_messages = []
         self.local_artifacts = []
         self.messages_file = self.run_dir / "messages.jsonl"
-        self.artifacts_file = self.run_dir / "artifacts.json" 
+        self.artifacts_file = self.run_dir / "artifacts.json"
+        self._consumed_message_ids = set()
         
         self.logger = self._setup_logging()
         self.run_summary = {
@@ -256,6 +270,21 @@ class HermesSprintRunner:
         raise SprintRunnerError("FAILED_INVALID_CONTEXT_SPEC", message)
 
     def _record_artifact(self, artifact_dict):
+        if "trust" not in artifact_dict and artifact_registry and ArtifactRef:
+            try:
+                if hasattr(self, "canonical_repo") and self.canonical_repo:
+                    artifact_registry.add_allowed_root(self.canonical_repo)
+                if hasattr(self, "runs_root") and self.runs_root:
+                    artifact_registry.add_allowed_root(self.runs_root)
+                if hasattr(self, "worktree_root") and self.worktree_root:
+                    artifact_registry.add_allowed_root(self.worktree_root)
+
+                ref_obj = ArtifactRef.from_dict(artifact_dict)
+                trust_obj = artifact_registry.validate_artifact_trust(ref_obj)
+                artifact_dict["trust"] = trust_obj.to_dict()
+            except Exception as e:
+                self.logger.debug("Failed to evaluate artifact trust: %s", e)
+
         self.local_artifacts.append(artifact_dict)
         try:
             self.artifacts_file.parent.mkdir(parents=True, exist_ok=True)
@@ -325,9 +354,27 @@ class HermesSprintRunner:
         if not self.local_messages:
             return ""
 
-        sections = ["--- LYSSTACK OPERATIONAL THREAD ---"]
+        valid_thread_msgs = []
         for msg in self.local_messages:
-            from_id = msg.get("from", {}).get("id", "unknown")
+            job_match = (
+                (msg.get("jobId") == self.job_id)
+                or (msg.get("threadId") == self.thread_id)
+                or (not msg.get("jobId") and not msg.get("threadId"))
+            )
+            if not job_match:
+                continue
+            # Thread-level handoffs and results belong to general thread history
+            if msg.get("kind") in {"handoff", "verification_result", "phase_failure", "status"}:
+                valid_thread_msgs.append(msg)
+
+        if not valid_thread_msgs:
+            return ""
+
+        valid_thread_msgs.sort(key=lambda m: m.get("createdAt") or m.get("id") or "")
+
+        sections = ["--- LYSSTACK OPERATIONAL THREAD ---"]
+        for msg in valid_thread_msgs:
+            from_id = msg.get("from", {}).get("id", "unknown") if isinstance(msg.get("from"), dict) else str(msg.get("from"))
             kind = msg.get("kind", "status")
             intent = msg.get("intent")
             text = msg.get("text", "")
@@ -348,13 +395,95 @@ class HermesSprintRunner:
         sections.append("--- END THREAD ---")
         return "\n\n".join(sections)
 
-    def build_effective_prompt(self, base_prompt, current_agent=None):
+    def fetch_pending_mailbox_messages(self, current_agent):
+        norm_agent = normalize_agent_id(current_agent) if normalize_agent_id else str(current_agent).lower()
+        consumed = getattr(self, "_consumed_message_ids", set())
+        messages_by_id = {}
+
+        # 1. Fetch remote messages from control plane inbox
+        if default_publisher and default_publisher.enabled:
+            remote_entries = default_publisher.fetch_agent_inbox(
+                agent_id=current_agent,
+                state="DELIVERED",
+                job_id=self.job_id,
+                thread_id=self.thread_id,
+            )
+            for entry in remote_entries:
+                msg = entry.get("message")
+                if msg and isinstance(msg, dict):
+                    msg_id = msg.get("id")
+                    to_list = msg.get("to", [])
+                    recipient_matches = any(
+                        (t.get("id") if isinstance(t, dict) else str(t)).lower() in {norm_agent, str(current_agent).lower()}
+                        for t in to_list
+                    )
+                    job_matches = (
+                        (msg.get("jobId") == self.job_id)
+                        or (msg.get("threadId") == self.thread_id)
+                        or (not msg.get("jobId") and not msg.get("threadId"))
+                    )
+                    if msg_id and msg_id not in consumed and recipient_matches and job_matches:
+                        messages_by_id[msg_id] = msg
+
+        # 2. Check local messages recorded in this runner
+        for msg in self.local_messages:
+            msg_id = msg.get("id")
+            if not msg_id or msg_id in consumed:
+                continue
+            to_list = msg.get("to", [])
+            recipient_matches = any(
+                (t.get("id") if isinstance(t, dict) else str(t)).lower() in {norm_agent, str(current_agent).lower()}
+                for t in to_list
+            )
+            job_matches = (msg.get("jobId") == self.job_id) or (msg.get("threadId") == self.thread_id)
+            if recipient_matches and job_matches:
+                messages_by_id[msg_id] = msg
+
+        result = list(messages_by_id.values())
+        result.sort(key=lambda m: m.get("createdAt") or m.get("id") or "")
+        return result
+
+    def build_mailbox_messages_section(self, current_agent, mailbox_messages):
+        if not mailbox_messages:
+            return ""
+
+        sections = [f"--- LYSSTACK OPERATIONAL MESSAGES FOR {str(current_agent).upper()} ---"]
+        for msg in mailbox_messages:
+            from_obj = msg.get("from", {})
+            from_id = from_obj.get("id", "unknown") if isinstance(from_obj, dict) else str(from_obj)
+            kind = msg.get("kind", "operator")
+            intent = msg.get("intent")
+            text = msg.get("text", "")
+            artifacts = msg.get("artifactRefs", [])
+
+            header = f"[from: {from_id}]\nkind: {kind}"
+            if intent:
+                header += f"\nintent: {intent}"
+            body = f"{header}\n\n{text}"
+            if artifacts:
+                art_lines = ["\nArtifacts:"]
+                for art in artifacts:
+                    art_lines.append(f"- {art.get('type', 'generic')}: {art.get('ref', '')} ({art.get('label', '')})")
+                body += "\n".join(art_lines)
+
+            sections.append(body)
+
+        sections.append("--- END OPERATIONAL MESSAGES ---")
+        return "\n\n".join(sections)
+
+    def build_effective_prompt(self, base_prompt, current_agent=None, mailbox_messages=None):
         parts = [base_prompt]
         if self.context_bundle:
             parts.append(self.context_bundle)
         thread_section = self.build_operational_thread_section(current_agent)
         if thread_section:
             parts.append(thread_section)
+        if current_agent:
+            if mailbox_messages is None:
+                mailbox_messages = self.fetch_pending_mailbox_messages(current_agent)
+            mb_section = self.build_mailbox_messages_section(current_agent, mailbox_messages)
+            if mb_section:
+                parts.append(mb_section)
         return "\n\n".join(parts)
 
     def _load_verification_spec(self):
@@ -735,7 +864,7 @@ class HermesSprintRunner:
             )
         return self._backend_cache[backend_name]
 
-    def execute_agent(self, phase, wt_dir):
+    def execute_agent(self, phase, wt_dir, mailbox_messages=None):
         agent_name = phase["agent"]
         adapter = self.agent_registry.get(agent_name)
         backend = self._get_backend(self.resolve_backend_name(phase))
@@ -747,6 +876,7 @@ class HermesSprintRunner:
             prompt=self.build_effective_prompt(
                 prompt_file.read_text(encoding="utf-8").strip(),
                 current_agent=agent_name,
+                mailbox_messages=mailbox_messages,
             ),
             options=phase.get("cmd_options", {}),
             stdout_file=self.run_dir / f"{phase['name']}_{agent_name}_stdout.log",
@@ -905,13 +1035,20 @@ class HermesSprintRunner:
                 target_branch = self.spec.get("target_branch", "s02/integration")
                 self.sync_phase_worktree(wt_dir, target_branch)
 
+            # Fetch pending mailbox messages specifically targeted to this agent for this job
+            pending_mailbox_messages = self.fetch_pending_mailbox_messages(agent)
+            consumed_ids = [m["id"] for m in pending_mailbox_messages if "id" in m]
+
             handoff_path, original_handoff = self._prepare_handoff_path(
                 wt_dir,
                 expected_handoff,
             )
             try:
                 if not self.skip_agent_exec and not self.dry_run:
-                    execution_result = self.execute_agent(phase, wt_dir)
+                    try:
+                        execution_result = self.execute_agent(phase, wt_dir, mailbox_messages=pending_mailbox_messages)
+                    except TypeError:
+                        execution_result = self.execute_agent(phase, wt_dir)
                 else:
                     execution_result = None
                     self.logger.info(f"Skipping agent execution CLI (skip_agent_exec={self.skip_agent_exec}, dry_run={self.dry_run})")
@@ -923,6 +1060,14 @@ class HermesSprintRunner:
                     wt_dir,
                     expected_handoff,
                 )
+
+                # Successfully executed agent -> acknowledge consumed mailbox messages
+                for msg_id in consumed_ids:
+                    if default_publisher and default_publisher.enabled:
+                        default_publisher.acknowledge_message(agent, msg_id)
+                    self._consumed_message_ids.add(msg_id)
+                if consumed_ids:
+                    self.logger.info("Acknowledged %s mailbox message(s) for agent %s", len(consumed_ids), agent)
             finally:
                 self._restore_handoff_path(handoff_path, original_handoff)
 

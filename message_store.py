@@ -297,29 +297,55 @@ class MessageStore:
         recipient_id: str,
         state: Optional[str] = None,
         limit: int = 50,
+        job_id: Optional[str] = None,
+        thread_id: Optional[str] = None,
+        chronological: bool = False,
     ) -> List[MailboxEntryDTO]:
         norm_id = normalize_agent_id(recipient_id)
         with self._lock:
-            entries = list(self._inboxes.get(norm_id, []))
+            seen_ids = set()
+            entries = []
+            for e in self._inboxes.get(norm_id, []):
+                if e.messageId not in seen_ids:
+                    seen_ids.add(e.messageId)
+                    entries.append(e)
             if norm_id != recipient_id:
-                entries.extend(self._inboxes.get(recipient_id, []))
+                for e in self._inboxes.get(recipient_id, []):
+                    if e.messageId not in seen_ids:
+                        seen_ids.add(e.messageId)
+                        entries.append(e)
 
         if state:
             entries = [e for e in entries if e.state.upper() == state.upper()]
 
-        entries.sort(key=lambda e: e.receivedAt, reverse=True)
+        if job_id:
+            entries = [
+                e for e in entries
+                if e.message and (e.message.jobId == job_id or (e.message.threadId and job_id in e.message.threadId))
+            ]
+
+        if thread_id:
+            entries = [e for e in entries if e.message and e.message.threadId == thread_id]
+
+        if chronological:
+            entries.sort(key=lambda e: e.receivedAt or "")
+        else:
+            entries.sort(key=lambda e: e.receivedAt or "", reverse=True)
+
         return entries[:limit]
 
     def acknowledge_message(self, message_id: str, recipient_id: str) -> bool:
         norm_id = normalize_agent_id(recipient_id)
         with self._lock:
-            entries = self._inboxes.get(norm_id, [])
-            for entry in entries:
-                if entry.messageId == message_id:
-                    entry.state = "ACKNOWLEDGED"
-                    entry.acknowledgedAt = datetime.now(timezone.utc).isoformat()
-                    return True
-        return False
+            found = False
+            for bucket_key in {norm_id, recipient_id}:
+                entries = self._inboxes.get(bucket_key, [])
+                for entry in entries:
+                    if entry.messageId == message_id:
+                        entry.state = "ACKNOWLEDGED"
+                        entry.acknowledgedAt = datetime.now(timezone.utc).isoformat()
+                        found = True
+            return found
 
     def recover_from_runs(self, runs_root: Path) -> None:
         """Recovers historical threads and messages from messages.jsonl files in hermes-runs directory."""

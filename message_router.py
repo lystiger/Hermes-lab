@@ -201,8 +201,18 @@ class MessageRouter:
         recipient_id: str,
         state: Optional[str] = None,
         limit: int = 50,
+        job_id: Optional[str] = None,
+        thread_id: Optional[str] = None,
+        chronological: bool = False,
     ) -> List[MailboxEntryDTO]:
-        return self.store.list_inbox(recipient_id=recipient_id, state=state, limit=limit)
+        return self.store.list_inbox(
+            recipient_id=recipient_id,
+            state=state,
+            limit=limit,
+            job_id=job_id,
+            thread_id=thread_id,
+            chronological=chronological,
+        )
 
     def acknowledge(self, message_id: str, recipient_id: str) -> bool:
         success = self.store.acknowledge_message(message_id=message_id, recipient_id=recipient_id)

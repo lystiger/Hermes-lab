@@ -5,10 +5,11 @@
 **Tactical AI Agent Orchestration & Telemetry Command Station**
 
 [![React](https://img.shields.io/badge/React-19.2-61DAFB?style=flat-square&logo=react&logoColor=black)](https://react.dev/)
-[![TypeScript](https://img.shields.io/badge/TypeScript-5.0+-3178C6?style=flat-square&logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
-[![Vite](https://img.shields.io/badge/Vite-6.0+-646CFF?style=flat-square&logo=vite&logoColor=white)](https://vitejs.dev/)
-[![Tailwind CSS](https://img.shields.io/badge/TailwindCSS-4.0-38B2AC?style=flat-square&logo=tailwind-css&logoColor=white)](https://tailwindcss.com/)
-[![License](https://img.shields.io/badge/License-ISC-CBA35C?style=flat-square)](LICENSE)
+[![TypeScript](https://img.shields.io/badge/TypeScript-5.8-3178C6?style=flat-square&logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
+[![Vite](https://img.shields.io/badge/Vite-8.2-646CFF?style=flat-square&logo=vite&logoColor=white)](https://vitejs.dev/)
+[![Zustand](https://img.shields.io/badge/Zustand-5.0-brown?style=flat-square)](https://github.com/pmndrs/zustand)
+[![Tailwind CSS](https://img.shields.io/badge/TailwindCSS-4.3-38B2AC?style=flat-square&logo=tailwind-css&logoColor=white)](https://tailwindcss.com/)
+[![CI](https://img.shields.io/badge/CI-Passing-3FB950?style=flat-square)](https://github.com/lystiger/LysControl/actions)
 
 </div>
 
@@ -16,48 +17,57 @@
 
 ## ⚡ Overview
 
-**LysControl** is a cybernetic mission control console designed to orchestrate, monitor, and dispatch autonomous AI agent pipelines. It provides real-time telemetry, multi-agent execution graphs, token consumption budgets, provider rate-limit tracking, and interactive command dispatching across local container sandboxes and external LLM APIs.
+**LysControl** is the operator-facing console designed to visualize, monitor, and dispatch autonomous AI agent pipelines orchestrated by the **LysStack** control plane. 
+
+> [!NOTE]
+> **Architectural Boundary**: LysControl is strictly a frontend visualization and operator console. It does not own server scheduling, container execution, or provider API connections. All data flows through the `LysStackApi` contract layer.
+
+```text
+LysControl (Console UI)
+    │
+    │  LysStackApi Contracts (REST + SSE / WS)
+    ▼
+LysStack Control Plane (Future Backend)
+    ├── Agent Registry (Dynamic Operatives)
+    ├── Job Scheduler & Queue
+    ├── Telemetry & Token Quotas
+    └── Container Sandboxes & Tool Adapters
+```
 
 ---
 
-## 🚀 Key Features
+## 🚦 Feature Status & Architecture
 
-- **⚡ Real-Time Telemetry & Overview**:
-  - Live metric stream tracking active jobs, queue depth, blocked tasks, today's token consumption, and projected spend.
-  - Multi-layered 3D ambient gyro animations reflecting live pipeline execution.
+### 🟢 Implemented Frontend Architecture
+- **Generic Agent Identity & Dynamic Operatives**: Closed agent unions removed. Any dynamic agent (e.g. `kimi`, `qwen`, or dynamic subagents like `reviewer-8f92`) is supported via generic `AgentId` and `AgentSummary` / `AgentDetail` domain models without modifying core frontend types.
+- **Decoupled Presentation Metadata & Graceful Fallbacks**: Agent artwork is optional. Agents without WebP portraits automatically render cybernetic geometric sigils, initials glyphs, and accent borders.
+- **Domain Separation of Actors**: AI agents, system daemons (`lyscontrol`, `lysstack`), runtimes (`hermes`, `herdr`), and tools (`pytest`) are modeled distinctly as `ActorRef`.
+- **Global UI State Management**: Built on **Zustand** (`useConsoleStore`) for client preferences, 3D motion toggles, active modals, and streamed audit buffers.
+- **Contract & API Layer**: `LysStackApi` interface with pluggable adapters (`MockLysStackApi`, ready for `HttpLysStackApi`). Routes and components consume data solely through hooks (`useAgents`, `useJobs`, `usePipeline`, `useTelemetry`).
+- **Interactive Visual Console**:
+  - **Overview (`/`)**: Real-time telemetry, 3D ambient gyros, agent lanes, and live event trace.
+  - **Queue (`/queue`)**: Serial execution order graph and priority queue (`P0`–`P3`).
+  - **Agents (`/agents` & `/agents/:agentId`)**: Tactical grid and deep inspection (3D portraits, multi-segment context breakdown, activity logs, allowance windows, and run histories).
+  - **Usage (`/usage`)**: Token burn meters, provider rate-limit windows, and queue projections.
+  - **Events (`/events`)**: Sticky-header filterable event audit log.
+  - **Settings (`/settings`)**: Runtime daemon status, policy caps, and 3D client rendering controls.
+  - **Job Inspector Modal**: Changed files diff table, test runner logs, retry history, and structured tool calls.
 
-- **🤖 Operator Registry & 3D Agent Cards**:
-  - Registered AI operatives:
-    - **Gemini** (`antigravity-2.5-pro`): Build, scaffolding, and database migrations.
-    - **Claude** (`claude-sonnet-4-5`): Architecture, contract review, hardening, and documentation.
-    - **Codex** (`gpt-5-codex`): Verification, test suites, static analysis, and regression audits.
-    - **Elysia** (`lys-tactical-orchestrator`): Autonomous pipeline arbitration, handoffs, and dispatch.
-  - Visual cards with animated WebP avatars, cyberpunk sigil fallbacks, breathing animations, code crawling backgrounds, and neon laser scanlines.
-  - Detailed context window allocation gauges breaking down **Input**, **Output**, **Cached**, and **Remaining Free** tokens.
+### 🟡 Simulated Currently (Mock Layer)
+- **Telemetry & Clock Pulse**: Background ticker simulating token consumption burn and event arrivals.
+- **Provider Quota Windows**: Static mock quotas for Anthropic (5h rolling), OpenAI (weekly plan), Google AI Studio (daily ledger), and Herdr local container.
+- **Job Pipeline & Queue Data**: Pre-configured mock fixtures for active migration job `#142` and pending tasks.
+- **Operator Command Dispatcher**: Local mock feedback acknowledging operator prompts.
 
-- **⛓️ Execution Pipeline & Priority Queue**:
-  - Isometric connected diamond graph visualizer for `BUILD` → `HARDEN` → `VERIFY` → `COMPLETE` stages.
-  - Priority-based job queue (`P0` critical to `P3` background) with repository locks, multi-agent chain badges, and token/time estimates.
-
-- **🔍 Interactive Job Inspector**:
-  - Full-screen modal inspector for any active or past job.
-  - Granular changed files diff table (`+add` / `−del`), test runner log capture (pytest/ruff/mypy), sandbox retry histories, and structured tool call logs.
-
-- **📊 Token Budget & Provider Quota Tracking**:
-  - Real-time sprint budget burn meter with configurable hard-stop pause policies.
-  - Provider rate limit tracking: Anthropic 5-hour rolling windows, OpenAI weekly plan allowances, Google AI Studio ledger quotas, and Herdr unmetered local container runtimes.
-  - Predictive queue exhaustion models forecasting remaining budget after pending jobs.
-
-- **📡 Live Audit Trace Stream**:
-  - Sticky-header live event log streaming timestamps, sources, event kinds, durations, and targets.
-  - Filterable by agent, tool invocations, or error/retry warnings.
-
-- **🕹️ Tactical Command Dispatcher**:
-  - Interactive command console to inject prompts, retry failed jobs, trigger manual handoffs, or query agent states directly.
+### 🔵 Planned for Real LysStack Integration
+- **Direct Control Plane Connection**: Replace `MockLysStackApi` with `HttpLysStackApi` via REST and SSE/WebSocket real-time feeds.
+- **Live Tool & Sandbox Streaming**: Real Docker / containerd execution logs and interactive test runners.
+- **A2A & MCP Messaging Adapters**: Multi-agent communication routing and MCP tool capabilities.
+- **Persona Memory & Relationship Dialogue**: Autonomous character interaction layers after runtime contracts are established.
 
 ---
 
-## 📁 Architecture & File Structure
+## 📁 Project Structure
 
 ```
 LysControl/
@@ -75,7 +85,7 @@ LysControl/
 │   ├── components/
 │   │   ├── Layout.tsx                # Shell with Sidebar, Header & JobModal
 │   │   ├── Sidebar.tsx               # Navigation with daemon health status
-│   │   ├── Header.tsx                # Dynamic breadcrumbs & live latency ETA
+│   │   ├── Header.tsx                # Dynamic breadcrumbs & live telemetry
 │   │   ├── JobModal.tsx              # Floating Job Inspector modal
 │   │   ├── AnimatedCube.tsx          # 3D spinning gold cube logo
 │   │   ├── AmbientGyro.tsx           # Multi-layered 3D rotating rings
@@ -90,18 +100,30 @@ LysControl/
 │   │   └── tools/                    # Tool execution items & Docker sandbox status
 │   │
 │   ├── api/
-│   │   ├── types.ts                  # TypeScript interfaces & domain contracts
-│   │   ├── mockData.ts               # Agent profiles, jobs, pipelines & seeds
-│   │   └── client.ts                 # API client with dispatch & event stream
+│   │   ├── types.ts                  # Clean TypeScript domain contracts & types
+│   │   ├── contracts.ts              # LysStackApi interface definition
+│   │   ├── client.ts                 # API client singleton
+│   │   ├── hooks.ts                  # React query & domain data hooks
+│   │   ├── adapters/
+│   │   │   └── mockAdapter.ts        # MockLysStackApi implementation
+│   │   └── mock/
+│   │       ├── actors.ts             # System actors & resolver functions
+│   │       ├── agents.ts             # Agent mock datasets & dynamic generator
+│   │       ├── jobs.ts               # Jobs, pipelines & diff fixtures
+│   │       ├── telemetry.ts          # Quotas, projections & settings
+│   │       └── events.ts             # Seed and pool event logs
 │   │
 │   ├── stores/
-│   │   └── useConsoleStore.ts        # Global state, live clock & event stream
+│   │   └── useConsoleStore.ts        # Zustand global store for client UI state
 │   │
 │   └── styles/
 │       └── globals.css               # Tailwind CSS, cyber scanlines & 3D keyframes
 │
-└── public/
-    └── agents/                       # Cyberpunk operator portraits (.webp)
+├── public/
+│   └── agents/                       # Cyberpunk operator portraits (.webp)
+│
+├── design-reference/                 # Preserved original design prototype assets
+└── .github/workflows/ci.yml          # GitHub Actions CI pipeline
 ```
 
 ---
@@ -111,7 +133,7 @@ LysControl/
 ### Prerequisites
 
 - **Node.js**: `v20.0.0` or higher
-- **npm**, **pnpm**, or **yarn**
+- **npm**
 
 ### Installation
 
@@ -126,34 +148,30 @@ npm install
 
 ### Development Server
 
-Start the local development server on `http://localhost:3000`:
+Start the local Vite dev server on `http://localhost:3000`:
 
 ```bash
 npm run dev
 ```
 
-### Production Build
-
-Compile the optimized production bundle into `dist/`:
+### Quality & Engineering Commands
 
 ```bash
+# Typecheck TypeScript codebase
+npm run typecheck
+
+# Lint with ESLint
+npm run lint
+
+# Run Vitest test suite
+npm run test
+
+# Build production bundle
 npm run build
-```
 
-Preview the production build locally:
-
-```bash
+# Preview production build locally
 npm run preview
 ```
-
----
-
-## ⚙️ Configuration
-
-LysControl reads local daemon and operator configurations from:
-
-- `~/.lyscontrol/config.toml`: Runtime daemons, Redis state stores, retention policies, and hard-stop token caps.
-- `~/.lyscontrol/agents.toml`: Operator registration, concurrency bounds, model providers, and system directives.
 
 ---
 

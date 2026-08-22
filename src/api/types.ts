@@ -219,6 +219,7 @@ export interface JobDetail extends Job {
 
 export interface PipelineStep {
   id: string;
+  jobId?: string;
   phase: PhaseName;
   agentId?: AgentId;
   agentName?: string;

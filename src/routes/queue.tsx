@@ -42,7 +42,7 @@ export const QueueRoute: React.FC = () => {
             return (
               <div key={p.id || idx}>
                 <div
-                  onClick={() => setActiveModalJobId(p.id)}
+                  onClick={() => setActiveModalJobId(p.jobId || jobs.find((j) => j.status === 'RUNNING')?.id || jobs[0]?.id || p.id)}
                   style={{
                     borderColor: isRunning ? 'rgba(217,160,91,0.45)' : isBlocked ? 'rgba(227,160,8,0.3)' : '#1F242B',
                     backgroundColor: isRunning ? 'rgba(217,160,91,0.06)' : isBlocked ? 'rgba(227,160,8,0.04)' : '#0C0E11'

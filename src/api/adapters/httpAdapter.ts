@@ -188,6 +188,7 @@ export class HttpLysStackApi implements LysStackApi {
 
       return {
         id: p.id || `phase-${p.order}`,
+        jobId: data.id,
         phase: p.name,
         agentId: p.agentId,
         agentName: actor?.displayName || p.agentId,
@@ -232,7 +233,10 @@ export class HttpLysStackApi implements LysStackApi {
         return [];
       }
       const detail = await this.getJob(activeJob.id);
-      return detail?.executionGraph || [];
+      return (detail?.executionGraph || []).map((s) => ({
+        ...s,
+        jobId: activeJob.id
+      }));
     } catch {
       return [];
     }

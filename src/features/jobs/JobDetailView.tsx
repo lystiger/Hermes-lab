@@ -47,7 +47,7 @@ export const JobDetailView: React.FC<JobDetailViewProps> = ({ jobId = '' }) => {
   };
 
   const statusCol = getStatusColor(job.status);
-  const jobEvents = allEvents.filter((e) => !e.jobId || e.jobId === job.id || e.jobId === job.sprintId);
+  const jobEvents = allEvents.filter((e) => Boolean(e.jobId && (e.jobId === job.id || e.jobId === job.sprintId)));
 
   return (
     <div className="w-full bg-[#0A0B0D] select-none">

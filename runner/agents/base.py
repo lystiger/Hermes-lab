@@ -10,12 +10,15 @@ from .errors import SprintRunnerError
 
 try:
     import sys
-    ROOT_DIR = Path(__file__).resolve().parent.parent.parent
-    if str(ROOT_DIR) not in sys.path:
-        sys.path.insert(0, str(ROOT_DIR))
-    from event_bus import event_bus
+    CONTROL_DIR = Path(__file__).resolve().parent.parent
+    if str(CONTROL_DIR) not in sys.path:
+        sys.path.insert(0, str(CONTROL_DIR))
+    from control_plane.event_publisher import default_publisher
 except Exception:
-    event_bus = None
+    try:
+        from runner.control_plane.event_publisher import default_publisher
+    except Exception:
+        default_publisher = None
 
 
 @dataclass(frozen=True)
@@ -56,13 +59,15 @@ class AgentAdapter(ABC):
 
         phase_name = context.phase.get("name", "")
         start_time = time.monotonic()
+        sprint_id = getattr(context.runner, "sprint_id", None)
 
-        if event_bus:
-            event_bus.publish(
+        if default_publisher:
+            default_publisher.publish(
                 source_id=self.name,
                 source_kind="agent",
                 kind="agent.started",
                 detail=f"Executing phase {phase_name or self.name} in worktree {context.worktree.name}",
+                job_id=sprint_id,
                 metadata={"command": command[0], "phase": phase_name},
             )
 
@@ -81,13 +86,14 @@ class AgentAdapter(ABC):
             )
         except Exception as exc:
             duration_s = f"{time.monotonic() - start_time:.2f}s"
-            if event_bus:
-                event_bus.publish(
+            if default_publisher:
+                default_publisher.publish(
                     source_id=self.name,
                     source_kind="agent",
                     kind="agent.failed",
                     detail=f"Agent {self.name} raised exception: {str(exc)}",
                     duration=duration_s,
+                    job_id=sprint_id,
                     metadata={"phase": phase_name, "error": str(exc)},
                 )
             raise
@@ -104,13 +110,14 @@ class AgentAdapter(ABC):
 
         if result.returncode != 0:
             stderr = result.stderr or ""
-            if event_bus:
-                event_bus.publish(
+            if default_publisher:
+                default_publisher.publish(
                     source_id=self.name,
                     source_kind="agent",
                     kind="agent.failed",
                     detail=f"Agent {self.name} exited with code {result.returncode}",
                     duration=duration_s,
+                    job_id=sprint_id,
                     metadata={"phase": phase_name, "returncode": result.returncode},
                 )
 
@@ -127,24 +134,26 @@ class AgentAdapter(ABC):
         try:
             self.validate_result(result, context)
         except Exception as exc:
-            if event_bus:
-                event_bus.publish(
+            if default_publisher:
+                default_publisher.publish(
                     source_id=self.name,
                     source_kind="agent",
                     kind="agent.failed",
                     detail=f"Agent {self.name} validation failed: {str(exc)}",
                     duration=duration_s,
+                    job_id=sprint_id,
                     metadata={"phase": phase_name, "error": str(exc)},
                 )
             raise
 
-        if event_bus:
-            event_bus.publish(
+        if default_publisher:
+            default_publisher.publish(
                 source_id=self.name,
                 source_kind="agent",
                 kind="agent.finished",
                 detail=f"Phase {phase_name or self.name} completed successfully",
                 duration=duration_s,
+                job_id=sprint_id,
                 metadata={"phase": phase_name, "returncode": 0},
             )
 

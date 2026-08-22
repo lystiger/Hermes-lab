@@ -4,14 +4,17 @@ import threading
 import time
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
-from typing import Optional
+from typing import Any, Dict, Optional, Literal
 
-from fastapi import FastAPI, Request, Query, Header
+from fastapi import FastAPI, Request, Query, Header, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
+from pydantic import BaseModel, Field
 
 from event_bus import event_bus, RuntimeEvent
 from agent_service import agent_service
+from agent_state_reducer import agent_state_reducer
+from normalization import normalize_agent_id
 
 
 @asynccontextmanager
@@ -69,6 +72,68 @@ async def count_requests(request: Request, call_next):
 
 
 # -------------------------------------------------------------
+# Pydantic Schemas for Internal Event Ingress
+# -------------------------------------------------------------
+
+class EventSourcePayload(BaseModel):
+    id: str = Field(..., min_length=1, max_length=100)
+    kind: Literal["agent", "system", "runtime", "tool"] = "agent"
+    displayName: Optional[str] = None
+    accentColor: Optional[str] = None
+
+
+class InternalEventPayload(BaseModel):
+    source: EventSourcePayload
+    kind: str = Field(..., min_length=1, max_length=100)
+    detail: str = Field(..., min_length=1, max_length=1000)
+    duration: Optional[str] = "—"
+    jobId: Optional[str] = None
+    metadata: Optional[Dict[str, Any]] = None
+
+
+# -------------------------------------------------------------
+# Internal Ingress Endpoint (Cross-Process Runner -> Control Plane)
+# -------------------------------------------------------------
+
+@app.post("/internal/events", status_code=status.HTTP_202_ACCEPTED)
+async def ingest_internal_event(payload: InternalEventPayload):
+    """
+    Ingests runtime execution telemetry events from Hermes sprint runners or external tools.
+    Updates the active agent state reducer and broadcasts to the canonical RuntimeEventBus.
+    """
+    raw_source_id = payload.source.id
+    normalized_id = normalize_agent_id(raw_source_id)
+    display_name = payload.source.displayName or normalized_id.capitalize()
+
+    # 1. Update active agent state reducer (Task 4)
+    agent_state_reducer.apply(
+        source_id=normalized_id,
+        kind=payload.kind,
+        detail=payload.detail,
+        metadata=payload.metadata,
+    )
+
+    # 2. Publish to the canonical RuntimeEventBus (Task 3)
+    event = event_bus.publish(
+        source_id=normalized_id,
+        source_kind=payload.source.kind,
+        source_name=display_name,
+        kind=payload.kind,
+        detail=payload.detail,
+        duration=payload.duration or "—",
+        job_id=payload.jobId,
+        metadata=payload.metadata,
+        accent_color=payload.source.accentColor,
+    )
+
+    return {
+        "accepted": True,
+        "eventId": event.id,
+        "normalizedSourceId": normalized_id,
+    }
+
+
+# -------------------------------------------------------------
 # Core LysStack Control API Endpoints
 # -------------------------------------------------------------
 
@@ -117,7 +182,7 @@ async def metrics():
 @app.get("/agents")
 async def get_agents():
     """
-    Returns dynamically registered agents from the runtime registry.
+    Returns dynamically registered agents from the runtime registry with real runtime status.
     """
     return agent_service.get_all_agents()
 

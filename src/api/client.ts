@@ -1,10 +1,18 @@
 import { LysStackApi } from './contracts';
 import { MockLysStackApi } from './adapters/mockAdapter';
+import { HttpLysStackApi } from './adapters/httpAdapter';
 
-// Current active API client instance (defaults to MockLysStackApi, easily swappable for HttpLysStackApi)
-export const lysStackApi: LysStackApi = new MockLysStackApi();
+const apiUrl = import.meta.env.VITE_LYSSTACK_API_URL;
 
-export { MockLysStackApi } from './adapters/mockAdapter';
-export * from './types';
-export * from './contracts';
+export const isRealApiMode = Boolean(apiUrl);
 
+export const lysStackApi: LysStackApi = isRealApiMode
+  ? new HttpLysStackApi(apiUrl)
+  : new MockLysStackApi();
+
+export function createApiClient(customUrl?: string): LysStackApi {
+  if (customUrl) {
+    return new HttpLysStackApi(customUrl);
+  }
+  return isRealApiMode ? new HttpLysStackApi(apiUrl) : new MockLysStackApi();
+}

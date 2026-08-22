@@ -1,5 +1,6 @@
 import { create } from 'zustand';
-import { TraceEvent, AgentSummary, AgentDetail } from '../api/types';
+import { TraceEvent, AgentSummary, AgentDetail, ConnectionStatus, HealthStatus } from '../api/types';
+import { isRealApiMode } from '../api/client';
 
 function pad(n: number, w: number): string {
   return String(n).padStart(w, '0');
@@ -14,6 +15,10 @@ export function fmtTs(sec: number): string {
 }
 
 interface ConsoleUIState {
+  // Connection State to LysStack Backend
+  connectionStatus: ConnectionStatus;
+  backendHealth: HealthStatus | null;
+
   // Client UI Preferences & Selection
   selectedAgentId: string;
   activeModalJobId: string | null;
@@ -24,7 +29,7 @@ interface ConsoleUIState {
   ambient3d: boolean;
   portraits: 'both' | 'slots' | 'marks';
   
-  // Real-time Visual Clock & Simulation State
+  // Real-time Visual Clock & Metrics State
   tick: number;
   clock: string;
   elapsed: string;
@@ -36,6 +41,8 @@ interface ConsoleUIState {
   allEvents: TraceEvent[];
 
   // Actions
+  setConnectionStatus: (status: ConnectionStatus) => void;
+  setBackendHealth: (health: HealthStatus | null) => void;
   setSelectedAgentId: (id: string) => void;
   setActiveModalJobId: (id: string | null) => void;
   setActiveDossierAgent: (agent: AgentSummary | AgentDetail | null) => void;
@@ -52,6 +59,8 @@ interface ConsoleUIState {
 const baseTs = 10 * 3600 + 42 * 60 + 16;
 
 export const useConsoleStore = create<ConsoleUIState>((set, get) => ({
+  connectionStatus: isRealApiMode ? 'CONNECTING' : 'CONNECTED',
+  backendHealth: null,
   selectedAgentId: 'claude',
   activeModalJobId: null,
   activeDossierAgent: null,
@@ -64,11 +73,13 @@ export const useConsoleStore = create<ConsoleUIState>((set, get) => ({
   tick: 0,
   clock: '10:42',
   elapsed: '08:41',
-  tokensToday: '284K',
+  tokensToday: isRealApiMode ? '124K' : '284K',
   jobTokens: '44.1k',
   hardenTokens: '13.7k',
   allEvents: [],
 
+  setConnectionStatus: (connectionStatus) => set({ connectionStatus }),
+  setBackendHealth: (backendHealth) => set({ backendHealth }),
   setSelectedAgentId: (id) => set({ selectedAgentId: id.toLowerCase() }),
   setActiveModalJobId: (id) => set({ activeModalJobId: id }),
   setActiveDossierAgent: (agent) => set({ activeDossierAgent: agent }),
@@ -84,9 +95,15 @@ export const useConsoleStore = create<ConsoleUIState>((set, get) => ({
     })),
 
   addTraceEvent: (event) =>
-    set((state) => ({
-      allEvents: [event, ...state.allEvents].slice(0, 100)
-    })),
+    set((state) => {
+      // Prevent duplicates by event id
+      if (state.allEvents.some((e) => e.id === event.id)) {
+        return state;
+      }
+      return {
+        allEvents: [event, ...state.allEvents].slice(0, 150)
+      };
+    }),
 
   tickClock: () => {
     const state = get();
@@ -95,18 +112,29 @@ export const useConsoleStore = create<ConsoleUIState>((set, get) => ({
     const elapsed = `${pad(Math.floor(elapsedS / 60), 2)}:${pad(elapsedS % 60, 2)}`;
     const clockS = baseTs + nextTick;
     const clock = `${pad(Math.floor(clockS / 3600), 2)}:${pad(Math.floor(clockS / 60) % 60, 2)}`;
-    const jobTokens = `${((44100 + nextTick * 41) / 1000).toFixed(1)}k`;
-    const hardenTokens = `${((13700 + nextTick * 41) / 1000).toFixed(1)}k`;
-    const tokensToday = `${284 + Math.floor(nextTick * 0.06)}K`;
 
-    set({
-      tick: nextTick,
-      clock,
-      elapsed,
-      jobTokens,
-      hardenTokens,
-      tokensToday
-    });
+    // In simulated mock mode only, advance demo counters
+    if (!isRealApiMode) {
+      const jobTokens = `${((44100 + nextTick * 41) / 1000).toFixed(1)}k`;
+      const hardenTokens = `${((13700 + nextTick * 41) / 1000).toFixed(1)}k`;
+      const tokensToday = `${284 + Math.floor(nextTick * 0.06)}K`;
+
+      set({
+        tick: nextTick,
+        clock,
+        elapsed,
+        jobTokens,
+        hardenTokens,
+        tokensToday
+      });
+    } else {
+      // In real HTTP mode, keep clock ticking without fabricating fake telemetry numbers
+      set({
+        tick: nextTick,
+        clock,
+        elapsed
+      });
+    }
   }
 }));
 

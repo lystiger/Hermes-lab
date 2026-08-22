@@ -1,6 +1,8 @@
 import React from 'react';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import { useAgent, useAgents } from '../api/hooks';
+import { useConsoleStore } from '../stores/useConsoleStore';
+import { isRealApiMode } from '../api/client';
 
 export const Header: React.FC = () => {
   const location = useLocation();
@@ -8,17 +10,18 @@ export const Header: React.FC = () => {
   const { agentId } = useParams<{ agentId?: string }>();
   const { agent } = useAgent(agentId);
   const { agents } = useAgents();
+  const { connectionStatus, backendHealth } = useConsoleStore();
 
   const pathname = location.pathname;
 
   let title = 'Overview';
-  let subtitle = 'hermes · local runtime';
+  let subtitle = isRealApiMode ? 'lysstack · control plane' : 'hermes · local runtime';
   let crumb = '';
   let backPath = '';
 
   if (pathname === '/') {
     title = 'Overview';
-    subtitle = 'hermes · local runtime';
+    subtitle = isRealApiMode ? 'lysstack · control plane' : 'hermes · local runtime';
   } else if (pathname === '/queue') {
     title = 'Queue';
     subtitle = '8 jobs · serial per repository';
@@ -35,11 +38,31 @@ export const Header: React.FC = () => {
     subtitle = 'tokens · budget · quota';
   } else if (pathname === '/events') {
     title = 'Events';
-    subtitle = 'trace stream';
+    subtitle = isRealApiMode ? 'live SSE stream' : 'trace stream';
   } else if (pathname === '/settings') {
     title = 'Settings';
-    subtitle = 'local';
+    subtitle = isRealApiMode ? 'control plane api' : 'local';
   }
+
+  const getConnectionColor = () => {
+    switch (connectionStatus) {
+      case 'CONNECTED':
+        return '#3FB950';
+      case 'CONNECTING':
+        return '#E3A008';
+      case 'DEGRADED':
+        return '#E3A008';
+      case 'DISCONNECTED':
+        return '#F2555A';
+      default:
+        return '#8C949F';
+    }
+  };
+
+  const statusColor = getConnectionColor();
+  const statusLabel = isRealApiMode
+    ? connectionStatus.toLowerCase()
+    : 'mock mode';
 
   return (
     <header className="h-[46px] flex-shrink-0 flex items-center justify-between px-5 border-b border-[#1F242B] bg-[#0C0E11] select-none">
@@ -65,11 +88,20 @@ export const Header: React.FC = () => {
         <span className="text-[#2A3038]">|</span>
         <span>budget <span className="text-[#E3A008]">58%</span></span>
         <span className="text-[#2A3038]">|</span>
-        <span className="flex items-center gap-1.5 text-[#3FB950]">
-          <span className="w-1.5 h-1.5 rounded-[1px] bg-[#3FB950]" />
-          healthy
+        <span
+          style={{ color: statusColor }}
+          className="flex items-center gap-1.5"
+          title={backendHealth ? `${backendHealth.service} v${backendHealth.version} (${backendHealth.uptimeSeconds}s uptime)` : 'Connection State'}
+        >
+          <span
+            style={{ backgroundColor: statusColor }}
+            className={`w-1.5 h-1.5 rounded-[1px] ${connectionStatus === 'CONNECTING' ? 'animate-pulse' : ''}`}
+          />
+          {statusLabel}
         </span>
       </div>
     </header>
   );
 };
+
+export default Header;

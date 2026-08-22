@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { lysStackApi } from './client';
+import { lysStackApi, isRealApiMode } from './client';
 import {
   AgentSummary,
   AgentDetail,
@@ -12,28 +12,68 @@ import {
   SettingItem,
   OverviewTelemetry,
   ActorRef,
-  TraceEvent
+  TraceEvent,
+  HealthStatus
 } from './types';
 import { resolveActorPresentation } from './actors';
 import { useConsoleStore } from '../stores/useConsoleStore';
+
+export function useHealth() {
+  const [health, setHealth] = useState<HealthStatus | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<Error | null>(null);
+  const { setBackendHealth, setConnectionStatus } = useConsoleStore();
+
+  const checkHealth = useCallback(async () => {
+    try {
+      setLoading(true);
+      const data = await lysStackApi.getHealth();
+      setHealth(data);
+      setBackendHealth(data);
+      setConnectionStatus('CONNECTED');
+      setError(null);
+    } catch (err) {
+      setError(err as Error);
+      setConnectionStatus('DISCONNECTED');
+    } finally {
+      setLoading(false);
+    }
+  }, [setBackendHealth, setConnectionStatus]);
+
+  useEffect(() => {
+    checkHealth();
+    // Poll health periodically every 30s
+    const interval = setInterval(checkHealth, 30000);
+    return () => clearInterval(interval);
+  }, [checkHealth]);
+
+  return { health, loading, error, refetch: checkHealth };
+}
 
 export function useAgents() {
   const [agents, setAgents] = useState<AgentSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<Error | null>(null);
+  const { setConnectionStatus } = useConsoleStore();
 
   const fetchAgents = useCallback(async () => {
     try {
       setLoading(true);
       const data = await lysStackApi.getAgents();
       setAgents(data);
+      if (isRealApiMode) {
+        setConnectionStatus('CONNECTED');
+      }
       setError(null);
     } catch (err) {
       setError(err as Error);
+      if (isRealApiMode) {
+        setConnectionStatus('DISCONNECTED');
+      }
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [setConnectionStatus]);
 
   useEffect(() => {
     fetchAgents();
@@ -190,30 +230,60 @@ export function useSettings() {
 }
 
 export function useEventStream() {
-  const { addTraceEvent, setInitialEvents } = useConsoleStore();
+  const { addTraceEvent, setInitialEvents, setConnectionStatus, setBackendHealth } = useConsoleStore();
 
   useEffect(() => {
     let isSubscribed = true;
 
-    // Load initial events from API
-    lysStackApi.getTraceEvents().then((initial) => {
-      if (isSubscribed) {
-        setInitialEvents(initial);
-      }
-    });
+    // 1. Initial Health Check
+    lysStackApi
+      .getHealth()
+      .then((health) => {
+        if (isSubscribed) {
+          setBackendHealth(health);
+          setConnectionStatus('CONNECTED');
+        }
+      })
+      .catch(() => {
+        if (isSubscribed && isRealApiMode) {
+          setConnectionStatus('DISCONNECTED');
+        }
+      });
 
-    // Subscribe to live stream
-    const sub = lysStackApi.subscribeEvents((evt: TraceEvent) => {
-      if (isSubscribed) {
-        addTraceEvent(evt);
+    // 2. Load initial events from API
+    lysStackApi
+      .getTraceEvents()
+      .then((initial) => {
+        if (isSubscribed) {
+          setInitialEvents(initial);
+        }
+      })
+      .catch(() => {
+        if (isSubscribed && isRealApiMode) {
+          setConnectionStatus('DISCONNECTED');
+        }
+      });
+
+    // 3. Subscribe to live stream
+    const sub = lysStackApi.subscribeEvents(
+      (evt: TraceEvent) => {
+        if (isSubscribed) {
+          addTraceEvent(evt);
+          setConnectionStatus('CONNECTED');
+        }
+      },
+      () => {
+        if (isSubscribed && isRealApiMode) {
+          setConnectionStatus('DISCONNECTED');
+        }
       }
-    });
+    );
 
     return () => {
       isSubscribed = false;
       sub.unsubscribe();
     };
-  }, [addTraceEvent, setInitialEvents]);
+  }, [addTraceEvent, setInitialEvents, setConnectionStatus, setBackendHealth]);
 }
 
 export function useActorPresentation(actorIdentifier: string): ActorRef {

@@ -9,7 +9,8 @@ import {
   ProjectionItem,
   SettingItem,
   TraceEvent,
-  OverviewTelemetry
+  OverviewTelemetry,
+  HealthStatus
 } from './types';
 
 export interface EventSubscription {
@@ -17,6 +18,7 @@ export interface EventSubscription {
 }
 
 export interface LysStackApi {
+  getHealth(): Promise<HealthStatus>;
   getAgents(): Promise<AgentSummary[]>;
   getAgent(id: AgentId): Promise<AgentDetail | null>;
   getJobs(): Promise<Job[]>;
@@ -26,8 +28,11 @@ export interface LysStackApi {
   getProviderQuotas(): Promise<ProviderQuota[]>;
   getProjections(): Promise<ProjectionItem[]>;
   getSettings(): Promise<{ runtime: SettingItem[]; policy: SettingItem[] }>;
-  getTraceEvents(limit?: number): Promise<TraceEvent[]>;
-  subscribeEvents(handler: (event: TraceEvent) => void): EventSubscription;
+  getTraceEvents(limit?: number, after?: string): Promise<TraceEvent[]>;
+  subscribeEvents(
+    handler: (event: TraceEvent) => void,
+    onError?: (err: Error) => void
+  ): EventSubscription;
   sendOperatorCommand(targetActorId: string, command: string): Promise<{ success: boolean; response: string }>;
   triggerJobAction(jobId: string, action: 'retry' | 'pause' | 'cancel' | 'promote'): Promise<boolean>;
 }

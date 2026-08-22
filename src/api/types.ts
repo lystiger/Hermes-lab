@@ -13,6 +13,16 @@ export type PhaseName = 'BUILD' | 'HARDEN' | 'VERIFY' | 'COMPLETE' | 'REVIEW' | 
 
 export type ActorKind = 'agent' | 'system' | 'runtime' | 'tool';
 
+export type ConnectionStatus = 'CONNECTING' | 'CONNECTED' | 'DEGRADED' | 'DISCONNECTED';
+
+export interface HealthStatus {
+  status: string;
+  service: string;
+  version: string;
+  uptimeSeconds: number;
+  timestamp: string;
+}
+
 export interface ActorRef {
   id: string;
   kind: ActorKind;
@@ -178,6 +188,7 @@ export interface TraceEvent {
   detail: string;
   dur: string;
   jobId?: string;
+  metadata?: Record<string, any>;
 }
 
 export interface ProviderQuota {

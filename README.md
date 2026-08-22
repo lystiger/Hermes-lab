@@ -17,164 +17,124 @@
 
 ## ⚡ Overview
 
-**LysControl** is the operator-facing console designed to visualize, monitor, and dispatch autonomous AI agent pipelines orchestrated by the **LysStack** control plane. 
+**LysControl** is the operator-facing command station designed to visualize, monitor, and dispatch autonomous AI agent pipelines orchestrated by the **LysStack** control plane.
 
 > [!NOTE]
-> **Architectural Boundary**: LysControl is strictly a frontend visualization and operator console. It does not own server scheduling, container execution, or provider API connections. All data flows through the `LysStackApi` contract layer.
+> **Architectural Boundary**: LysControl is strictly a frontend visualization client. It does not own server scheduling, container execution, or provider API connections. All communication flows through the `LysStackApi` contract layer.
 
 ```text
-LysControl (Console UI)
-    │
-    │  LysStackApi Contracts (REST + SSE / WS)
-    ▼
-LysStack Control Plane (Future Backend)
-    ├── Agent Registry (Dynamic Operatives)
-    ├── Job Scheduler & Queue
-    ├── Telemetry & Token Quotas
-    └── Container Sandboxes & Tool Adapters
+                     USER
+                       │
+                       ▼
+                  LysControl
+               React + Vite UI
+                       │
+                       │ HTTP + SSE
+                       ▼
+                HttpLysStackApi
+                       │
+                       ▼
+              LysStack Control API (FastAPI)
+                       │
+          ┌────────────┼────────────┐
+          │            │            │
+          ▼            ▼            ▼
+       Gemini        Claude        Codex
+          │
+          └──── Hermes Runtime / Worktrees
 ```
 
 ---
 
-## 🚦 Feature Status & Architecture
+## 🚦 Integration Status (Phase 3)
 
-### 🟢 Implemented Frontend Architecture
-- **Generic Agent Identity & Dynamic Operatives**: Closed agent unions removed. Any dynamic agent (e.g. `kimi`, `qwen`, or dynamic subagents like `reviewer-8f92`) is supported via generic `AgentId` and `AgentSummary` / `AgentDetail` domain models without modifying core frontend types.
-- **Decoupled Presentation Metadata & Graceful Fallbacks**: Agent artwork is optional. Agents without WebP portraits automatically render cybernetic geometric sigils, initials glyphs, and accent borders.
-- **Domain Separation of Actors**: AI agents, system daemons (`lyscontrol`, `lysstack`), runtimes (`hermes`, `herdr`), and tools (`pytest`) are modeled distinctly as `ActorRef`.
-- **Global UI State Management**: Built on **Zustand** (`useConsoleStore`) for client preferences, 3D motion toggles, active modals, and streamed audit buffers.
-- **Contract & API Layer**: `LysStackApi` interface with pluggable adapters (`MockLysStackApi`, ready for `HttpLysStackApi`). Routes and components consume data solely through hooks (`useAgents`, `useJobs`, `usePipeline`, `useTelemetry`).
-- **Interactive Visual Console**:
-  - **Overview (`/`)**: Real-time telemetry, 3D ambient gyros, agent lanes, and live event trace.
-  - **Queue (`/queue`)**: Serial execution order graph and priority queue (`P0`–`P3`).
-  - **Agents (`/agents` & `/agents/:agentId`)**: Tactical grid and deep inspection (3D portraits, multi-segment context breakdown, activity logs, allowance windows, and run histories).
-  - **Usage (`/usage`)**: Token burn meters, provider rate-limit windows, and queue projections.
-  - **Events (`/events`)**: Sticky-header filterable event audit log.
-  - **Settings (`/settings`)**: Runtime daemon status, policy caps, and 3D client rendering controls.
-  - **Job Inspector Modal**: Changed files diff table, test runner logs, retry history, and structured tool calls.
+### 🟢 REAL INTEGRATION
+- **Control Plane Health (`GET /health`)**: Live health status, process uptime counter, and version metadata from LysStack.
+- **Dynamic Agent Registry (`GET /agents`)**: Consumes the live runtime `AgentRegistry` (`Antigravity/Gemini`, `Claude`, `Codex`, and dynamic operatives). No hardcoded agent conditionals.
+- **Runtime Event History (`GET /events`)**: Historical event log retrieval supporting limits and `after=<event-id>` cursor pagination.
+- **Live Event Stream (`GET /events/stream` via SSE)**: Real-time Server-Sent Events delivery for `runtime.started`, `agent.started`, `agent.finished`, `agent.failed`, and tool execution traces with stable event IDs and clean disconnect handling.
+- **HttpLysStackApi & Adapter Selection**: Environment-driven adapter switching (`VITE_LYSSTACK_API_URL`). When configured, connects to real backend; if unreachable, displays a genuine `disconnected` state without silently hiding failures behind mocks.
+- **Connection Indicator**: Header connection indicator reflects live network state (`connected`, `connecting`, `disconnected`, `mock mode`).
 
-### 🟡 Simulated Currently (Mock Layer)
-- **Telemetry & Clock Pulse**: Background ticker simulating token consumption burn and event arrivals.
-- **Provider Quota Windows**: Static mock quotas for Anthropic (5h rolling), OpenAI (weekly plan), Google AI Studio (daily ledger), and Herdr local container.
-- **Job Pipeline & Queue Data**: Pre-configured mock fixtures for active migration job `#142` and pending tasks.
-- **Operator Command Dispatcher**: Local mock feedback acknowledging operator prompts.
-
-### 🔵 Planned for Real LysStack Integration
-- **Direct Control Plane Connection**: Replace `MockLysStackApi` with `HttpLysStackApi` via REST and SSE/WebSocket real-time feeds.
-- **Live Tool & Sandbox Streaming**: Real Docker / containerd execution logs and interactive test runners.
-- **A2A & MCP Messaging Adapters**: Multi-agent communication routing and MCP tool capabilities.
-- **Persona Memory & Relationship Dialogue**: Autonomous character interaction layers after runtime contracts are established.
+### 🟡 SIMULATED TEMPORARILY (Transitioning in Phase 4)
+- **Jobs & Queue Lifecycle**: Job details, execution graph mutations, and retry triggers.
+- **Provider Quotas & Burn Telemetry**: Quota meters and projection estimations.
+- **Command Dispatcher Mutation**: Operator command execution pipeline.
 
 ---
 
-## 📁 Project Structure
+## 🛠️ Local Development & Quick Start
 
-```
-LysControl/
-├── src/
-│   ├── routes/
-│   │   ├── index.tsx                 # Overview dashboard & telemetry
-│   │   ├── queue.tsx                 # Execution pipeline & priority queue
-│   │   ├── agents/
-│   │   │   ├── index.tsx             # Operator registry grid
-│   │   │   └── $agentId.tsx          # Operator detail (3D portrait, context, metrics)
-│   │   ├── usage.tsx                 # Token budgets, context windows & quotas
-│   │   ├── events.tsx                # Real-time streaming audit trace logs
-│   │   └── settings.tsx              # Runtime environment, policy & sandbox
-│   │
-│   ├── components/
-│   │   ├── Layout.tsx                # Shell with Sidebar, Header & JobModal
-│   │   ├── Sidebar.tsx               # Navigation with daemon health status
-│   │   ├── Header.tsx                # Dynamic breadcrumbs & live telemetry
-│   │   ├── JobModal.tsx              # Floating Job Inspector modal
-│   │   ├── AnimatedCube.tsx          # 3D spinning gold cube logo
-│   │   ├── AmbientGyro.tsx           # Multi-layered 3D rotating rings
-│   │   ├── Badge.tsx                 # Cyber status / priority badges
-│   │   └── CyberButton.tsx           # Action buttons
-│   │
-│   ├── features/
-│   │   ├── agents/                   # Agent cards, meters, metrics & portraits
-│   │   ├── jobs/                     # Pipeline graphs, queue tables & diff views
-│   │   ├── messaging/                # Inter-agent chatter & command dispatchers
-│   │   ├── telemetry/                # Top metrics bar, quotas & budget alerts
-│   │   └── tools/                    # Tool execution items & Docker sandbox status
-│   │
-│   ├── api/
-│   │   ├── types.ts                  # Clean TypeScript domain contracts & types
-│   │   ├── contracts.ts              # LysStackApi interface definition
-│   │   ├── client.ts                 # API client singleton
-│   │   ├── hooks.ts                  # React query & domain data hooks
-│   │   ├── adapters/
-│   │   │   └── mockAdapter.ts        # MockLysStackApi implementation
-│   │   └── mock/
-│   │       ├── actors.ts             # System actors & resolver functions
-│   │       ├── agents.ts             # Agent mock datasets & dynamic generator
-│   │       ├── jobs.ts               # Jobs, pipelines & diff fixtures
-│   │       ├── telemetry.ts          # Quotas, projections & settings
-│   │       └── events.ts             # Seed and pool event logs
-│   │
-│   ├── stores/
-│   │   └── useConsoleStore.ts        # Zustand global store for client UI state
-│   │
-│   └── styles/
-│       └── globals.css               # Tailwind CSS, cyber scanlines & 3D keyframes
-│
-├── public/
-│   └── agents/                       # Cyberpunk operator portraits (.webp)
-│
-├── design-reference/                 # Preserved original design prototype assets
-└── .github/workflows/ci.yml          # GitHub Actions CI pipeline
-```
-
----
-
-## 🛠️ Getting Started
-
-### Prerequisites
-
-- **Node.js**: `v20.0.0` or higher
-- **npm**
-
-### Installation
+### 1. Start the LysStack Control Plane Backend (`hermes-lab`)
 
 ```bash
-# Clone the repository
-git clone https://github.com/lystiger/LysControl.git
-cd LysControl
-
-# Install dependencies
-npm install
+cd /home/lystiger/projects/hermes-lab
+source .venv/bin/activate
+uvicorn main:app --port 8000 --reload
 ```
 
-### Development Server
+The control API will be available at `http://localhost:8000`:
+- Health check: `http://localhost:8000/health`
+- Agent registry: `http://localhost:8000/agents`
+- Event history: `http://localhost:8000/events`
+- Event stream: `http://localhost:8000/events/stream`
 
-Start the local Vite dev server on `http://localhost:3000`:
+### 2. Start the LysControl Frontend
 
 ```bash
+cd /home/lystiger/projects/LysControl
+
+# Connect to real LysStack backend
+VITE_LYSSTACK_API_URL=http://localhost:8000 npm run dev
+
+# Or run in standalone mock mode (no backend required)
 npm run dev
 ```
 
-### Quality & Engineering Commands
+Open `http://localhost:3000` (or Vite's output port) to access the console.
+
+---
+
+## 🧪 Testing & Verification
 
 ```bash
-# Typecheck TypeScript codebase
-npm run typecheck
+# Frontend checks (LysControl)
+npm run typecheck  # TypeScript compiler validation (0 errors)
+npm run lint       # ESLint flat config inspection (0 errors)
+npm run test       # Vitest unit & architectural isolation suite (6 suites, 19 tests)
+npm run build      # Vite production bundle build
 
-# Lint with ESLint
-npm run lint
-
-# Run Vitest test suite
-npm run test
-
-# Build production bundle
-npm run build
-
-# Preview production build locally
-npm run preview
+# Backend checks (hermes-lab)
+cd /home/lystiger/projects/hermes-lab
+pytest             # 109 passed, 2 skipped
 ```
 
 ---
 
-## 📜 License
+## 🏛️ Repository Architecture
 
-This project is licensed under the **ISC License**.
+```text
+LysControl/
+├── src/
+│   ├── api/
+│   │   ├── contracts.ts           # LysStackApi domain interface & EventSubscription
+│   │   ├── types.ts               # Domain models (AgentSummary, TraceEvent, HealthStatus)
+│   │   ├── actors.ts              # Domain actor presentation resolver (registry -> system -> fallback)
+│   │   ├── client.ts              # Pluggable API client factory (HTTP vs Mock adapter)
+│   │   ├── hooks.ts               # React hooks (useHealth, useAgents, useEventStream, useJobs)
+│   │   ├── adapters/
+│   │   │   ├── httpAdapter.ts     # Real LysStack HTTP + SSE client adapter
+│   │   │   └── mockAdapter.ts     # Standalone offline mock adapter
+│   │   └── mock/                  # Pure mock fixtures (isolated behind mockAdapter)
+│   ├── components/                # Layout, Sidebar, Header, JobModal, DossierModal
+│   ├── features/
+│   │   ├── agents/                # Agent portraits, meters, activity, metrics grids
+│   │   ├── jobs/                  # Execution graph, queue tables, active execution cards
+│   │   ├── messaging/             # Command dispatcher & tactical messaging
+│   │   └── telemetry/             # Top metrics, quota lists, risk alerts
+│   ├── routes/                    # Overview, Queue, Agents, AgentDetail, Usage, Events, Settings
+│   ├── stores/                    # Zustand UI store (useConsoleStore)
+│   └── styles/                    # Cybernetic theme CSS
+├── public/agents/                 # Web-optimized WebP avatar crops & character cards
+└── design-reference/              # Reference cards & prototype snapshots
+```

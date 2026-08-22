@@ -39,6 +39,15 @@ export class MockLysStackApi implements LysStackApi {
   private pipeline: PipelineStep[] = [...MOCK_PIPELINE];
   private simTick = 0;
   private lastSimTs = 10 * 3600 + 42 * 60 + 47.4;
+  async getHealth() {
+    return {
+      status: 'ok',
+      service: 'lysstack-mock',
+      version: '0.1.0-mock',
+      uptimeSeconds: 4200,
+      timestamp: new Date().toISOString()
+    };
+  }
 
   async getAgents(): Promise<AgentSummary[]> {
     return Object.values(this.agents).map((detail) => ({

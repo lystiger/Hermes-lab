@@ -1,0 +1,41 @@
+{
+  "name": "LysControl",
+  "type": "module",
+  "version": "1.0.0",
+  "description": "Lystiger control station of the agents",
+  "main": "src/main.tsx",
+  "scripts": {
+    "dev": "vite --host --port 3000",
+    "start": "vite --host --port 3000",
+    "build": "vite build",
+    "preview": "vite preview --host --port 3000"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/lystiger/LysControl.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/lystiger/LysControl/issues"
+  },
+  "homepage": "https://github.com/lystiger/LysControl#readme",
+  "devDependencies": {
+    "@tailwindcss/vite": "^4.3.3",
+    "@types/react": "^19.2.18",
+    "@types/react-dom": "^19.2.4",
+    "@vitejs/plugin-react": "^6.1.0",
+    "tailwindcss": "^4.3.3",
+    "typescript": "^7.0.2",
+    "vite": "^8.2.2"
+  },
+  "dependencies": {
+    "clsx": "^2.1.1",
+    "lucide-react": "^1.33.0",
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8",
+    "react-router-dom": "^7.18.2",
+    "tailwind-merge": "^3.6.0"
+  }
+}

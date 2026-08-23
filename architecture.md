@@ -1,0 +1,242 @@
+# LysStack / Hermes Lab Architecture & Phase Evolution
+
+## 1. Executive Summary & System Overview
+
+**LysStack** (orchestration backend / control plane in `Hermes-lab`) and **LysControl** (operator-facing React/Vite control station) provide an end-to-end, capability-aware, multi-agent orchestration runtime for software engineering workflows.
+
+### Core Philosophy
+
+Traditional workflow orchestrators model jobs as static, predefined Directed Acyclic Graphs (DAGs) or rigid sequential phase loops. LysStack models execution as a **reactive runtime spine**:
+
+```text
+User Goal / Sprint Spec
+         ↓
+    Job Record
+         ↓
+      PLANNING
+         ↓
+  Initial Task Graph
+         ↓
+Event-Driven Scheduler ←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←
+         ↓                                                    ↑
+Agent / Tool Execution                                        ↑
+         ↓                                                    ↑ (FIRST_COMPLETED)
+Observation & Artifact Discovery                              ↑
+         ↓                                                    ↑
+     VERIFYING                                                ↑
+         ↓                                                    ↑
+Verification Outcome ──[PASSED]──────→ COMPLETED              ↑
+         │                                                    ↑
+   [REPAIRABLE / REPLAN]                                      ↑
+         ↓                                                    ↑
+Bounded Dynamic Replanner ──[Mutations: Add/Supersede Task]───┘
+         │
+  [Budget Exhausted / Fatal] ────────→ BLOCKED
+```
+
+### Separation of Concerns
+
+1. **WHAT to do next (Authoritative Reactive Runtime)**: Owned by [`ReactiveJobEngine`](file:///home/lystiger/projects/hermes-lab/runtime/engine.py), [`TaskGraph`](file:///home/lystiger/projects/hermes-lab/runtime/task_graph.py), [`ReactiveScheduler`](file:///home/lystiger/projects/hermes-lab/runtime/scheduler.py), and [`BoundedReplanner`](file:///home/lystiger/projects/hermes-lab/runtime/replanning.py). Evaluates preconditions, schedules tasks dynamically, observes outcomes, and mutates the graph incrementally.
+2. **HOW to execute safely (Execution Infrastructure)**: Owned by [`HermesActorAdapter`](file:///home/lystiger/projects/hermes-lab/runtime/hermes_adapter.py), [`HermesVerifierAdapter`](file:///home/lystiger/projects/hermes-lab/runtime/hermes_adapter.py), [`ExecutionManager`](file:///home/lystiger/projects/hermes-lab/runtime/execution.py), and low-level agent runners ([`HermesSprintRunner`](file:///home/lystiger/projects/hermes-lab/runner/runner.py)). Manages CLI processes, git worktrees, tool registries, file mutation, timeout guards, and test execution.
+
+---
+
+## 2. High-Level Architecture Topology
+
+```mermaid
+flowchart TB
+    subgraph UI ["LysControl (Frontend Control Station)"]
+        Station["Vite / React SPA"]
+        DAGView["Dynamic DAG Visualizer"]
+        AgentMon["Agent & Capability Inspector"]
+        EventStream["Live Event / Telemetry Feed"]
+    end
+
+    subgraph API ["Control Plane & API Layer (FastAPI)"]
+        Router["main.py API Router"]
+        JobSvc["JobService (Runtime Registry)"]
+        EvtBus["RuntimeEventBus (SSE Broadcaster)"]
+    end
+
+    subgraph Spine ["Authoritative Reactive Runtime Spine (runtime/)"]
+        Engine["ReactiveJobEngine"]
+        TGraph["TaskGraph (Acyclic, Stalled Detection)"]
+        Sched["ReactiveScheduler (Actor Concurrency & Matching)"]
+        ExecMgr["ExecutionManager (Timeout Guards)"]
+        ObsReg["ObservationRegistry (Runtime Memory)"]
+        Replanner["BoundedReplanner (Budget-Constrained Mutations)"]
+    end
+
+    subgraph CapMsg ["Capabilities & Collaboration (capabilities/ & messaging/)"]
+        CapReg["CapabilityRegistry (Deterministic Matching)"]
+        MsgMgr["MessageManager (A2A Threads & Personas)"]
+    end
+
+    subgraph Infra ["Execution Infrastructure (runner/ & adapters)"]
+        ActorAdap["HermesActorAdapter"]
+        VerifAdap["HermesVerifierAdapter"]
+        Worktrees["Git Worktree Isolation Engine"]
+        Agents["Agent Backends (Antigravity, Gemini, Claude, Codex)"]
+        Tools["Tool Registry & Direct Argv Execution"]
+    end
+
+    Station <-->|REST API + SSE Streams| Router
+    Router <--> JobSvc
+    Router <--> EvtBus
+    Router <--> MsgMgr
+
+    JobSvc --> Engine
+    Engine --> TGraph
+    Engine --> Sched
+    Engine --> ExecMgr
+    Engine --> ObsReg
+    Engine --> Replanner
+    Engine --> EvtBus
+
+    Sched --> CapReg
+    Sched --> ExecMgr
+    ExecMgr --> ActorAdap
+    Engine --> VerifAdap
+
+    ActorAdap --> Worktrees
+    ActorAdap --> Agents
+    ActorAdap --> Tools
+    VerifAdap --> Worktrees
+```
+
+---
+
+## 3. Core Subsystems
+
+### 3.1. Reactive Runtime Spine (`runtime/`)
+
+#### 1. `ReactiveJobEngine` ([`runtime/engine.py`](file:///home/lystiger/projects/hermes-lab/runtime/engine.py))
+The authoritative orchestrator for an individual job lifecycle. It drives the state machine:
+- `CREATED` $\to$ `PLANNING` $\to$ `EXECUTING` $\to$ `VERIFYING` $\to$ `COMPLETED`
+- `VERIFYING` $\to$ `REPAIRING` $\to$ `EXECUTING` (on repairable check failures)
+- `EXECUTING` / `REPAIRING` $\to$ `BLOCKED` (on unrecoverable failures, deadlocks, or exhausted replan budgets)
+- Any $\to$ `CANCELLED` (on operator abort)
+
+Uses an async `FIRST_COMPLETED` wait loop so fast-completing concurrent tasks immediately unlock dependents while slow parallel tasks continue executing.
+
+#### 2. `TaskGraph` & `TaskNode` ([`runtime/task_graph.py`](file:///home/lystiger/projects/hermes-lab/runtime/task_graph.py))
+Dynamic DAG representing units of work:
+- **Duplicate Prevention**: Rejects duplicate task IDs with `ValueError`.
+- **Cycle Detection**: Prevents cyclical dependencies via reachability checks on insertion.
+- **Safe Removal & Superseding**: Rejects removal of tasks that have active dependents; provides `supersede_task()` to replace obsolete tasks cleanly.
+- **Stalled & Deadlock Detection**: Provides `is_stalled()`, `has_runnable_tasks()`, and `find_dependency_blocked_tasks()` to trigger immediate replanning or blocked transitions when tasks cannot proceed.
+
+#### 3. `ReactiveScheduler` ([`runtime/scheduler.py`](file:///home/lystiger/projects/hermes-lab/runtime/scheduler.py))
+Selects and matches available actors for runnable tasks:
+- **Capability-Aware Selection**: Matches `TaskNode.required_capabilities` against actor capabilities.
+- **Actor Concurrency Tracking**: Tracks `_busy_actors` per actor ID with configurable per-actor concurrency limits.
+- **Explainable Decisions**: Distinguishes `ACTOR_BUSY` (which defers the task as `READY`) from `NO_CAPABLE_ACTOR` (which marks the task `BLOCKED`).
+
+#### 4. `ExecutionManager` & `AgentRun` ([`runtime/execution.py`](file:///home/lystiger/projects/hermes-lab/runtime/execution.py))
+Tracks discrete execution attempts:
+- Manages runs with timestamps, exit reasons, and artifact references.
+- Wraps execution in timeout guards, marking runs as `TIMED_OUT` without crashing the scheduler.
+
+#### 5. `ObservationRegistry` & `Observation` ([`runtime/observations.py`](file:///home/lystiger/projects/hermes-lab/runtime/observations.py))
+Dynamic runtime memory capturing outputs, errors, test results, discovered files, and metrics. Used by planners and verifiers for informed context.
+
+#### 6. `BoundedReplanner` ([`runtime/replanning.py`](file:///home/lystiger/projects/hermes-lab/runtime/replanning.py))
+Enforces hard bounds on dynamic adaptation:
+- Restricts mutations (`ADD_TASK`, `SUPERSEDE_TASK`, `ADD_DEPENDENCY`, `REMOVE_DEPENDENCY`, `UPDATE_TASK_METADATA`).
+- Strictly enforces `max_replans_per_job`, `max_tasks_per_job`, and `max_task_attempts`.
+
+#### 7. `VerifierAdapter` & `VerificationResult` ([`runtime/verification.py`](file:///home/lystiger/projects/hermes-lab/runtime/verification.py))
+Executes structured verification steps and returns `PASSED`, `REPAIRABLE`, or `FAILED` with actionable repair recommendations.
+
+---
+
+### 3.2. Capabilities Subsystem (`capabilities/`)
+
+- **Capability Descriptors**: Open-string descriptors (e.g., `implementation`, `code.python`, `review.code`, `verification`, `backend.fastapi`, `frontend.react`).
+- **Capability Registry**: [`CapabilityRegistry`](file:///home/lystiger/projects/hermes-lab/capabilities/capabilities.py#L86) provides registration of actors, query mechanisms, deterministic scoring, and tie-breaking.
+- **Normalization & Proficiency**: Canonical normalization rules and optional proficiency weightings.
+
+---
+
+### 3.3. Collaboration & Messaging (`messaging/` & `events/`)
+
+- **Agent-to-Agent Messaging**: [`MessageManager`](file:///home/lystiger/projects/hermes-lab/messaging/messaging_manager.py) manages multi-turn peer conversations, persona context, and thread hierarchies.
+- **Runtime Event Bus**: High-performance [`RuntimeEventBus`](file:///home/lystiger/projects/hermes-lab/events/event_bus.py) powers Server-Sent Events (SSE) streaming live telemetry to `LysControl`.
+
+---
+
+### 3.4. Execution Infrastructure (`runner/` & `runtime/hermes_adapter.py`)
+
+- **`HermesActorAdapter`**: Bridges `TaskNode` execution to CLI tools, agent subprocesses, or sessionful Herdr workers.
+- **`HermesVerifierAdapter`**: Executes project test suites (Playwright, pytest, npm, uv) with isolated working directories and timeouts.
+- **Worktree Isolation**: Git worktrees created per sprint/task under dedicated storage roots, isolating changes before integration merges.
+
+---
+
+## 4. Phase-by-Phase Evolution
+
+```text
+Phase 1-2: Scaffolding & Git Worktrees
+   ├── FastAPI control service & health endpoints
+   └── Worktree isolation engine per agent sprint
+
+Phase 3-4: Agent Adapters & Execution Backends
+   ├── Pluggable CLI agent adapters (Antigravity, Claude, Codex)
+   └── Subprocess and Herdr agent execution backends
+
+Phase 5: Three-Agent Delivery & Generic Verification
+   ├── Three-agent pipeline (Scaffolding → Hardening → Verification)
+   ├── Generic multi-command verification pipeline (Playwright / npm / uv / pytest)
+   ├── Sessionful Herdr lifecycle & ownership verification
+   └── Control REST API & cross-process job runners
+
+Phase 6 & 6.1: Agent-to-Agent (A2A) Messaging & Persona Threads
+   ├── Structured A2A peer communication protocol
+   ├── Multi-turn conversation threads & persona contexts
+   └── Live SSE event bus integration
+
+Phase 7: Capability-Aware Delegation & Tool Actors
+   ├── Open-string capability registry & deterministic matching
+   ├── Dynamic task delegation & tool actor assignments
+   └── Operator control UI (LysControl) capability views
+
+Phase 8: Reactive Runtime Spine
+   ├── Dynamic incremental TaskGraph
+   ├── Event-driven ReactiveScheduler & ExecutionManager
+   ├── ObservationRegistry & BoundedReplanner
+   └── Structured Verification & Repair loop
+
+Phase 8.1: Runtime Integration & Invariant Hardening
+   ├── ReactiveJobEngine established as authoritative production path
+   ├── HermesActorAdapter & HermesVerifierAdapter infrastructure bridges
+   ├── TaskGraph invariant hardening (duplicate rejection, cycle detection, safe removal)
+   ├── Stalled graph / deadlock detection with immediate BLOCKED transition
+   ├── Concurrency tracking (ACTOR_BUSY vs NO_CAPABLE_ACTOR)
+   ├── Execution timeouts with TIMED_OUT run states
+   └── FIRST_COMPLETED event reactivity unlocking ready dependent tasks
+```
+
+---
+
+## 5. Runtime Invariants & Safety Guarantees
+
+1. **Authoritative DAG Authority**: The static phase array is demoted to input configuration; `ReactiveJobEngine` is the sole runtime orchestrator.
+2. **Acyclic Graphs**: Every `add_dependency` call validates reachability, strictly forbidding cycles.
+3. **Immutable Identity**: `TaskGraph.add_task` strictly rejects duplicate task IDs with `ValueError`.
+4. **Safe Task Removal**: A task cannot be removed if other active tasks depend on it; it must be superseded instead.
+5. **Deterministic Deadlock Detection**: Stalled dependency states trigger bounded replans or transition to `BLOCKED` immediately without waiting for `max_steps`.
+6. **Replan Budget Enforcement**: Dynamic graph mutations cannot exceed `max_replans_per_job`, `max_tasks_per_job`, or `max_task_attempts`.
+7. **Terminal State Guards**: Once a job transitions to a terminal state (`BLOCKED`, `COMPLETED`, `CANCELLED`), subsequent steps cannot illegally transition back to active states.
+8. **Concurrency & Busy Safety**: An actor currently executing a task defers additional tasks as `READY` rather than falsely blocking them.
+9. **Timeout Containment**: Task execution exceeding configured limits generates a structured failure and `TIMED_OUT` run record without crashing the runtime.
+
+---
+
+## 6. Testing & Quality Assurance
+
+The system is validated across comprehensive test suites:
+
+- **Total Backend Pytest Tests**: **214 tests** (212 passed, 2 skipped, 0 failed).
+- **Hardening Suite (`tests/test_phase8_1_runtime_hardening.py`)**: 14 tests verifying production launch, deadlocks, cycles, concurrency, timeouts, and reactivity.
+- **Frontend Vitest Suite (`LysControl`)**: 41 tests across 10 test suites covering UI views, adapters, delegation, and messaging.
+- **Cross-Process Integration**: Validates end-to-end FastAPI subprocess execution and live event synchronization.

@@ -156,6 +156,10 @@ class ExecutionManager:
         else:
             raise TypeError(f"Adapter must be ActorAdapter or callable, got {type(adapter)}")
 
+    @property
+    def default_adapter(self) -> Optional[ActorAdapter]:
+        return self._default_adapter
+
     def get_run(self, run_id: str) -> Optional[AgentRun]:
         return self._runs.get(run_id)
 

@@ -175,6 +175,8 @@ class JobLauncher:
         skip_agent_exec: bool = False,
         control_url_override: Optional[str] = None,
         mode: str = "reactive_runtime",
+        agent_registry: Any = None,
+        start_background: bool = True,
     ) -> Dict[str, Any]:
         """
         Launches an approved sprint execution using the authoritative ReactiveJobEngine runtime.
@@ -205,23 +207,68 @@ class JobLauncher:
                 control_url_override=control_url_override,
             )
 
+        # Resolve spec paths relative to sprint specification directory
+        spec_dir = spec_file.parent
+        def _resolve_spec_path(val: Optional[str], default: Path) -> Path:
+            if not val:
+                return default.resolve()
+            p = Path(val)
+            if not p.is_absolute():
+                p = spec_dir / p
+            return p.resolve()
+
+        target_repo = _resolve_spec_path(spec.get("target_repo") or spec.get("canonical_repo"), default=self.root_dir)
+        worktree_root = _resolve_spec_path(spec.get("worktree_root"), default=Path.home() / "hermes-worktrees" / sprint_id)
+        runs_root = _resolve_spec_path(spec.get("runs_root"), default=Path.home() / "hermes-runs")
+        run_dir = runs_root / f"run_{timestamp}_{sprint_id}"
+        base_ref = spec.get("base_ref") or spec.get("base_branch", "main")
+        target_branch = spec.get("target_branch", f"sprint/{sprint_id}/integration")
+
         # Build production ReactiveJobEngine
         event_bridge = RuntimeEventBridge(event_bus)
 
-        # Decompose initial tasks from sprint spec phases
+        # Decompose initial tasks from sprint spec phases with normalized metadata
         initial_tasks: List[TaskNode] = []
         phases = spec.get("phases", [])
         for idx, p in enumerate(phases, start=1):
             phase_id = p.get("name") or f"phase_{idx}"
             agent_id = p.get("agent")
             req_caps = p.get("required_capabilities") or []
+            role = p.get("role") or ("builder" if idx == 1 else ("hardener" if idx < len(phases) else "verifier"))
+
+            prompt_file_raw = p.get("prompt_file")
+            prompt_file_resolved = None
+            if prompt_file_raw:
+                p_file = Path(prompt_file_raw)
+                if not p_file.is_absolute():
+                    p_file = (self.root_dir / p_file).resolve()
+                if not p_file.exists():
+                    p_file = (spec_dir / prompt_file_raw).resolve()
+                prompt_file_resolved = p_file
+
+            normalized_meta = {
+                "phase": p,
+                "order": idx,
+                "role": role,
+                "prompt_file": str(prompt_file_resolved) if prompt_file_resolved else None,
+                "expected_handoff": p.get("expected_handoff"),
+                "commit_message": p.get("commit_message") or f"feat({phase_id}): implement {phase_id}",
+                "worktree_dir": p.get("worktree_dir") or phase_id,
+                "branch": p.get("branch") or f"sprint/{phase_id}",
+                "base_branch": target_branch,
+                "execution_backend": p.get("execution_backend") or spec.get("execution_backend") or "subprocess",
+                "timeout_seconds": p.get("timeout_seconds") or spec.get("limits", {}).get("timeout_seconds", 300),
+                "tool_policy": spec.get("tool_policy") or spec.get("limits", {}).get("tool_policy"),
+                "options": p.get("cmd_options", {}),
+            }
+
             t = TaskNode(
                 task_id=phase_id,
                 job_id=job_id,
-                description=p.get("prompt_file") or p.get("name") or f"Execute sprint phase {idx}",
+                description=str(prompt_file_resolved) if prompt_file_resolved else (p.get("name") or f"Execute sprint phase {idx}"),
                 assigned_actor=agent_id,
                 required_capabilities=req_caps,
-                metadata={"phase": p, "order": idx, "timeout_seconds": p.get("timeout_seconds")},
+                metadata=normalized_meta,
             )
             if p.get("dependencies"):
                 t.dependencies = list(p["dependencies"])
@@ -231,14 +278,22 @@ class JobLauncher:
             initial_tasks.append(t)
 
         actor_adapter = HermesActorAdapter(
-            target_repo=self.root_dir,
+            target_repo=target_repo,
+            worktree_root=worktree_root,
+            run_dir=run_dir,
             dry_run=dry_run,
             skip_agent_exec=skip_agent_exec,
+            agent_registry=agent_registry,
+            spec=spec,
+            job_id=job_id,
+            base_ref=base_ref,
+            target_branch=target_branch,
         )
 
         verifier_adapter = HermesVerifierAdapter(
             verification_steps=spec.get("verification_steps") or spec.get("verification", []),
-            working_dir=self.root_dir,
+            working_dir=target_repo,
+            worktree_root=worktree_root,
         )
 
         runtime_limits = RuntimeLimits(
@@ -252,8 +307,8 @@ class JobLauncher:
             job_id=job_id,
             goal=spec.get("name", f"Hermes Sprint {sprint_id}"),
             title=spec.get("name", f"Hermes Sprint {sprint_id}"),
-            repository=spec.get("target_repo", "—"),
-            branch=spec.get("target_branch", f"hermes/{sprint_id}/integration"),
+            repository=str(target_repo),
+            branch=target_branch,
             priority="P1",
             actor_adapter=actor_adapter,
             verifier=verifier_adapter,
@@ -287,9 +342,10 @@ class JobLauncher:
             },
         )
 
-        # Start execution loop asynchronously in background
-        self._start_engine_background(engine)
-        logger.info("Launched reactive job %s for sprint %s (mode: %s)", job_id, sprint_id, mode)
+        # Start execution loop asynchronously in background if requested
+        if start_background:
+            self._start_engine_background(engine)
+        logger.info("Launched reactive job %s for sprint %s (mode: %s, background: %s)", job_id, sprint_id, mode, start_background)
 
         return {
             "jobId": job_id,

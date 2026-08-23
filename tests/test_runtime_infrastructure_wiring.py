@@ -15,6 +15,7 @@ from pathlib import Path
 import pytest
 import shutil
 import subprocess
+import sys
 import tempfile
 import time
 from typing import Any, Dict, List, Optional
@@ -307,3 +308,132 @@ async def test_production_planner_decomposition_and_replanning():
     assert replan_result.mutations[0].mutation_type == GraphMutationType.ADD_TASK
     assert "Playwright test failed" in replan_result.mutations[0].task.description
     assert replan_result.mutations[0].task.required_capabilities == ["implementation", "testing.unit"]
+
+
+# -----------------------------------------------------------------------------
+# 6. Real-Spec End-to-End Reactive Job Execution
+# -----------------------------------------------------------------------------
+
+@pytest.mark.anyio
+async def test_real_spec_end_to_end_reactive_execution(temp_git_repo):
+    """
+    Tests complete Phase 8.1.2 end-to-end integration:
+    - Real sprint specification loaded and paths resolved.
+    - Phase 1 (scaffold/builder): creates math_module.py, commits, merges into integration worktree.
+    - Phase 2 (harden/hardener): syncs from integration HEAD, creates test_math.py, commits, merges.
+    - Verification: runs pytest against the integration worktree where both files exist.
+    - Engine reaches COMPLETED state.
+    """
+    from jobs.job_launcher import job_launcher
+    from jobs.job_service import job_service
+
+    sprint_id = "test-real-e2e-sprint"
+    sprint_file = Path(f"sprints/{sprint_id}.json")
+    sprint_file.parent.mkdir(parents=True, exist_ok=True)
+
+    wt_root = temp_git_repo / ".worktrees"
+    runs_root = temp_git_repo / ".runs"
+
+    sprint_spec = {
+        "sprint_id": sprint_id,
+        "name": "E2E Real Spec Execution",
+        "target_repo": str(temp_git_repo),
+        "worktree_root": str(wt_root),
+        "runs_root": str(runs_root),
+        "base_branch": "main",
+        "target_branch": f"sprint/{sprint_id}/integration",
+        "phases": [
+            {
+                "name": "scaffold_math",
+                "agent": "mock_builder",
+                "role": "builder",
+                "worktree_dir": "wt_scaffold",
+                "branch": f"sprint/{sprint_id}/scaffold",
+                "commit_message": "feat(scaffold): create math_module.py",
+            },
+            {
+                "name": "harden_math",
+                "agent": "mock_hardener",
+                "role": "hardener",
+                "worktree_dir": "wt_harden",
+                "branch": f"sprint/{sprint_id}/harden",
+                "commit_message": "feat(harden): add test_math.py",
+                "dependencies": ["scaffold_math"],
+            }
+        ],
+        "verification_steps": [
+            {
+                "name": "run_unit_tests",
+                "command": [sys.executable, "-m", "pytest", "test_math.py", "-v"],
+                "timeout_seconds": 15,
+            }
+        ]
+    }
+
+    sprint_file.write_text(json.dumps(sprint_spec, indent=2), encoding="utf-8")
+
+    # Mock agent registry generating code files
+    class MockBuilderAgent:
+        name = "mock_builder"
+        def execute(self, context):
+            code_file = context.worktree / "math_module.py"
+            code_file.write_text("def add(a, b):\n    return a + b\n")
+            class Res:
+                exit_code = 0
+                stdout = "Created math_module.py"
+                stderr = ""
+            return Res()
+
+    class MockHardenerAgent:
+        name = "mock_hardener"
+        def execute(self, context):
+            # Verify math_module.py was integrated into this worktree from Phase 1
+            assert (context.worktree / "math_module.py").exists(), "math_module.py must exist in worktree from integration HEAD!"
+            test_file = context.worktree / "test_math.py"
+            test_file.write_text("from math_module import add\n\ndef test_add():\n    assert add(2, 3) == 5\n")
+            class Res:
+                exit_code = 0
+                stdout = "Created test_math.py"
+                stderr = ""
+            return Res()
+
+    class CustomAgentRegistry:
+        def get(self, name):
+            if name == "mock_builder":
+                return MockBuilderAgent()
+            elif name == "mock_hardener":
+                return MockHardenerAgent()
+            raise ValueError(f"Unknown agent: {name}")
+
+    try:
+        # Launch job with custom agent registry without auto-starting background loop
+        launch_res = job_launcher.launch(
+            sprint_id=sprint_id,
+            dry_run=False,
+            agent_registry=CustomAgentRegistry(),
+            start_background=False,
+        )
+        job_id = launch_res["jobId"]
+        engine = job_service.get_engine(job_id)
+        assert engine is not None
+
+        # Run engine to completion
+        await engine.run_until_complete(max_steps=15)
+
+        assert engine.state == JobState.COMPLETED
+        assert engine.graph.is_all_completed() is True
+
+        # Verify integration worktree has merged files
+        integration_dir = wt_root / "integration"
+        assert integration_dir.exists()
+        assert (integration_dir / "math_module.py").exists()
+        assert (integration_dir / "test_math.py").exists()
+
+        # Verify git history in integration worktree contains both commits
+        log_res = subprocess.run(["git", "log", "--oneline"], cwd=str(integration_dir), capture_output=True, text=True)
+        assert "feat(scaffold)" in log_res.stdout
+        assert "feat(harden)" in log_res.stdout
+
+    finally:
+        if sprint_file.exists():
+            sprint_file.unlink()

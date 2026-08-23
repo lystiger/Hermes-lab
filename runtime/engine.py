@@ -119,6 +119,10 @@ class ReactiveJobEngine:
         return self.job.state
 
     @property
+    def actor_adapter(self) -> Optional[ActorAdapter]:
+        return self.execution_manager.default_adapter if self.execution_manager else None
+
+    @property
     def is_terminal(self) -> bool:
         return self.job.is_terminal
 

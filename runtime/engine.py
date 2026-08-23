@@ -1,7 +1,7 @@
 import asyncio
 from datetime import datetime, timezone
 import logging
-from typing import Any, Callable, Dict, List, Optional, Union
+from typing import Any, Callable, Dict, List, Optional, Set, Union
 
 from runtime.job_state import JobRecord, JobState, TERMINAL_JOB_STATES
 from runtime.task_graph import TaskGraph, TaskNode, TaskStatus

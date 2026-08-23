@@ -244,7 +244,18 @@ async def test_tool_execution_bridge(temp_git_repo):
         custom_read_tool,
     )
 
-    adapter = HermesActorAdapter(target_repo=temp_git_repo, tool_registry=tools)
+    # Tool access requires an explicit policy: there is no permissive default.
+    adapter = HermesActorAdapter(
+        target_repo=temp_git_repo,
+        tool_registry=tools,
+        spec={
+            "tool_policy": {
+                "allow_tools": True,
+                "allowed_tools": ["tool.read_file"],
+                "read_only_only": False,
+            }
+        },
+    )
 
     task = TaskNode(
         task_id="read_readme",

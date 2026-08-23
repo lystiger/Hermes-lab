@@ -214,6 +214,14 @@ Phase 8.1: Runtime Integration & Invariant Hardening
    ├── Concurrency tracking (ACTOR_BUSY vs NO_CAPABLE_ACTOR)
    ├── Execution timeouts with TIMED_OUT run states
    └── FIRST_COMPLETED event reactivity unlocking ready dependent tasks
+
+Phase 8.1.3: Async Execution & Fail-Closed Runtime
+   ├── Blocking agent/Git work dispatched off the event loop (asyncio.to_thread)
+   ├── Per-repository Git mutation lock serializing commits and integration merges
+   ├── Fail-closed worktree creation, validation, and integration fetch/reset
+   ├── context.root resolved once at launcher/spec-normalization time
+   ├── No permissive default ToolPolicy; runtime-stamped tool requester identity
+   └── Bounded OBSERVATION_DISCOVERY graph expansion
 ```
 
 ---
@@ -229,6 +237,13 @@ Phase 8.1: Runtime Integration & Invariant Hardening
 7. **Terminal State Guards**: Once a job transitions to a terminal state (`BLOCKED`, `COMPLETED`, `CANCELLED`), subsequent steps cannot illegally transition back to active states.
 8. **Concurrency & Busy Safety**: An actor currently executing a task defers additional tasks as `READY` rather than falsely blocking them.
 9. **Timeout Containment**: Task execution exceeding configured limits generates a structured failure and `TIMED_OUT` run record without crashing the runtime.
+10. **Non-Blocking Execution**: Agent CLI processes, tool subprocesses, and Git commands run on worker threads; a blocking agent never stalls the engine's event loop.
+11. **Serialized Git Mutation**: All worktree creation, commit, sync, and integration-merge operations against one repository are held under a single process-wide reentrant lock; concurrent tasks execute their agents in parallel but mutate Git one at a time.
+12. **Fail-Closed Infrastructure**: A worktree that cannot be created or validated, or an integration fetch/reset that fails, fails the task with a `worktree_error` exit reason. The runtime never degrades to an unversioned directory or a stale base, and only a directory that is the top level of its own worktree is treated as one.
+13. **Fail-Closed Tool Policy**: There is no permissive default `ToolPolicy`. When neither the task nor the spec declares one, `allowed_tools` is unset and the registry rejects the invocation.
+14. **Runtime-Stamped Requester Identity**: Every tool invocation carries a requester assigned by the runtime. Identity on agent-emitted embedded requests is overwritten, so an agent cannot claim a privileged identity to bypass capability gating.
+15. **Bounded Discovery Expansion**: Observation-driven replanning expands the graph only for observations explicitly flagged `requires_follow_up`, capped per replan, gated on remaining replan budget, and idempotent through observation-derived task IDs.
+16. **Single Point of Path Resolution**: `context.root` is resolved and validated at launcher/spec-normalization time relative to the sprint specification directory; the adapter rejects an unresolved relative root rather than re-resolving it against a different base.
 
 ---
 
@@ -236,7 +251,8 @@ Phase 8.1: Runtime Integration & Invariant Hardening
 
 The system is validated across comprehensive test suites:
 
-- **Total Backend Pytest Tests**: **214 tests** (212 passed, 2 skipped, 0 failed).
+- **Total Backend Pytest Tests**: **240 tests** (238 passed, 2 skipped, 0 failed).
 - **Hardening Suite (`tests/test_phase8_1_runtime_hardening.py`)**: 14 tests verifying production launch, deadlocks, cycles, concurrency, timeouts, and reactivity.
+- **Async & Fail-Closed Suite (`tests/test_phase8_1_3_async_failclosed.py`)**: 20 tests verifying off-loop concurrent agent execution, serialized Git mutation, worktree and sync fail-closure, context resolution, tool policy and requester identity, and bounded discovery expansion.
 - **Frontend Vitest Suite (`LysControl`)**: 41 tests across 10 test suites covering UI views, adapters, delegation, and messaging.
 - **Cross-Process Integration**: Validates end-to-end FastAPI subprocess execution and live event synchronization.

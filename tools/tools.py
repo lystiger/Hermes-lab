@@ -258,8 +258,10 @@ class ToolRegistry:
         tool_id = request.toolId
         req_id = request.id or "unknown"
         requester_id = ""
+        requester_kind = ""
         if isinstance(request.requester, dict):
             requester_id = str(request.requester.get("id", "")).strip()
+            requester_kind = str(request.requester.get("kind", "")).strip().lower()
         elif request.requester:
             requester_id = str(request.requester).strip()
 
@@ -366,7 +368,12 @@ class ToolRegistry:
         request.timeoutSeconds = req_timeout
 
         # 7. Policy constraint: require_actor_capability
-        if policy_obj.require_actor_capability and requester_id and profile.capabilities:
+        # Capability gating governs agents. A requester of kind "runtime" is the Hermes
+        # controller itself dispatching a tool task it already scheduled; it is not a
+        # registered capability-bearing actor. The kind is stamped by the runtime and is
+        # never read from agent output, so an agent cannot claim it to bypass this check.
+        is_controller = requester_kind == "runtime"
+        if policy_obj.require_actor_capability and requester_id and profile.capabilities and not is_controller:
             cap_reg = capability_registry
             if not cap_reg:
                 from capabilities.capabilities import default_capability_registry

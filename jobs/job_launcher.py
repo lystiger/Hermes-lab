@@ -17,7 +17,13 @@ from jobs.job_state_reducer import job_state_reducer
 from runtime.engine import ReactiveJobEngine
 from runtime.job_state import JobRecord, JobState
 from runtime.task_graph import TaskNode
-from runtime.hermes_adapter import HermesActorAdapter, HermesVerifierAdapter, HermesPlannerAdapter
+from runtime.hermes_adapter import (
+    HermesActorAdapter,
+    HermesVerifierAdapter,
+    HermesPlannerAdapter,
+    ContextSpecError,
+    resolve_context_spec,
+)
 from runtime.events import RuntimeEventBridge
 from runtime.limits import RuntimeLimits
 
@@ -223,6 +229,15 @@ class JobLauncher:
         run_dir = runs_root / f"run_{timestamp}_{sprint_id}"
         base_ref = spec.get("base_ref") or spec.get("base_branch", "main")
         target_branch = spec.get("target_branch", f"sprint/{sprint_id}/integration")
+
+        # Resolve and validate context.root here, at spec-normalization time, relative to the
+        # sprint specification directory. The adapter must never re-resolve it against the
+        # target repository or the process working directory, which yields a different path.
+        if "context" in spec:
+            try:
+                spec["context"] = resolve_context_spec(spec["context"], spec_dir)
+            except ContextSpecError as exc:
+                raise ValueError(f"Invalid context specification in sprint '{sprint_id}': {exc}") from exc
 
         # Build production ReactiveJobEngine
         event_bridge = RuntimeEventBridge(event_bus)

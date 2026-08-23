@@ -146,6 +146,11 @@ class ProductionPlannerAdapter(PlannerAdapter):
     into concrete TaskNode DAGs and incremental GraphMutation operations.
     """
 
+    # Observation kinds that may justify expanding the graph with follow-up work.
+    EXPANDABLE_OBSERVATION_KINDS = ("discovery", "requirement", "gap", "missing_work")
+    # Hard ceiling on tasks added by a single observation-driven expansion.
+    MAX_DISCOVERY_TASKS_PER_REPLAN = 3
+
     def __init__(self, limits: Optional[RuntimeLimits] = None):
         self.limits = limits or RuntimeLimits()
 
@@ -214,6 +219,10 @@ class ProductionPlannerAdapter(PlannerAdapter):
         import time
         mutations = []
         reason_str = str(request.reason.value if hasattr(request.reason, "value") else request.reason).lower()
+
+        # 0. Observation-driven discovery: one bounded graph expansion.
+        if "observation" in reason_str or "discovery" in reason_str:
+            return self._plan_observation_discovery(request)
 
         # 1. Verification Failure / Repair
         if "verification" in reason_str or "repair" in reason_str:
@@ -299,6 +308,98 @@ class ProductionPlannerAdapter(PlannerAdapter):
                 )
 
         return ReplanResult(mutations=[], explanation=f"No automatic mutations required for {reason_str}", should_continue=False)
+
+    def _plan_observation_discovery(self, request: ReplanRequest) -> ReplanResult:
+        """
+        Expands the graph once from observations that explicitly request follow-up work.
+
+        Bounded on four axes so discovery can never drive an unbounded planning loop:
+        - the replan budget must not be exhausted;
+        - only observations carrying an explicit `requires_follow_up` signal qualify, so the
+          routine `discovery` observations every task emits do not generate tasks;
+        - at most MAX_DISCOVERY_TASKS_PER_REPLAN tasks are added per expansion;
+        - task ids are derived from the observation id, so re-expanding the same observation
+          produces a duplicate the graph rejects instead of a second task.
+        """
+        if request.replan_budget_remaining <= 0:
+            return ReplanResult(
+                mutations=[],
+                explanation="Observation discovery skipped: replan budget exhausted",
+                should_continue=False,
+            )
+
+        candidates = []
+        for obs in request.new_observations:
+            if str(obs.kind).lower() not in self.EXPANDABLE_OBSERVATION_KINDS:
+                continue
+            meta = obs.metadata or {}
+            if not meta.get("requires_follow_up"):
+                continue
+            candidates.append(obs)
+
+        if not candidates:
+            return ReplanResult(
+                mutations=[],
+                explanation="No observations requested follow-up work; graph unchanged",
+                should_continue=False,
+            )
+
+        mutations: List[GraphMutation] = []
+        explanation_parts: List[str] = []
+        for obs in candidates[: self.MAX_DISCOVERY_TASKS_PER_REPLAN]:
+            meta = obs.metadata or {}
+            task_id = f"discover_{obs.id}"
+            if request.current_graph.get_task(task_id) is not None:
+                continue
+
+            description = str(meta.get("follow_up_task") or obs.content or "Investigate discovered work")
+            required_caps = meta.get("required_capabilities") or ["implementation"]
+            if isinstance(required_caps, str):
+                required_caps = [required_caps]
+
+            node = TaskNode(
+                task_id=task_id,
+                job_id=request.job_id,
+                description=description[:500],
+                required_capabilities=list(required_caps),
+                metadata={
+                    "observation_ref": obs.id,
+                    "origin": "observation_discovery",
+                    "source_task_id": obs.task_id,
+                },
+                max_attempts=min(2, self.limits.max_task_attempts),
+            )
+
+            # Discovered work depends on the task that surfaced it when that task is still
+            # in the graph, so the expansion cannot run ahead of the work that produced it.
+            if obs.task_id and request.current_graph.get_task(obs.task_id) is not None:
+                node.dependencies = [obs.task_id]
+
+            mutations.append(
+                GraphMutation(
+                    mutation_type=GraphMutationType.ADD_TASK,
+                    task=node,
+                    reason=f"Observation {obs.id} requested follow-up work",
+                )
+            )
+            explanation_parts.append(f"Added discovery task '{task_id}' from observation {obs.id}")
+
+        if not mutations:
+            return ReplanResult(
+                mutations=[],
+                explanation="All requested follow-up work is already present in the graph",
+                should_continue=False,
+            )
+
+        skipped = max(0, len(candidates) - self.MAX_DISCOVERY_TASKS_PER_REPLAN)
+        if skipped:
+            explanation_parts.append(f"{skipped} further observation(s) deferred by expansion bound")
+
+        return ReplanResult(
+            mutations=mutations,
+            explanation="; ".join(explanation_parts),
+            should_continue=True,
+        )
 
 
 # Alias for production planner adapter

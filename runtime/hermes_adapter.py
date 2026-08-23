@@ -1,5 +1,5 @@
 """
-Hermes Execution Infrastructure Adapters for Phase 8.1.2.
+Hermes Execution Infrastructure Adapters for Phase 8.1.3.
 Provides:
 1. Spec path resolution relative to specification directory and control root.
 2. Normalized TaskNode metadata mapping (role, worktree_dir, branch, handoff, backend).
@@ -8,9 +8,10 @@ Provides:
 5. Merge of successful task commits into integration worktree.
 6. Dependent task synchronization from integration HEAD.
 7. Verification against the authoritative integration worktree.
-8. Fail-closed error handling on worktree, syntax, and Git merge errors.
-9. Full preservation and enforcement of job ToolPolicy.
+8. Fail-closed error handling on worktree, sync, syntax, and Git merge errors.
+9. Full preservation and enforcement of job ToolPolicy with no permissive default.
 10. Production planner adapter (HermesPlannerAdapter / ProductionPlannerAdapter).
+11. Blocking agent/Git work executed off the event loop under a per-repository lock.
 """
 
 import asyncio
@@ -19,8 +20,8 @@ import json
 import logging
 import os
 from pathlib import Path, PureWindowsPath
-import py_compile
 import subprocess
+import threading
 import time
 from typing import Any, Dict, List, Optional, Sequence, Union
 
@@ -42,6 +43,100 @@ from tools.tools import (
 )
 
 logger = logging.getLogger("hermes.runtime.hermes_adapter")
+
+DEFAULT_CONTEXT_MAX_BYTES = 131072
+
+
+class WorktreeError(RuntimeError):
+    """Raised when a Git worktree cannot be created, validated, or synchronized."""
+
+
+class ContextSpecError(ValueError):
+    """Raised when a sprint specification declares an unusable context bundle."""
+
+
+# Git mutations against one repository (worktree add, commit, integration merge,
+# fetch/reset) are serialized per repository. Task worktrees are separate directories
+# but share a single object store and `.git/worktrees` metadata, and the integration
+# worktree is written by every task, so concurrent mutation corrupts shared state.
+_REPO_GIT_LOCKS: Dict[str, threading.RLock] = {}
+_REPO_GIT_LOCKS_GUARD = threading.Lock()
+
+
+def repo_git_lock(repo_path: Union[str, Path]) -> threading.RLock:
+    """Returns the process-wide reentrant Git mutation lock for a repository path."""
+    key = str(Path(repo_path).resolve())
+    with _REPO_GIT_LOCKS_GUARD:
+        lock = _REPO_GIT_LOCKS.get(key)
+        if lock is None:
+            lock = threading.RLock()
+            _REPO_GIT_LOCKS[key] = lock
+        return lock
+
+
+def resolve_context_spec(context: Any, spec_dir: Path) -> Dict[str, Any]:
+    """
+    Normalizes a spec `context` block at launcher/spec-normalization time.
+
+    `context.root` is resolved relative to the sprint specification directory (never
+    the process working directory or the target repository), validated to be an
+    existing directory, and returned as an absolute path. Files are validated to be
+    relative and contained within the resolved root.
+
+    Raises ContextSpecError when the declared bundle cannot be resolved.
+    """
+    if not isinstance(context, dict):
+        raise ContextSpecError("'context' must be a JSON object")
+
+    root_value = context.get("root")
+    if not isinstance(root_value, str) or not root_value.strip():
+        raise ContextSpecError("context.root must be a non-empty path string")
+
+    root_path = Path(root_value)
+    if not root_path.is_absolute():
+        if PureWindowsPath(root_value).anchor:
+            raise ContextSpecError("context.root must use a path native to the current platform")
+        root_path = Path(spec_dir) / root_path
+    root_path = root_path.resolve()
+    if not root_path.is_dir():
+        raise ContextSpecError(f"context.root does not exist or is not a directory: {root_value}")
+
+    files = context.get("files")
+    if (
+        not isinstance(files, list)
+        or not files
+        or any(not isinstance(item, str) or not item.strip() for item in files)
+    ):
+        raise ContextSpecError("context.files must be a non-empty array of non-empty strings")
+
+    max_bytes = context.get("max_bytes", DEFAULT_CONTEXT_MAX_BYTES)
+    if isinstance(max_bytes, bool) or not isinstance(max_bytes, int) or max_bytes <= 0:
+        raise ContextSpecError("context.max_bytes must be a positive integer")
+
+    normalized_files: List[str] = []
+    seen: set = set()
+    for file_value in files:
+        native_path = Path(file_value)
+        windows_path = PureWindowsPath(file_value)
+        if native_path.is_absolute() or windows_path.anchor or ".." in windows_path.parts:
+            raise ContextSpecError(f"context file must be relative and contained: {file_value}")
+        resolved = (root_path / native_path).resolve()
+        try:
+            resolved.relative_to(root_path)
+        except ValueError as error:
+            raise ContextSpecError(f"Context file escapes context.root: {file_value}") from error
+        logical = resolved.relative_to(root_path).as_posix()
+        if logical in seen:
+            raise ContextSpecError(f"duplicate normalized context file: {file_value}")
+        seen.add(logical)
+        normalized_files.append(logical)
+
+    normalized = dict(context)
+    normalized["root"] = str(root_path)
+    normalized["files"] = normalized_files
+    normalized["max_bytes"] = max_bytes
+    normalized["root_resolved"] = True
+    return normalized
 
 
 class HermesActorAdapter(ActorAdapter):
@@ -82,35 +177,53 @@ class HermesActorAdapter(ActorAdapter):
         self.target_branch = target_branch
         self.logger = logger
         self.persona_enabled = True
+        self.controller_id = f"hermes.runtime:{self.job_id}"
+        self._git_lock = repo_git_lock(self.target_repo)
         self.context_bundle = self._load_context_bundle()
         self._integration_ready = False
 
     def _load_context_bundle(self) -> str:
-        """Loads and formats context bundle if declared in spec."""
+        """
+        Loads and formats the context bundle declared in the spec.
+
+        `context.root` must already be an absolute, resolved path: normalization is the
+        launcher's responsibility (see resolve_context_spec). An unresolved relative root
+        is a specification error and fails closed rather than being silently re-resolved
+        against the target repository or the process working directory.
+        """
         if not self.spec or "context" not in self.spec:
             return ""
         ctx = self.spec["context"]
         if not isinstance(ctx, dict):
-            return ""
+            raise ContextSpecError("'context' must be a JSON object")
+
         root_val = ctx.get("root")
-        files = ctx.get("files", [])
+        files = ctx.get("files") or []
         if not root_val or not files:
-            return ""
+            raise ContextSpecError("context requires both a 'root' and a non-empty 'files' list")
+
         root_path = Path(root_val)
         if not root_path.is_absolute():
-            root_path = (self.target_repo / root_path).resolve()
+            raise ContextSpecError(
+                f"context.root must be resolved to an absolute path before execution: {root_val}"
+            )
         if not root_path.is_dir():
-            return ""
+            raise ContextSpecError(f"context.root does not exist or is not a directory: {root_val}")
 
         sections = ["--- LYSSTACK CONTEXT BUNDLE ---"]
         for f_name in files:
             f_path = (root_path / f_name).resolve()
-            if f_path.is_file():
-                try:
-                    content = f_path.read_text(encoding="utf-8")
-                    sections.append(f"[{f_name}]\n{content}")
-                except Exception as e:
-                    logger.warning("Could not read context file %s: %s", f_path, e)
+            try:
+                f_path.relative_to(root_path)
+            except ValueError as error:
+                raise ContextSpecError(f"Context file escapes context.root: {f_name}") from error
+            if not f_path.is_file():
+                raise ContextSpecError(f"Context file does not exist: {f_name}")
+            try:
+                content = f_path.read_text(encoding="utf-8")
+            except (OSError, UnicodeError) as error:
+                raise ContextSpecError(f"Unable to read UTF-8 context file: {f_name}") from error
+            sections.append(f"[{f_name}]\n{content}")
         sections.append("--- END CONTEXT BUNDLE ---")
         return "\n\n".join(sections)
 
@@ -141,89 +254,161 @@ class HermesActorAdapter(ActorAdapter):
         except Exception:
             return False
 
+    @staticmethod
+    def _is_worktree_root(path: Path) -> bool:
+        """
+        True only when path is the top level of its own Git worktree.
+
+        `--is-inside-work-tree` is true for any directory nested inside a repository, so it
+        cannot distinguish a real worktree from a plain subdirectory of the target repo
+        (worktree_root commonly lives inside it). Treating such a subdirectory as a worktree
+        would point `git reset --hard` at the target repository itself.
+        """
+        if not path.exists() or not path.is_dir():
+            return False
+        try:
+            res = subprocess.run(
+                ["git", "rev-parse", "--show-toplevel"],
+                cwd=str(path),
+                capture_output=True,
+                text=True,
+            )
+        except Exception:
+            return False
+        if res.returncode != 0:
+            return False
+        try:
+            return Path(res.stdout.strip()).resolve() == path.resolve()
+        except OSError:
+            return False
+
     def ensure_integration_worktree(self) -> Path:
         """
         Creates or validates the authoritative integration worktree on target_branch.
+
+        Fails closed: when the target repository is a Git repository, a missing or
+        non-Git integration directory is an error rather than a plain directory fallback.
         """
         integration_dir = self.worktree_root / "integration"
         if not self._is_git_repo(self.target_repo):
             integration_dir.mkdir(parents=True, exist_ok=True)
             return integration_dir
 
-        if self._integration_ready and self._is_git_repo(integration_dir):
-            return integration_dir
+        with self._git_lock:
+            if self._integration_ready and self._is_worktree_root(integration_dir):
+                return integration_dir
 
-        self.worktree_root.mkdir(parents=True, exist_ok=True)
-        if not integration_dir.exists():
-            self._ensure_worktree(integration_dir, branch=self.target_branch, base_branch=self.base_ref)
-        self._integration_ready = True
-        return integration_dir
+            self.worktree_root.mkdir(parents=True, exist_ok=True)
+            if not self._is_worktree_root(integration_dir):
+                self._ensure_worktree(integration_dir, branch=self.target_branch, base_branch=self.base_ref)
+
+            if not self._is_worktree_root(integration_dir):
+                raise WorktreeError(
+                    f"Integration worktree at {integration_dir} is not a valid Git worktree; "
+                    "refusing to run against an unversioned integration directory"
+                )
+            self._integration_ready = True
+            return integration_dir
 
     def _ensure_worktree(self, path: Path, branch: str, base_branch: str) -> Path:
         """
         Ensures a clean Git worktree exists at path checked out on branch.
+
+        Fails closed: if the target repository is a Git repository, any failure to create
+        or validate the worktree raises WorktreeError. Falling back to a plain directory
+        would run an agent against unversioned files whose output can never be committed,
+        integrated, or verified.
         """
         if not self._is_git_repo(self.target_repo):
             path.mkdir(parents=True, exist_ok=True)
             return path
 
-        path.parent.mkdir(parents=True, exist_ok=True)
-        if path.exists():
-            # Validate existing worktree
-            res = subprocess.run(
-                ["git", "rev-parse", "--is-inside-work-tree"],
-                cwd=str(path),
-                capture_output=True,
-                text=True,
-            )
-            if res.returncode == 0 and res.stdout.strip() == "true":
-                # Check for dirty uncommitted changes and clean them
-                dirty = subprocess.run(["git", "status", "--porcelain"], cwd=str(path), capture_output=True, text=True)
-                if dirty.stdout.strip():
-                    logger.warning("Resetting dirty uncommitted changes in worktree at %s", path.name)
-                    self.run_cmd(["git", "reset", "--hard", "HEAD"], cwd=path, check=False)
-                return path
+        with self._git_lock:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            if path.exists():
+                if self._is_worktree_root(path):
+                    # Check for dirty uncommitted changes and clean them
+                    dirty = subprocess.run(["git", "status", "--porcelain"], cwd=str(path), capture_output=True, text=True)
+                    if dirty.stdout.strip():
+                        logger.warning("Resetting dirty uncommitted changes in worktree at %s", path.name)
+                        self.run_cmd(["git", "reset", "--hard", "HEAD"], cwd=path)
+                    return path
+                if any(path.iterdir()):
+                    raise WorktreeError(
+                        f"Worktree path {path} already exists and is not a Git worktree root; refusing to reuse it"
+                    )
 
-        # Check if branch exists
-        res_branch = self.run_cmd(["git", "branch", "--list", branch], cwd=self.target_repo, check=False)
-        if res_branch.stdout.strip():
-            cmd = ["git", "worktree", "add", str(path), branch]
-        else:
-            cmd = ["git", "worktree", "add", "-b", branch, str(path), base_branch]
+            # Check if branch exists
+            res_branch = self.run_cmd(["git", "branch", "--list", branch], cwd=self.target_repo, check=False)
+            if res_branch.stdout.strip():
+                cmd = ["git", "worktree", "add", str(path), branch]
+            else:
+                cmd = ["git", "worktree", "add", "-b", branch, str(path), base_branch]
 
-        proc = subprocess.run(cmd, cwd=str(self.target_repo), capture_output=True, text=True)
-        if proc.returncode != 0:
-            logger.warning("Git worktree creation command '%s' failed (rc=%s): %s; using directory", cmd, proc.returncode, proc.stderr)
-            path.mkdir(parents=True, exist_ok=True)
+            proc = subprocess.run(cmd, cwd=str(self.target_repo), capture_output=True, text=True)
+            if proc.returncode != 0:
+                detail = (proc.stderr.strip() or proc.stdout.strip() or f"exit code {proc.returncode}")
+                raise WorktreeError(
+                    f"Git worktree creation failed for branch '{branch}' at {path}: {detail}"
+                )
 
-        return path
+            if not self._is_worktree_root(path):
+                raise WorktreeError(f"Git reported success but {path} is not a valid worktree root")
+
+            return path
 
     def sync_task_worktree_from_integration(self, worktree_path: Path) -> None:
         """
         Synchronizes a task worktree from the latest integration branch HEAD.
+
+        Fails closed: a failed fetch or reset leaves the task on a stale base, so the agent
+        would build against the wrong tree and produce a commit that silently reverts
+        already-integrated work. Both commands raise on failure.
         """
-        if not self._is_git_repo(worktree_path):
-            logger.warning("sync_task_worktree_from_integration: %s is not a git repo", worktree_path)
+        if not self._is_git_repo(self.target_repo):
             return
+        if not self._is_worktree_root(worktree_path):
+            raise WorktreeError(
+                f"Cannot synchronize {worktree_path}: not a Git worktree root of {self.target_repo}"
+            )
+
         logger.info("Synchronizing task worktree %s from %s", worktree_path.name, self.target_branch)
-        f_res = self.run_cmd(["git", "fetch", ".", self.target_branch], cwd=worktree_path, check=False)
-        r_res = self.run_cmd(["git", "reset", "--hard", "FETCH_HEAD"], cwd=worktree_path, check=False)
-        log_res = self.run_cmd(["git", "log", "-n", "3", "--oneline"], cwd=worktree_path, check=False)
-        logger.info("Synced %s (fetch_rc=%s, reset_rc=%s):\n%s\nFiles: %s", worktree_path.name, f_res.returncode, r_res.returncode, log_res.stdout, list(worktree_path.glob('*')))
+        with self._git_lock:
+            try:
+                self.run_cmd(["git", "fetch", ".", self.target_branch], cwd=worktree_path)
+                self.run_cmd(["git", "reset", "--hard", "FETCH_HEAD"], cwd=worktree_path)
+            except RuntimeError as exc:
+                raise WorktreeError(
+                    f"Failed to synchronize {worktree_path.name} from '{self.target_branch}': {exc}"
+                ) from exc
+            log_res = self.run_cmd(["git", "log", "-n", "3", "--oneline"], cwd=worktree_path, check=False)
+        logger.info("Synced %s from %s:\n%s", worktree_path.name, self.target_branch, log_res.stdout)
 
     def inspect_changed_files(self, worktree_path: Path) -> List[str]:
         """Returns list of changed files in worktree."""
-        if not self._is_git_repo(worktree_path):
+        if not self._is_worktree_root(worktree_path):
             return []
         res = self.run_cmd(["git", "status", "--porcelain", "--untracked-files=all"], cwd=worktree_path, check=False)
         return [line.strip() for line in res.stdout.splitlines() if line.strip()]
 
     def validate_python_syntax(self, worktree_path: Path) -> None:
-        """Validates syntax of all Python files in the worktree."""
+        """
+        Validates syntax of all Python files in the worktree.
+
+        Compiles in-memory rather than via py_compile so that no __pycache__ artifacts are
+        written into the worktree, which would otherwise be staged into the task commit and
+        trip the verifier-role mutation check.
+        """
         for py_file in worktree_path.rglob("*.py"):
+            if any(part in (".git", "__pycache__") for part in py_file.parts):
+                continue
             try:
-                py_compile.compile(str(py_file), doraise=True)
-            except py_compile.PyCompileError as e:
+                source = py_file.read_text(encoding="utf-8")
+            except (OSError, UnicodeError) as e:
+                raise RuntimeError(f"Unable to read Python file {py_file.name}: {e}")
+            try:
+                compile(source, str(py_file), "exec")
+            except SyntaxError as e:
                 raise RuntimeError(f"Python syntax error in {py_file.name}: {e}")
 
     def _commit_and_integrate_changes(
@@ -234,30 +419,36 @@ class HermesActorAdapter(ActorAdapter):
     ) -> Optional[str]:
         """
         Stages changes, commits them on the task branch, and merges into the integration worktree.
+
+        The commit and the integration merge are held under the repository Git lock as one
+        unit: concurrent tasks share a single object store and a single integration worktree,
+        so interleaved commits and merges would race on `.git` state and on the integration
+        working directory.
         """
-        if not self._is_git_repo(worktree_path):
+        if not self._is_worktree_root(worktree_path):
             return None
 
-        changed_files = self.inspect_changed_files(worktree_path)
-        if not changed_files or role == "verifier":
-            return None
+        with self._git_lock:
+            changed_files = self.inspect_changed_files(worktree_path)
+            if not changed_files or role == "verifier":
+                return None
 
-        commit_msg = task.metadata.get("commit_message") or f"feat({task.task_id}): {task.description[:72]}"
-        logger.info("Staging and committing %d files in %s: %s", len(changed_files), worktree_path.name, commit_msg)
-        self.run_cmd(["git", "add", "."], cwd=worktree_path)
-        self.run_cmd(["git", "commit", "-m", commit_msg], cwd=worktree_path)
+            commit_msg = task.metadata.get("commit_message") or f"feat({task.task_id}): {task.description[:72]}"
+            logger.info("Staging and committing %d files in %s: %s", len(changed_files), worktree_path.name, commit_msg)
+            self.run_cmd(["git", "add", "."], cwd=worktree_path)
+            self.run_cmd(["git", "commit", "-m", commit_msg], cwd=worktree_path)
 
-        commit_sha_res = self.run_cmd(["git", "rev-parse", "HEAD"], cwd=worktree_path)
-        commit_sha = commit_sha_res.stdout.strip()
+            commit_sha_res = self.run_cmd(["git", "rev-parse", "HEAD"], cwd=worktree_path)
+            commit_sha = commit_sha_res.stdout.strip()
 
-        # Merge into integration worktree
-        integration_dir = self.worktree_root / "integration"
-        if self._is_git_repo(integration_dir):
-            logger.info("Merging task commit %s into integration worktree", commit_sha[:7])
-            merge_msg = f"merge({self.job_id}): merge {task.task_id} ({commit_sha[:7]})"
-            self.run_cmd(["git", "merge", "--no-ff", "-m", merge_msg, commit_sha], cwd=integration_dir)
+            # Merge into integration worktree
+            integration_dir = self.worktree_root / "integration"
+            if self._is_worktree_root(integration_dir):
+                logger.info("Merging task commit %s into integration worktree", commit_sha[:7])
+                merge_msg = f"merge({self.job_id}): merge {task.task_id} ({commit_sha[:7]})"
+                self.run_cmd(["git", "merge", "--no-ff", "-m", merge_msg, commit_sha], cwd=integration_dir)
 
-        return commit_sha
+            return commit_sha
 
     def _commit_worktree_changes(self, worktree_path: Path, task: TaskNode) -> List[str]:
         """Compatibility helper returning changed files committed."""
@@ -309,6 +500,92 @@ class HermesActorAdapter(ActorAdapter):
 
         return "\n\n".join(parts)
 
+    def build_tool_job_config(self, task: TaskNode) -> Dict[str, Any]:
+        """
+        Builds the job configuration handed to the ToolRegistry for policy derivation.
+
+        There is no permissive default: when neither the task nor the spec declares a
+        ToolPolicy, the config carries none and ToolPolicy.from_config leaves allowed_tools
+        unset, which the registry rejects. Tool access is granted only by explicit policy.
+        """
+        job_cfg: Dict[str, Any] = dict(self.spec) if isinstance(self.spec, dict) else {}
+        task_policy = task.metadata.get("tool_policy")
+        if isinstance(task_policy, dict):
+            job_cfg["tool_policy"] = task_policy
+        return job_cfg
+
+    def build_requester(
+        self,
+        task: TaskNode,
+        run: AgentRun,
+        actor_id: str,
+        kind: str,
+    ) -> Dict[str, Any]:
+        """
+        Stamps the authoritative requester identity onto a tool invocation.
+
+        The identity is assigned by the runtime, never taken from agent output: an agent
+        that emits an embedded tool request cannot choose who it claims to be, so capability
+        and policy checks always run against the actor that actually made the request.
+        """
+        return {
+            "id": actor_id,
+            "kind": kind,
+            "jobId": task.job_id,
+            "taskId": task.task_id,
+            "runId": run.run_id,
+        }
+
+    def _execute_tool_task(
+        self,
+        task: TaskNode,
+        run: AgentRun,
+        actor_id: str,
+    ) -> TaskExecutionResult:
+        """Blocking tool-actor dispatch; invoked off the event loop."""
+        tool_id = actor_id if actor_id.startswith("tool.") else f"tool.{actor_id}"
+        req_args = task.metadata.get("tool_args") or task.metadata.get("args") or {
+            "task_id": task.task_id,
+            "query": task.description,
+        }
+        # A tool-actor task is dispatched by the runtime itself on behalf of the job,
+        # unless the spec records the agent that delegated it.
+        requester_id = task.metadata.get("requested_by") or self.controller_id
+        requester_kind = "agent" if task.metadata.get("requested_by") else "runtime"
+
+        req = ToolInvocationRequest(
+            toolId=tool_id,
+            args=req_args,
+            jobId=task.job_id,
+            requester=self.build_requester(task, run, requester_id, requester_kind),
+            timeoutSeconds=task.metadata.get("timeout_seconds", 60),
+        )
+
+        try:
+            tool_res: ToolInvocationResult = self.tool_registry.execute(
+                request=req,
+                worktree_dir=self.target_repo,
+                job_config=self.build_tool_job_config(task),
+                job_id=task.job_id,
+            )
+            artifacts = list(tool_res.artifactRefs or [])
+            status_str = "succeeded" if tool_res.status == "success" else "failed"
+            return TaskExecutionResult(
+                status=status_str,
+                output=tool_res.output,
+                error=tool_res.error,
+                artifact_refs=artifacts,
+                metadata={"tool": tool_id, "execution_type": "tool_actor", "requester": requester_id},
+            )
+        except Exception as e:
+            logger.warning("Tool execution '%s' raised exception: %s", tool_id, e)
+            return TaskExecutionResult(
+                status="failed",
+                error=str(e),
+                exit_reason="tool_error",
+                metadata={"tool": tool_id},
+            )
+
     async def execute_task(
         self,
         task: TaskNode,
@@ -317,6 +594,9 @@ class HermesActorAdapter(ActorAdapter):
     ) -> TaskExecutionResult:
         """
         Executes a TaskNode via real tool invocation, simulated runner, or real agent backends.
+
+        All blocking work (agent CLI processes, Git mutation, tool subprocesses) is dispatched
+        to a worker thread so a running agent never stalls the reactive engine's event loop.
         """
         ctx = context or {}
         actor_id = run.actor_id or task.assigned_actor or "unknown"
@@ -326,50 +606,7 @@ class HermesActorAdapter(ActorAdapter):
 
         # 1. Tool execution (e.g. tool.test_runner, tool.git.inspect, tool.read_file)
         if actor_id.startswith("tool.") or "tool" in task.required_capabilities:
-            tool_id = actor_id if actor_id.startswith("tool.") else f"tool.{actor_id}"
-            req_args = task.metadata.get("tool_args") or task.metadata.get("args") or {
-                "task_id": task.task_id,
-                "query": task.description,
-            }
-            req = ToolInvocationRequest(
-                toolId=tool_id,
-                args=req_args,
-                jobId=task.job_id,
-                timeoutSeconds=task.metadata.get("timeout_seconds", 60),
-            )
-
-            # Preserve and enforce ToolPolicy
-            raw_policy = task.metadata.get("tool_policy") or self.spec.get("tool_policy") or self.spec.get("limits", {}).get("tool_policy")
-            job_cfg = raw_policy if isinstance(raw_policy, dict) else {
-                "allow_tools": True,
-                "allowed_tools": [tool_id, "tool.test_runner", "tool.git.inspect", "tool.read_file", "tool.write_file"],
-                "require_actor_capability": False,
-                "read_only_only": False,
-            }
-
-            try:
-                tool_res: ToolInvocationResult = self.tool_registry.execute(
-                    request=req,
-                    worktree_dir=self.target_repo,
-                    job_config=job_cfg,
-                )
-                artifacts = list(tool_res.artifactRefs or [])
-                status_str = "succeeded" if tool_res.status == "success" else "failed"
-                return TaskExecutionResult(
-                    status=status_str,
-                    output=tool_res.output,
-                    error=tool_res.error,
-                    artifact_refs=artifacts,
-                    metadata={"tool": tool_id, "execution_type": "tool_actor"},
-                )
-            except Exception as e:
-                logger.warning("Tool execution '%s' raised exception: %s", tool_id, e)
-                return TaskExecutionResult(
-                    status="failed",
-                    error=str(e),
-                    exit_reason="tool_error",
-                    metadata={"tool": tool_id},
-                )
+            return await asyncio.to_thread(self._execute_tool_task, task, run, actor_id)
 
         # 2. Dry run / Mock execution mode
         if is_dry_run or is_skip:
@@ -399,7 +636,32 @@ class HermesActorAdapter(ActorAdapter):
                 metadata={"dry_run": True},
             )
 
-        # 3. Real Agent CLI / Backend Execution
+        # 3. Real Agent CLI / Backend Execution (blocking; dispatched off the event loop)
+        try:
+            return await asyncio.to_thread(self._execute_real_agent, task, run, actor_id, role)
+        except Exception as exc:
+            logger.exception("Error executing real task %s on actor %s: %s", task.task_id, actor_id, exc)
+            return TaskExecutionResult(
+                status="failed",
+                error=str(exc),
+                exit_reason="exception",
+                metadata={"actor": actor_id},
+            )
+
+    def _execute_real_agent(
+        self,
+        task: TaskNode,
+        run: AgentRun,
+        actor_id: str,
+        role: str,
+    ) -> TaskExecutionResult:
+        """
+        Blocking real-agent execution path: worktree preparation, agent CLI invocation,
+        syntax and role validation, commit, and integration merge.
+
+        Runs on a worker thread. Git mutations inside are serialized by the per-repository
+        lock; the agent process itself runs unlocked so concurrent tasks make real progress.
+        """
         try:
             # Ensure authoritative integration worktree
             self.ensure_integration_worktree()
@@ -472,11 +734,21 @@ class HermesActorAdapter(ActorAdapter):
             stdout_text = getattr(raw_res, "stdout", "") or ""
             stderr_text = getattr(raw_res, "stderr", "") or ""
 
-            # Check for embedded tool requests in stdout
+            # Check for embedded tool requests in stdout. The requester identity is
+            # overwritten with the executing actor: an agent may ask for a tool, it may not
+            # declare who is asking, and the job ToolPolicy applies to every such request.
             parsed_tool_reqs = parse_tool_requests(stdout_text) if parse_tool_requests else []
+            tool_job_config = self.build_tool_job_config(task)
             for tr in parsed_tool_reqs:
+                tr.requester = self.build_requester(task, run, actor_id, "agent")
+                tr.jobId = task.job_id
                 try:
-                    self.tool_registry.execute(tr, worktree_dir=worktree_path)
+                    self.tool_registry.execute(
+                        tr,
+                        worktree_dir=worktree_path,
+                        job_config=tool_job_config,
+                        job_id=task.job_id,
+                    )
                 except Exception as te:
                     logger.warning("Embedded tool request failed: %s", te)
 
@@ -522,6 +794,16 @@ class HermesActorAdapter(ActorAdapter):
                 artifact_refs=artifacts,
                 observations=[obs],
                 metadata={"actor": actor_id, "worktree": str(worktree_path), "commit_sha": commit_sha},
+            )
+
+        except WorktreeError as exc:
+            # Fail closed: the task never ran against a valid, current tree.
+            logger.error("Worktree failure for task %s on actor %s: %s", task.task_id, actor_id, exc)
+            return TaskExecutionResult(
+                status="failed",
+                error=str(exc),
+                exit_reason="worktree_error",
+                metadata={"actor": actor_id, "fail_closed": True},
             )
 
         except Exception as exc:

@@ -17,7 +17,7 @@ from jobs.job_state_reducer import job_state_reducer
 from runtime.engine import ReactiveJobEngine
 from runtime.job_state import JobRecord, JobState
 from runtime.task_graph import TaskNode
-from runtime.hermes_adapter import HermesActorAdapter, HermesVerifierAdapter
+from runtime.hermes_adapter import HermesActorAdapter, HermesVerifierAdapter, HermesPlannerAdapter
 from runtime.events import RuntimeEventBridge
 from runtime.limits import RuntimeLimits
 
@@ -241,6 +241,13 @@ class JobLauncher:
             working_dir=self.root_dir,
         )
 
+        runtime_limits = RuntimeLimits(
+            concurrency_limit=spec.get("limits", {}).get("concurrency_limit", 3),
+            max_task_attempts=spec.get("limits", {}).get("max_attempts_per_task", 3),
+        )
+
+        planner_adapter = HermesPlannerAdapter(limits=runtime_limits)
+
         engine = ReactiveJobEngine(
             job_id=job_id,
             goal=spec.get("name", f"Hermes Sprint {sprint_id}"),
@@ -250,10 +257,8 @@ class JobLauncher:
             priority="P1",
             actor_adapter=actor_adapter,
             verifier=verifier_adapter,
-            limits=RuntimeLimits(
-                concurrency_limit=spec.get("limits", {}).get("concurrency_limit", 3),
-                max_task_attempts=spec.get("limits", {}).get("max_attempts_per_task", 3),
-            ),
+            planner=planner_adapter,
+            limits=runtime_limits,
             event_bridge=event_bridge,
         )
 

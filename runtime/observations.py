@@ -10,15 +10,28 @@ logger = logging.getLogger("hermes.runtime.observations")
 @dataclass
 class Observation:
     """A discrete piece of structured knowledge discovered during execution."""
-    observation_id: str
-    job_id: str
-    kind: str
-    content: str
+    observation_id: str = ""
+    job_id: str = ""
+    kind: str = "discovery"
+    content: str = ""
     task_id: Optional[str] = None
     actor_id: Optional[str] = None
+    source: Optional[str] = None
     confidence: float = 1.0
     created_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
     metadata: Dict[str, Any] = field(default_factory=dict)
+
+    def __post_init__(self):
+        if not self.observation_id:
+            self.observation_id = f"obs_{int(time.time() * 1000)}_{id(self) % 10000:04d}"
+        if not self.actor_id and self.source:
+            self.actor_id = self.source
+        elif not self.source and self.actor_id:
+            self.source = self.actor_id
+
+    @property
+    def id(self) -> str:
+        return self.observation_id
 
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)

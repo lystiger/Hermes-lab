@@ -45,12 +45,13 @@ from runtime.replanning import (
     ReplanResult,
     PlannerAdapter,
     CallablePlannerAdapter,
+    ProductionPlannerAdapter,
     BoundedReplanner,
 )
 from runtime.events import RuntimeEventBridge
 from runtime.scheduler import ReactiveScheduler, DispatchDecision
 from runtime.engine import ReactiveJobEngine
-from runtime.hermes_adapter import HermesActorAdapter, HermesVerifierAdapter
+from runtime.hermes_adapter import HermesActorAdapter, HermesVerifierAdapter, HermesPlannerAdapter
 
 __all__ = [
     "JobState",
@@ -84,6 +85,7 @@ __all__ = [
     "ReplanResult",
     "PlannerAdapter",
     "CallablePlannerAdapter",
+    "ProductionPlannerAdapter",
     "BoundedReplanner",
     "RuntimeEventBridge",
     "ReactiveScheduler",
@@ -91,4 +93,5 @@ __all__ = [
     "ReactiveJobEngine",
     "HermesActorAdapter",
     "HermesVerifierAdapter",
+    "HermesPlannerAdapter",
 ]

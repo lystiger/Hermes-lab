@@ -105,6 +105,39 @@ class ToolInvocationResult:
         )
 
 
+def parse_tool_requests(text: str) -> List[ToolInvocationRequest]:
+    """
+    Parses embedded tool requests from agent stdout.
+    Format:
+    --- LYSSTACK TOOL REQUEST ---
+    {
+      "toolId": "tool.test_runner",
+      "args": {...}
+    }
+    --- END LYSSTACK TOOL REQUEST ---
+    """
+    if not text or LYSSTACK_TOOL_REQUEST_START not in text:
+        return []
+
+    requests = []
+    parts = text.split(LYSSTACK_TOOL_REQUEST_START)
+    for part in parts[1:]:
+        if LYSSTACK_TOOL_REQUEST_END not in part:
+            continue
+        json_str = part.split(LYSSTACK_TOOL_REQUEST_END)[0].strip()
+        try:
+            data = json.loads(json_str)
+            if isinstance(data, dict):
+                requests.append(ToolInvocationRequest.from_dict(data))
+            elif isinstance(data, list):
+                for item in data:
+                    if isinstance(item, dict):
+                        requests.append(ToolInvocationRequest.from_dict(item))
+        except Exception as e:
+            logger.warning("Failed parsing embedded tool request: %s", e)
+    return requests
+
+
 @dataclass
 class ToolPolicy:
     """Configurable tool policy constraints."""

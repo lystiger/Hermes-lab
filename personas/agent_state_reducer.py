@@ -1,5 +1,5 @@
 from typing import Any, Dict, Optional
-from normalization import normalize_agent_id
+from capabilities.normalization import normalize_agent_id
 
 
 class AgentStateReducer:

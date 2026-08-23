@@ -221,7 +221,7 @@ class CapabilityRegistry:
         Selects the single best actor deterministically.
         Returns a DelegationDecision.
         """
-        from delegation import DelegationDecision
+        from capabilities.delegation import DelegationDecision
 
         req_clean = [r.strip() for r in required_capabilities if r.strip()]
 
@@ -303,7 +303,7 @@ class CapabilityRegistry:
 
 def create_default_capability_registry() -> CapabilityRegistry:
     """Factory creating a pre-populated CapabilityRegistry with default agent profiles."""
-    from persona import resolve_agent_profile
+    from personas.persona import resolve_agent_profile
 
     registry = CapabilityRegistry()
     for agent_id, caps in DEFAULT_CAPABILITY_PROFILES.items():

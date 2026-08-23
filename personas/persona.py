@@ -4,7 +4,7 @@ from typing import Any, Dict, List, Optional, Union
 import logging
 
 try:
-    from normalization import normalize_agent_id
+    from capabilities.normalization import normalize_agent_id
 except ImportError:
     normalize_agent_id = lambda x: str(x).lower()
 
@@ -250,7 +250,7 @@ def resolve_agent_profile(
             visual=PersonaVisual(subtitle=f"Operative ({agent_id})"),
         )
 
-    from capabilities import DEFAULT_CAPABILITY_PROFILES
+    from capabilities.capabilities import DEFAULT_CAPABILITY_PROFILES
 
     # Base profile
     profile = AgentProfile(
@@ -263,7 +263,7 @@ def resolve_agent_profile(
     # 2. Check for character card file or custom dict override via PersonaLoader
     if custom_override:
         try:
-            from persona_loader import PersonaLoader
+            from personas.persona_loader import PersonaLoader
             if isinstance(custom_override, (str, Path)):
                 # Path to character card file
                 loaded = PersonaLoader.load_from_file(custom_override, fallback_name=profile.displayName)

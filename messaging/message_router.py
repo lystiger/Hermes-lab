@@ -3,16 +3,16 @@ import logging
 import threading
 import time
 from typing import Any, Dict, List, Optional, Set, Union
-from artifact_registry import ArtifactRef, artifact_registry
-from event_bus import event_bus
-from message_store import (
+from artifacts.artifact_registry import ArtifactRef, artifact_registry
+from events.event_bus import event_bus
+from messaging.message_store import (
     ActorRefDTO,
     MessageDTO,
     ThreadDTO,
     MailboxEntryDTO,
     message_store,
 )
-from normalization import normalize_agent_id
+from capabilities.normalization import normalize_agent_id
 
 logger = logging.getLogger("hermes.message_router")
 

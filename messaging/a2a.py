@@ -263,7 +263,7 @@ class A2AOutputParser:
 
         # 2. Parse Delegation Blocks (Phase 7)
         try:
-            from delegation import DelegationRequest, LYSSTACK_DELEGATION_START, LYSSTACK_DELEGATION_END
+            from capabilities.delegation import DelegationRequest, LYSSTACK_DELEGATION_START, LYSSTACK_DELEGATION_END
             del_pattern = re.compile(
                 rf"{re.escape(LYSSTACK_DELEGATION_START)}\s*(.*?)\s*{re.escape(LYSSTACK_DELEGATION_END)}",
                 re.DOTALL,
@@ -297,7 +297,7 @@ class A2AOutputParser:
 
         # 3. Parse Tool Request Blocks (Phase 7)
         try:
-            from tools import ToolInvocationRequest, LYSSTACK_TOOL_REQUEST_START, LYSSTACK_TOOL_REQUEST_END
+            from tools.tools import ToolInvocationRequest, LYSSTACK_TOOL_REQUEST_START, LYSSTACK_TOOL_REQUEST_END
             tool_pattern = re.compile(
                 rf"{re.escape(LYSSTACK_TOOL_REQUEST_START)}\s*(.*?)\s*{re.escape(LYSSTACK_TOOL_REQUEST_END)}",
                 re.DOTALL,

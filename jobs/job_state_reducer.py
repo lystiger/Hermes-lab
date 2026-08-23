@@ -1,8 +1,8 @@
 from datetime import datetime, timezone
 import logging
 from typing import Any, Dict, List, Optional
-from job_service import JobDetailDTO, JobPhaseDTO, ArtifactRefDTO, job_service
-from normalization import normalize_agent_id
+from jobs.job_service import JobDetailDTO, JobPhaseDTO, ArtifactRefDTO, job_service
+from capabilities.normalization import normalize_agent_id
 
 logger = logging.getLogger("hermes.job_state_reducer")
 
@@ -10,6 +10,7 @@ logger = logging.getLogger("hermes.job_state_reducer")
 class JobStateReducer:
     """
     Deterministic state reducer that projects incoming runtime events onto canonical Job domain objects.
+    Supports both legacy runner phase telemetry and reactive runtime graph events.
     """
 
     def __init__(self, service=None):
@@ -37,7 +38,7 @@ class JobStateReducer:
 
         if kind == "job.created":
             sprint_id = meta.get("sprintId") or meta.get("sprint_id") or jid
-            title = meta.get("title") or f"Hermes Sprint {sprint_id}"
+            title = meta.get("title") or meta.get("goal") or f"Hermes Sprint {sprint_id}"
             repository = meta.get("repository") or meta.get("target_repo") or "Target Repository"
             branch = meta.get("branch") or meta.get("target_branch") or f"hermes/{sprint_id}/integration"
             priority = meta.get("priority", "P1")
@@ -76,6 +77,29 @@ class JobStateReducer:
             )
             self._service.register_job(new_job)
 
+        elif kind == "job.state_changed":
+            new_state = meta.get("new_state", "").upper()
+            if not job:
+                job = JobDetailDTO(
+                    id=jid,
+                    sprintId=jid,
+                    title=f"Hermes Sprint {jid}",
+                    repository="Managed Repo",
+                    branch=f"hermes/{jid}",
+                    status=new_state or "RUNNING",
+                    createdAt=now_iso,
+                    startedAt=now_iso,
+                )
+                self._service.register_job(job)
+            else:
+                if new_state:
+                    job.status = new_state
+                if meta.get("reason"):
+                    if new_state == "BLOCKED":
+                        job.blockedReason = meta.get("reason")
+                    elif new_state == "FAILED":
+                        job.errors.append({"error": str(meta.get("reason"))})
+
         elif kind == "job.started":
             if not job:
                 sprint_id = meta.get("sprintId") or meta.get("sprint_id") or jid
@@ -94,7 +118,38 @@ class JobStateReducer:
                 job.status = "RUNNING"
                 job.startedAt = job.startedAt or now_iso
 
-        elif kind == "phase.started":
+        elif kind == "task.created":
+            if job:
+                task_id = meta.get("taskId") or meta.get("task_id") or detail
+                desc = meta.get("description") or detail
+                existing_phase = next((p for p in job.phases if p.id == task_id or p.name == desc), None)
+                if not existing_phase:
+                    idx = len(job.phases) + 1
+                    job.phases.append(
+                        JobPhaseDTO(
+                            id=task_id,
+                            name=desc,
+                            order=idx,
+                            role="builder",
+                            agentId="unknown",
+                            status="PENDING",
+                            dependencies=meta.get("dependencies", []),
+                            requiredCapabilities=meta.get("requiredCapabilities", []),
+                        )
+                    )
+
+        elif kind == "task.assigned":
+            if job:
+                task_id = meta.get("taskId") or meta.get("task_id")
+                actor_id = normalize_agent_id(meta.get("assignedActor") or meta.get("assigned_actor") or source_id or "unknown")
+                if actor_id not in job.assignedAgentIds:
+                    job.assignedAgentIds.append(actor_id)
+                target_phase = next((p for p in job.phases if p.id == task_id), None)
+                if target_phase:
+                    target_phase.agentId = actor_id
+                    target_phase.role = actor_id
+
+        elif kind == "task.started" or kind == "phase.started":
             if not job:
                 job = JobDetailDTO(
                     id=jid,
@@ -108,15 +163,14 @@ class JobStateReducer:
                 )
                 self._service.register_job(job)
 
-            phase_name = meta.get("phase") or meta.get("name") or detail
+            phase_name = meta.get("phase") or meta.get("name") or meta.get("taskId") or detail
             phase_role = meta.get("role", "builder")
-            agent_id = normalize_agent_id(meta.get("agent") or source_id or "unknown")
+            agent_id = normalize_agent_id(meta.get("agent") or meta.get("actorId") or source_id or "unknown")
 
             if agent_id not in job.assignedAgentIds:
                 job.assignedAgentIds.append(agent_id)
 
-            # Match or append phase
-            target_phase = next((p for p in job.phases if p.name == phase_name or p.role == phase_role), None)
+            target_phase = next((p for p in job.phases if p.id == phase_name or p.name == phase_name or p.role == phase_role), None)
             if not target_phase:
                 idx = len(job.phases) + 1
                 target_phase = JobPhaseDTO(
@@ -131,7 +185,7 @@ class JobStateReducer:
                 job.phases.append(target_phase)
             else:
                 target_phase.status = "RUNNING"
-                target_phase.startedAt = now_iso
+                target_phase.startedAt = target_phase.startedAt or now_iso
                 if agent_id != "unknown":
                     target_phase.agentId = agent_id
 
@@ -140,10 +194,10 @@ class JobStateReducer:
             total_phases = max(len(job.phases), 1)
             job.progress = round(target_phase.order / (total_phases + 1), 2)
 
-        elif kind == "phase.completed":
+        elif kind == "task.completed" or kind == "phase.completed":
             if job:
-                phase_name = meta.get("phase") or meta.get("name") or detail
-                target_phase = next((p for p in job.phases if p.name == phase_name or phase_name in p.name), None)
+                phase_name = meta.get("phase") or meta.get("name") or meta.get("taskId") or detail
+                target_phase = next((p for p in job.phases if p.id == phase_name or p.name == phase_name or phase_name in p.name), None)
                 if target_phase:
                     target_phase.status = "SUCCEEDED"
                     target_phase.completedAt = now_iso
@@ -153,18 +207,38 @@ class JobStateReducer:
                         target_phase.changedFilesCount = meta.get("changedFilesCount")
                     if meta.get("durationMs"):
                         target_phase.durationMs = int(meta["durationMs"])
+                succeeded = len([p for p in job.phases if p.status == "SUCCEEDED"])
+                job.progress = round(succeeded / max(len(job.phases), 1), 2)
 
-        elif kind == "phase.failed":
+        elif kind == "task.failed" or kind == "phase.failed":
             if job:
-                phase_name = meta.get("phase") or meta.get("name") or detail
-                target_phase = next((p for p in job.phases if p.name == phase_name or phase_name in p.name), None)
+                phase_name = meta.get("phase") or meta.get("name") or meta.get("taskId") or detail
+                target_phase = next((p for p in job.phases if p.id == phase_name or p.name == phase_name or phase_name in p.name), None)
                 if target_phase:
                     target_phase.status = "FAILED"
                     target_phase.completedAt = now_iso
-                job.status = "FAILED"
-                job.completedAt = now_iso
                 if meta.get("error"):
                     job.errors.append({"phase": phase_name, "error": str(meta["error"])})
+
+        elif kind == "task.superseded":
+            if job:
+                task_id = meta.get("taskId") or meta.get("task_id")
+                target_phase = next((p for p in job.phases if p.id == task_id), None)
+                if target_phase:
+                    target_phase.status = "SUPERSEDED"
+                    target_phase.completedAt = now_iso
+
+        elif kind == "observation.created":
+            if job:
+                job.observations.append(dict(meta))
+
+        elif kind == "verification.passed":
+            if job:
+                job.verification = {"status": "PASSED", "summary": detail, "results": meta}
+
+        elif kind == "verification.failed":
+            if job:
+                job.verification = {"status": "FAILED", "summary": detail, "results": meta}
 
         elif kind == "job.completed":
             if job:
@@ -181,6 +255,12 @@ class JobStateReducer:
                             ref=commit_sha,
                         )
                     )
+
+        elif kind == "job.blocked":
+            if job:
+                job.status = "BLOCKED"
+                job.completedAt = now_iso
+                job.blockedReason = meta.get("reason") or detail
 
         elif kind == "job.failed":
             if job:

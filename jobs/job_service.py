@@ -4,8 +4,8 @@ import json
 import logging
 from pathlib import Path
 from typing import Any, Dict, List, Optional
-from normalization import normalize_agent_id
-from artifact_registry import ArtifactRef, artifact_registry
+from capabilities.normalization import normalize_agent_id
+from artifacts.artifact_registry import ArtifactRef, artifact_registry
 
 logger = logging.getLogger("hermes.job_service")
 
@@ -26,7 +26,7 @@ class JobPhaseDTO:
     order: int
     role: str
     agentId: str
-    status: str  # "PENDING" | "PREPARING" | "RUNNING" | "SUCCEEDED" | "FAILED" | "SKIPPED" | "CANCELLED"
+    status: str  # "PENDING" | "PREPARING" | "RUNNING" | "SUCCEEDED" | "FAILED" | "SKIPPED" | "CANCELLED" | "SUPERSEDED" | "BLOCKED"
     attempt: int = 1
     durationMs: Optional[int] = None
     startedAt: Optional[str] = None
@@ -34,6 +34,8 @@ class JobPhaseDTO:
     commitSha: Optional[str] = None
     changedFilesCount: Optional[int] = None
     detail: Optional[str] = None
+    dependencies: List[str] = field(default_factory=list)
+    requiredCapabilities: List[str] = field(default_factory=list)
 
 
 @dataclass
@@ -44,7 +46,7 @@ class JobDetailDTO:
     repository: str
     branch: str
     priority: str = "P1"
-    status: str = "QUEUED"  # "QUEUED" | "PREPARING" | "RUNNING" | "COMPLETED" | "FAILED" | "CANCELLED"
+    status: str = "QUEUED"  # "QUEUED" | "PLANNING" | "PREPARING" | "RUNNING" | "VERIFYING" | "REPAIRING" | "COMPLETED" | "BLOCKED" | "FAILED" | "CANCELLED"
     currentPhase: Optional[str] = None
     assignedAgentIds: List[str] = field(default_factory=list)
     createdAt: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
@@ -52,10 +54,15 @@ class JobDetailDTO:
     completedAt: Optional[str] = None
     progress: Optional[float] = None
     phases: List[JobPhaseDTO] = field(default_factory=list)
+    tasks: List[Dict[str, Any]] = field(default_factory=list)
     verification: Optional[Dict[str, Any]] = None
     artifacts: List[ArtifactRefDTO] = field(default_factory=list)
     errors: List[Dict[str, Any]] = field(default_factory=list)
     retryHistory: List[Dict[str, Any]] = field(default_factory=list)
+    blockedReason: Optional[Any] = None
+    repairCount: int = 0
+    replanCount: int = 0
+    observations: List[Dict[str, Any]] = field(default_factory=list)
 
     def to_dict(self) -> Dict[str, Any]:
         data = asdict(self)
@@ -76,19 +83,23 @@ class JobDetailDTO:
             "startedAt": self.startedAt,
             "completedAt": self.completedAt,
             "progress": self.progress,
+            "blockedReason": self.blockedReason,
+            "repairCount": self.repairCount,
+            "replanCount": self.replanCount,
         }
 
 
 class JobService:
     """
-    Control-plane service that manages real Hermes sprint execution jobs.
+    Control-plane service that manages real Hermes sprint execution jobs and reactive runtime engines.
     Reconstructs historical runs from run summaries on startup and maintains live runtime state.
     """
 
     def __init__(self, runs_root: Optional[Path] = None, sprints_root: Optional[Path] = None):
         self._jobs: Dict[str, JobDetailDTO] = {}
+        self._engines: Dict[str, Any] = {}
         self.runs_root = runs_root or (Path(__file__).resolve().parent.parent / "hermes-runs")
-        self.sprints_root = sprints_root or (Path(__file__).resolve().parent / "sprints")
+        self.sprints_root = sprints_root or (Path(__file__).resolve().parent.parent / "sprints")
         artifact_registry.add_allowed_root(self.runs_root)
         self._recover_recent_runs()
 
@@ -252,16 +263,118 @@ class JobService:
     def register_job(self, job: JobDetailDTO) -> None:
         self._jobs[job.id] = job
 
+    def register_engine(self, engine: Any) -> None:
+        """Registers an active ReactiveJobEngine and synchronizes its JobDetailDTO."""
+        job_id = engine.job.job_id
+        self._engines[job_id] = engine
+
+        job_dto = self.get_job(job_id)
+        if not job_dto:
+            job_dto = JobDetailDTO(
+                id=job_id,
+                sprintId=job_id,
+                title=engine.job.title or engine.job.goal,
+                repository=engine.job.repository or "Local Workspace",
+                branch=engine.job.branch or "main",
+                priority=engine.job.priority,
+                status=engine.job.state.value.upper(),
+                createdAt=engine.job.created_at,
+                startedAt=engine.job.started_at,
+                completedAt=engine.job.completed_at,
+                blockedReason=engine.job.blocked_reason,
+                repairCount=engine.job.repair_count,
+                replanCount=engine.job.replan_count,
+            )
+            self.register_job(job_dto)
+        else:
+            job_dto.status = engine.job.state.value.upper()
+            job_dto.blockedReason = engine.job.blocked_reason
+            job_dto.repairCount = engine.job.repair_count
+            job_dto.replanCount = engine.job.replan_count
+
+    def get_engine(self, job_id: str) -> Optional[Any]:
+        return self._engines.get(job_id)
+
     def get_job(self, job_id: str) -> Optional[JobDetailDTO]:
-        return self._jobs.get(job_id)
+        job = self._jobs.get(job_id)
+        if not job:
+            return None
+
+        # Synchronize live engine state if present
+        engine = self._engines.get(job_id)
+        if engine:
+            job.status = engine.job.state.value.upper()
+            job.startedAt = engine.job.started_at or job.startedAt
+            job.completedAt = engine.job.completed_at or job.completedAt
+            job.blockedReason = engine.job.blocked_reason
+            job.repairCount = engine.job.repair_count
+            job.replanCount = engine.job.replan_count
+
+            # Map tasks
+            task_nodes = engine.graph.list_tasks()
+            job.tasks = [t.to_dict() for t in task_nodes]
+            if task_nodes:
+                phases = []
+                for idx, t in enumerate(task_nodes, start=1):
+                    phases.append(
+                        JobPhaseDTO(
+                            id=t.task_id,
+                            name=t.description,
+                            order=idx,
+                            role=t.assigned_actor or "builder",
+                            agentId=t.assigned_actor or "unknown",
+                            status=t.status.value,
+                            attempt=t.attempt,
+                            startedAt=t.started_at,
+                            completedAt=t.completed_at,
+                            dependencies=t.dependencies,
+                            requiredCapabilities=t.required_capabilities,
+                        )
+                    )
+                job.phases = phases
+                succeeded_count = len([t for t in task_nodes if t.status.value == "SUCCEEDED"])
+                job.progress = round(succeeded_count / max(len(task_nodes), 1), 2)
+                if job.status == "COMPLETED":
+                    job.progress = 1.0
+
+        return job
 
     def list_jobs(self, status: Optional[str] = None, limit: int = 50) -> List[Dict[str, Any]]:
+        # Refresh registered engines
+        for jid in list(self._engines.keys()):
+            self.get_job(jid)
+
         jobs = list(self._jobs.values())
         if status:
             jobs = [j for j in jobs if j.status.upper() == status.upper()]
-        # Sort newest first by createdAt or startedAt
         jobs.sort(key=lambda j: j.createdAt or j.startedAt or "", reverse=True)
         return [j.to_summary_dict() for j in jobs[:limit]]
+
+    def get_job_tasks(self, job_id: str) -> List[Dict[str, Any]]:
+        engine = self._engines.get(job_id)
+        if engine:
+            return [t.to_dict() for t in engine.graph.list_tasks()]
+        job = self.get_job(job_id)
+        if job and job.tasks:
+            return job.tasks
+        return []
+
+    def get_job_runs(self, job_id: str) -> List[Dict[str, Any]]:
+        engine = self._engines.get(job_id)
+        if engine:
+            runs = engine.execution_manager.list_runs_for_job(job_id)
+            return [r.to_dict() for r in runs]
+        return []
+
+    def get_job_observations(self, job_id: str) -> List[Dict[str, Any]]:
+        engine = self._engines.get(job_id)
+        if engine:
+            obs = engine.observation_registry.list_for_job(job_id)
+            return [o.to_dict() for o in obs]
+        job = self.get_job(job_id)
+        if job and job.observations:
+            return job.observations
+        return []
 
 
 job_service = JobService()

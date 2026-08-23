@@ -9,10 +9,10 @@ from pathlib import Path
 import unittest
 from fastapi.testclient import TestClient
 
-from artifact_registry import ArtifactRef, ArtifactRegistry
-from message_store import ActorRefDTO, MessageDTO, ThreadDTO, MessageStore
-from message_router import MessageRouter
-from event_bus import RuntimeEventBus
+from artifacts.artifact_registry import ArtifactRef, ArtifactRegistry
+from messaging.message_store import ActorRefDTO, MessageDTO, ThreadDTO, MessageStore
+from messaging.message_router import MessageRouter
+from events.event_bus import RuntimeEventBus
 from main import app
 
 

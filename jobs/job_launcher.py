@@ -9,9 +9,9 @@ import sys
 import time
 from typing import Any, Dict, Optional, Set
 
-from event_bus import event_bus
-from job_service import job_service
-from job_state_reducer import job_state_reducer
+from events.event_bus import event_bus
+from jobs.job_service import job_service
+from jobs.job_state_reducer import job_state_reducer
 
 logger = logging.getLogger("hermes.job_launcher")
 
@@ -31,7 +31,7 @@ class JobLauncher:
         runner_script: Optional[Path] = None,
         control_url: Optional[str] = None,
     ):
-        self.root_dir = Path(__file__).resolve().parent
+        self.root_dir = Path(__file__).resolve().parent.parent
         self.sprints_dir = sprints_dir or (self.root_dir / "sprints")
         self.runner_script = runner_script or (self.root_dir / "runner" / "run-hermes-sprint.py")
         self._configured_control_url = control_url

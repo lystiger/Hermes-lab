@@ -5,8 +5,8 @@ import logging
 from pathlib import Path
 import threading
 from typing import Any, Dict, List, Optional
-from artifact_registry import ArtifactRef
-from normalization import normalize_agent_id
+from artifacts.artifact_registry import ArtifactRef
+from capabilities.normalization import normalize_agent_id
 
 logger = logging.getLogger("hermes.message_store")
 

@@ -3,12 +3,12 @@ from typing import Any, Dict, List, Optional
 import sys
 from pathlib import Path
 
-RUNNER_DIR = Path(__file__).resolve().parent / "runner"
+RUNNER_DIR = Path(__file__).resolve().parent.parent / "runner"
 if str(RUNNER_DIR) not in sys.path:
     sys.path.insert(0, str(RUNNER_DIR))
 
-from normalization import normalize_agent_id
-from persona import resolve_agent_profile
+from capabilities.normalization import normalize_agent_id
+from personas.persona import resolve_agent_profile
 
 try:
     from runner.agents.registry import default_registry
@@ -162,5 +162,5 @@ class AgentService:
 agent_service = AgentService()
 
 # Bind agent service to the state reducer
-from agent_state_reducer import agent_state_reducer
+from personas.agent_state_reducer import agent_state_reducer
 agent_state_reducer.bind_service(agent_service)

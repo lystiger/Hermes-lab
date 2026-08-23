@@ -336,7 +336,7 @@ class ToolRegistry:
         if policy_obj.require_actor_capability and requester_id and profile.capabilities:
             cap_reg = capability_registry
             if not cap_reg:
-                from capabilities import default_capability_registry
+                from capabilities.capabilities import default_capability_registry
                 cap_reg = default_capability_registry
 
             actor_caps = set(cap_reg.get_actor_capabilities(requester_id))

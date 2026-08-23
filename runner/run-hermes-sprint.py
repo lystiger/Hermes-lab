@@ -39,14 +39,14 @@ if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
 try:
-    from artifact_registry import artifact_registry, ArtifactRef, ArtifactTrust
-    from normalization import normalize_agent_id
-    from persona import resolve_agent_profile, PersonaProfile, AgentProfile
-    from capabilities import CapabilityRegistry, Capability, CapabilityRef, create_default_capability_registry, DEFAULT_CAPABILITY_PROFILES
-    from delegation import DelegationRequest, DelegationDecision, TaskAssignment, LYSSTACK_DELEGATION_START, LYSSTACK_DELEGATION_END
-    from tools import ToolProfile, ToolInvocationRequest, ToolInvocationResult, ToolRegistry, default_tool_registry, LYSSTACK_TOOL_REQUEST_START, LYSSTACK_TOOL_REQUEST_END
-    from subagents import SubagentProfile, SubagentManager
-    from a2a import (
+    from artifacts.artifact_registry import artifact_registry, ArtifactRef, ArtifactTrust
+    from capabilities.normalization import normalize_agent_id
+    from personas.persona import resolve_agent_profile, PersonaProfile, AgentProfile
+    from capabilities.capabilities import CapabilityRegistry, Capability, CapabilityRef, create_default_capability_registry, DEFAULT_CAPABILITY_PROFILES
+    from capabilities.delegation import DelegationRequest, DelegationDecision, TaskAssignment, LYSSTACK_DELEGATION_START, LYSSTACK_DELEGATION_END
+    from tools.tools import ToolProfile, ToolInvocationRequest, ToolInvocationResult, ToolRegistry, default_tool_registry, LYSSTACK_TOOL_REQUEST_START, LYSSTACK_TOOL_REQUEST_END
+    from capabilities.subagents import SubagentProfile, SubagentManager
+    from messaging.a2a import (
         A2AOutput,
         AgentTurnResult,
         parse_a2a_output,

@@ -24,21 +24,21 @@ def _get_runner_module():
     spec.loader.exec_module(mod)
     return mod
 
-from capabilities import (
+from capabilities.capabilities import (
     Capability,
     CapabilityRef,
     CapabilityRegistry,
     DEFAULT_CAPABILITY_PROFILES,
     create_default_capability_registry,
 )
-from delegation import (
+from capabilities.delegation import (
     DelegationRequest,
     DelegationDecision,
     TaskAssignment,
     LYSSTACK_DELEGATION_START,
     LYSSTACK_DELEGATION_END,
 )
-from tools import (
+from tools.tools import (
     ToolProfile,
     ToolPolicy,
     ToolInvocationRequest,
@@ -48,9 +48,9 @@ from tools import (
     LYSSTACK_TOOL_REQUEST_START,
     LYSSTACK_TOOL_REQUEST_END,
 )
-from subagents import SubagentProfile, SubagentManager
-from a2a import A2AOutput, AgentTurnResult, parse_a2a_output, LYSSTACK_A2A_START, LYSSTACK_A2A_END
-from persona import AgentProfile, resolve_agent_profile
+from capabilities.subagents import SubagentProfile, SubagentManager
+from messaging.a2a import A2AOutput, AgentTurnResult, parse_a2a_output, LYSSTACK_A2A_START, LYSSTACK_A2A_END
+from personas.persona import AgentProfile, resolve_agent_profile
 from runner.backends.base import ExecutionResult
 
 

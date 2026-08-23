@@ -27,7 +27,7 @@ def _get_runner_module():
     spec.loader.exec_module(mod)
     return mod
 
-from a2a import (
+from messaging.a2a import (
     A2AOutput,
     AgentTurnResult,
     A2AOutputParser,
@@ -38,11 +38,11 @@ from a2a import (
     LYSSTACK_A2A_START,
     LYSSTACK_A2A_END,
 )
-from persona import resolve_agent_profile, PersonaProfile, AgentProfile
-from persona_loader import PersonaLoader
-from message_router import MessageRouter
-from message_store import MessageStore
-from event_bus import RuntimeEventBus
+from personas.persona import resolve_agent_profile, PersonaProfile, AgentProfile
+from personas.persona_loader import PersonaLoader
+from messaging.message_router import MessageRouter
+from messaging.message_store import MessageStore
+from events.event_bus import RuntimeEventBus
 from runner.backends.base import ExecutionResult
 
 

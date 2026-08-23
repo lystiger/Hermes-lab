@@ -27,6 +27,10 @@ class RuntimeEvent:
     jobId: Optional[str] = None
     metadata: Dict[str, Any] = field(default_factory=dict)
 
+    @property
+    def job_id(self) -> Optional[str]:
+        return self.jobId
+
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
 

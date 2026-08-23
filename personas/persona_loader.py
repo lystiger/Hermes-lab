@@ -3,7 +3,7 @@ import logging
 from pathlib import Path
 from typing import Any, Dict, Optional, Union
 
-from persona import PersonaProfile, PersonaVisual
+from personas.persona import PersonaProfile, PersonaVisual
 
 logger = logging.getLogger("hermes.persona_loader")
 

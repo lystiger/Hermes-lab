@@ -13,11 +13,11 @@ ROOT_DIR = Path(__file__).resolve().parent.parent
 if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
-from persona import AgentProfile, PersonaProfile, PersonaVisual, resolve_agent_profile, DEFAULT_PERSONAS
-from persona_loader import PersonaLoader, FORBIDDEN_PRIVILEGE_KEYS
-from message_store import ActorRefDTO, MessageDTO, ThreadDTO, MessageStore
-from message_router import MessageRouter
-from event_bus import RuntimeEventBus
+from personas.persona import AgentProfile, PersonaProfile, PersonaVisual, resolve_agent_profile, DEFAULT_PERSONAS
+from personas.persona_loader import PersonaLoader, FORBIDDEN_PRIVILEGE_KEYS
+from messaging.message_store import ActorRefDTO, MessageDTO, ThreadDTO, MessageStore
+from messaging.message_router import MessageRouter
+from events.event_bus import RuntimeEventBus
 import importlib.util
 runner_script = ROOT_DIR / "runner" / "run-hermes-sprint.py"
 spec = importlib.util.spec_from_file_location("run_hermes_sprint", str(runner_script))

@@ -11,16 +11,16 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
-from event_bus import event_bus, RuntimeEvent
-from agent_service import agent_service
-from agent_state_reducer import agent_state_reducer
-from job_service import job_service
-from job_state_reducer import job_state_reducer
-from job_launcher import job_launcher
-from normalization import normalize_agent_id
-from artifact_registry import ArtifactRef, artifact_registry
-from message_store import message_store
-from message_router import message_router
+from events.event_bus import event_bus, RuntimeEvent
+from personas.agent_service import agent_service
+from personas.agent_state_reducer import agent_state_reducer
+from jobs.job_service import job_service
+from jobs.job_state_reducer import job_state_reducer
+from jobs.job_launcher import job_launcher
+from capabilities.normalization import normalize_agent_id
+from artifacts.artifact_registry import ArtifactRef, artifact_registry
+from messaging.message_store import message_store
+from messaging.message_router import message_router
 
 
 @asynccontextmanager
@@ -308,6 +308,63 @@ async def get_job(job_id: str):
             detail=f"Job '{job_id}' not found",
         )
     return job.to_dict()
+
+
+@app.get("/jobs/{job_id}/tasks")
+async def get_job_tasks(job_id: str):
+    """
+    Returns the reactive task dependency graph nodes for a specific job.
+    """
+    job = job_service.get_job(job_id)
+    if not job:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Job '{job_id}' not found",
+        )
+    return job_service.get_job_tasks(job_id)
+
+
+@app.get("/jobs/{job_id}/runs")
+async def get_job_runs(job_id: str):
+    """
+    Returns all actor execution run records for a specific job.
+    """
+    job = job_service.get_job(job_id)
+    if not job:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Job '{job_id}' not found",
+        )
+    return job_service.get_job_runs(job_id)
+
+
+@app.get("/jobs/{job_id}/observations")
+async def get_job_observations(job_id: str):
+    """
+    Returns all runtime observations discovered during job execution.
+    """
+    job = job_service.get_job(job_id)
+    if not job:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Job '{job_id}' not found",
+        )
+    return job_service.get_job_observations(job_id)
+
+
+@app.get("/jobs/{job_id}/events")
+async def get_job_events(job_id: str, limit: int = Query(default=100, ge=1, le=500)):
+    """
+    Returns historical runtime events scoped to a specific job.
+    """
+    job = job_service.get_job(job_id)
+    if not job:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Job '{job_id}' not found",
+        )
+    events = [e for e in event_bus.recent(limit=limit) if e.job_id == job_id]
+    return [e.to_dict() for e in events]
 
 
 class CreateJobPayload(BaseModel):

@@ -27,7 +27,7 @@ def test_subprocess_cross_process_job_lifecycle():
     port = get_free_port()
     host = "127.0.0.1"
     base_url = f"http://{host}:{port}"
-    root_dir = os.path.dirname(os.path.abspath(__file__))
+    root_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
     # 1. Start real independent Uvicorn OS subprocess (Process A)
     proc = subprocess.Popen(
@@ -170,7 +170,7 @@ def test_post_jobs_spawns_real_runner_and_updates_jobs_lifecycle():
     port = get_free_port()
     host = "127.0.0.1"
     base_url = f"http://{host}:{port}"
-    root_dir = os.path.dirname(os.path.abspath(__file__))
+    root_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     sprints_dir = os.path.join(root_dir, "sprints")
 
     # Set up clean temporary git repo and outside storage dir

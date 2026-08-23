@@ -3,9 +3,9 @@ import json
 import httpx
 import pytest
 from main import app
-from event_bus import event_bus
-from agent_service import agent_service
-from job_service import job_service
+from events.event_bus import event_bus
+from personas.agent_service import agent_service
+from jobs.job_service import job_service
 from runner.control_plane.event_publisher import RuntimeEventPublisher
 
 
@@ -186,3 +186,44 @@ def test_post_jobs_security_validation():
 def test_publisher_failure_isolation():
     publisher = RuntimeEventPublisher(control_url="http://127.0.0.1:59999", timeout=0.2)
     assert publisher.publish("claude", "agent.started", "Dead URL test") is False
+
+
+def test_reactive_runtime_query_endpoints():
+    from runtime import ReactiveJobEngine, TaskNode, TaskExecutionResult, Observation
+
+    jid = "job_reactive_api_test"
+    engine = ReactiveJobEngine(
+        job_id=jid,
+        goal="API testing for reactive tasks and observations",
+    )
+    t1 = TaskNode(task_id="T1", job_id=jid, description="API Task 1", required_capabilities=["implementation"])
+    engine.graph.add_task(t1)
+    engine.observation_registry.add_observation(job_id=jid, kind="discovery", content="API observation content", task_id="T1")
+
+    job_service.register_engine(engine)
+
+    # 1. GET /jobs/{id}
+    job_res = client.get(f"/jobs/{jid}")
+    assert job_res.status_code == 200
+    job_data = job_res.json()
+    assert job_data["id"] == jid
+    assert len(job_data["tasks"]) == 1
+    assert job_data["tasks"][0]["task_id"] == "T1"
+
+    # 2. GET /jobs/{id}/tasks
+    tasks_res = client.get(f"/jobs/{jid}/tasks")
+    assert tasks_res.status_code == 200
+    tasks_data = tasks_res.json()
+    assert len(tasks_data) == 1
+    assert tasks_data[0]["task_id"] == "T1"
+
+    # 3. GET /jobs/{id}/observations
+    obs_res = client.get(f"/jobs/{jid}/observations")
+    assert obs_res.status_code == 200
+    obs_data = obs_res.json()
+    assert len(obs_data) == 1
+    assert obs_data[0]["content"] == "API observation content"
+
+    # 4. GET /jobs/{id}/events
+    events_res = client.get(f"/jobs/{jid}/events")
+    assert events_res.status_code == 200

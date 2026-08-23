@@ -8,7 +8,7 @@ from pathlib import Path
 import urllib.request
 import unittest
 
-ROOT_DIR = Path(__file__).resolve().parent
+ROOT_DIR = Path(__file__).resolve().parent.parent
 
 
 class TestPhase5EndToEndIntegration(unittest.TestCase):

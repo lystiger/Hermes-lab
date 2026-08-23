@@ -7,23 +7,28 @@ export type Priority = 'P0' | 'P1' | 'P2' | 'P3';
 
 export type JobStatus =
   | 'QUEUED'
+  | 'PLANNING'
   | 'PREPARING'
   | 'RUNNING'
+  | 'VERIFYING'
+  | 'REPAIRING'
   | 'BLOCKED'
   | 'FAILED'
   | 'COMPLETED'
   | 'CANCELLED'
-  | 'CLAIMED'
-  | 'VERIFYING';
+  | 'CLAIMED';
 
 export type PhaseStatus =
   | 'PENDING'
+  | 'READY'
   | 'PREPARING'
   | 'RUNNING'
   | 'SUCCEEDED'
   | 'FAILED'
   | 'SKIPPED'
-  | 'CANCELLED';
+  | 'CANCELLED'
+  | 'SUPERSEDED'
+  | 'BLOCKED';
 
 export type PipelineStepState = 'COMPLETED' | 'RUNNING' | 'QUEUED' | 'CLAIMED' | 'BLOCKED' | 'IDLE';
 
@@ -252,6 +257,11 @@ export interface Job {
   budget?: string;
   policy?: string;
   phases?: JobPhase[];
+  blockedReason?: any;
+  repairCount?: number;
+  replanCount?: number;
+  tasks?: any[];
+  observations?: any[];
 }
 
 export interface ChangedFile {

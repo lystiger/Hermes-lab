@@ -194,6 +194,8 @@ export class HttpLysStackApi implements LysStackApi {
       else if (p.status === 'RUNNING') state = 'RUNNING';
       else if (p.status === 'FAILED') state = 'BLOCKED';
       else if (p.status === 'CANCELLED') state = 'BLOCKED';
+      else if (p.status === 'BLOCKED') state = 'BLOCKED';
+      else if (p.status === 'SUPERSEDED') state = 'IDLE';
 
       return {
         id: p.id || `phase-${p.order}`,
@@ -204,7 +206,7 @@ export class HttpLysStackApi implements LysStackApi {
         task: p.name,
         meta: p.commitSha ? p.commitSha.slice(0, 7) : (p.status === 'SUCCEEDED' ? 'completed' : p.status.toLowerCase()),
         state,
-        note: p.role
+        note: p.role || (p.status === 'SUPERSEDED' ? 'superseded' : undefined)
       };
     });
 
@@ -223,6 +225,11 @@ export class HttpLysStackApi implements LysStackApi {
       completedAt: data.completedAt,
       progress: data.progress,
       phases,
+      tasks: data.tasks || [],
+      observations: data.observations || [],
+      blockedReason: data.blockedReason,
+      repairCount: data.repairCount || 0,
+      replanCount: data.replanCount || 0,
       executionGraph,
       changedFiles: [],
       retryHistory: data.retryHistory || [],

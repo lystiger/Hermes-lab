@@ -52,6 +52,8 @@ class ReactiveJobEngine:
         capability_registry: Optional[CapabilityRegistry] = None,
         observation_registry: Optional[ObservationRegistry] = None,
         execution_manager: Optional[ExecutionManager] = None,
+        actor_adapter: Optional[Union[ActorAdapter, Callable, Any]] = None,
+        default_adapter: Optional[Union[ActorAdapter, Callable, Any]] = None,
         verifier: Optional[Union[VerifierAdapter, Callable, Any]] = None,
         planner: Optional[Union[PlannerAdapter, Callable, Any]] = None,
         event_bridge: Optional[RuntimeEventBridge] = None,
@@ -74,6 +76,10 @@ class ReactiveJobEngine:
         self.capability_registry = capability_registry or default_capability_registry
         self.observation_registry = observation_registry or default_observation_registry
         self.execution_manager = execution_manager or ExecutionManager()
+        adapter_to_set = actor_adapter or default_adapter
+        if adapter_to_set:
+            self.execution_manager.set_default_adapter(adapter_to_set)
+
         self.bounded_replanner = BoundedReplanner(limits=self.limits)
         self.scheduler = ReactiveScheduler(
             capability_registry=self.capability_registry,
@@ -103,6 +109,7 @@ class ReactiveJobEngine:
 
         self._artifacts: List[Dict[str, Any]] = []
         self._last_verification_result: Optional[VerificationResult] = None
+        self._active_async_tasks: Set[asyncio.Task] = set()
 
         # Emit initial job created
         self.event_bridge.emit_job_created(self.job)
@@ -161,11 +168,22 @@ class ReactiveJobEngine:
 
         self.job.transition_to(JobState.PLANNING, reason="Starting initial plan decomposition", event_bridge=self.event_bridge)
 
-        # 1. Add provided initial tasks
+        # 1. Add provided initial tasks (enforcing authoritative runtime limits)
         if initial_tasks:
             for t in initial_tasks:
-                node = self.graph.add_task(t)
-                self.event_bridge.emit_task_created(node, reason="initial_task")
+                if self.graph.count() >= self.limits.max_tasks_per_job:
+                    logger.warning("Max tasks limit (%d) reached; skipping task", self.limits.max_tasks_per_job)
+                    break
+                if isinstance(t, dict):
+                    node = TaskNode.from_dict(t)
+                else:
+                    node = t
+                node.max_attempts = min(node.max_attempts, self.limits.max_task_attempts)
+                try:
+                    added_node = self.graph.add_task(node)
+                    self.event_bridge.emit_task_created(added_node, reason="initial_task")
+                except ValueError as e:
+                    logger.warning("Initial task addition skipped: %s", e)
 
         # 2. If planner is configured and graph is still empty (or planner wants to augment)
         if self.planner:
@@ -280,44 +298,57 @@ class ReactiveJobEngine:
                 self.job.transition_to(JobState.VERIFYING, reason="All tasks succeeded; entering verification", event_bridge=self.event_bridge)
                 return True
 
-            # Schedule and execute ready tasks
-            async_tasks = await self.scheduler.schedule_ready_tasks(
+            # Schedule and launch any newly ready tasks
+            new_async_tasks = await self.scheduler.schedule_ready_tasks(
                 graph=self.graph,
                 execution_manager=self.execution_manager,
                 context={"job": self.job.to_dict()},
             )
+            for t in new_async_tasks:
+                self._active_async_tasks.add(t)
 
-            if async_tasks:
-                # Await active execution tasks
-                results = await asyncio.gather(*async_tasks, return_exceptions=True)
-                for res in results:
-                    if isinstance(res, Exception):
-                        logger.error("Error during task execution: %s", res)
-                    elif isinstance(res, tuple) and len(res) == 2:
-                        task_node, exec_res = res
-                        # Ingest observations
-                        for obs in exec_res.observations:
-                            if isinstance(obs, Observation):
-                                self.observation_registry.register(obs)
-                                self.event_bridge.emit_observation_created(obs)
-                            elif isinstance(obs, dict):
-                                registered = self.observation_registry.add_observation(
-                                    job_id=self.job.job_id,
-                                    kind=obs.get("kind", "discovery"),
-                                    content=obs.get("content", ""),
-                                    task_id=task_node.task_id,
-                                    actor_id=task_node.assigned_actor,
-                                    metadata=obs.get("metadata", {}),
+            if self._active_async_tasks:
+                # Wait for FIRST completed task (allows newly ready dependent tasks to dispatch immediately without waiting for unrelated slow tasks)
+                done, pending = await asyncio.wait(
+                    self._active_async_tasks,
+                    return_when=asyncio.FIRST_COMPLETED,
+                )
+                self._active_async_tasks = pending
+
+                for completed_task in done:
+                    try:
+                        res = completed_task.result()
+                        if isinstance(res, tuple) and len(res) == 2:
+                            task_node, exec_res = res
+                            # Ingest observations
+                            for obs in exec_res.observations:
+                                if isinstance(obs, Observation):
+                                    self.observation_registry.register(obs)
+                                    self.event_bridge.emit_observation_created(obs)
+                                elif isinstance(obs, dict):
+                                    registered = self.observation_registry.add_observation(
+                                        job_id=self.job.job_id,
+                                        kind=obs.get("kind", "discovery"),
+                                        content=obs.get("content", ""),
+                                        task_id=task_node.task_id,
+                                        actor_id=task_node.assigned_actor,
+                                        metadata=obs.get("metadata", {}),
+                                    )
+                                    self.event_bridge.emit_observation_created(registered)
+
+                            # Check if execution result explicitly requests replan
+                            if exec_res.metadata.get("trigger_replan"):
+                                await self.request_replan(
+                                    reason=ReplanReason.OBSERVATION_DISCOVERY,
+                                    detail=exec_res.metadata.get("replan_reason", "Observation triggered dynamic plan expansion"),
                                 )
-                                self.event_bridge.emit_observation_created(registered)
+                                if self.is_terminal:
+                                    return False
+                    except Exception as exc:
+                        logger.error("Error processing completed task: %s", exc)
 
-                        # Check if execution result explicitly requests replan
-                        if exec_res.metadata.get("trigger_replan"):
-                            await self.request_replan(
-                                reason=ReplanReason.OBSERVATION_DISCOVERY,
-                                detail=exec_res.metadata.get("replan_reason", "Observation triggered dynamic plan expansion"),
-                            )
-                            return not self.is_terminal
+            if self.is_terminal:
+                return False
 
             # Check after execution batch
             if self.graph.is_all_completed():
@@ -326,7 +357,7 @@ class ReactiveJobEngine:
 
             # Check for permanent task failures (exhausted retries)
             failed_tasks = [t for t in self.graph.list_tasks() if t.status == TaskStatus.FAILED]
-            if failed_tasks:
+            if failed_tasks and not self.graph.has_running_tasks():
                 failed_desc = ", ".join([f"{t.task_id} (attempt {t.attempt}/{t.max_attempts})" for t in failed_tasks])
                 logger.info("Task failures detected: %s. Attempting replan.", failed_desc)
                 replanned = await self.request_replan(
@@ -341,11 +372,10 @@ class ReactiveJobEngine:
                     )
                 return not self.is_terminal
 
-            # Check if execution is blocked (no ready tasks, no running tasks, incomplete graph)
-            ready_tasks = self.graph.find_ready_tasks()
-            if not ready_tasks and not self.graph.is_all_completed() and not self.graph.has_active_tasks():
-                blocked_tasks = self.graph.find_blocked_tasks()
-                logger.info("Execution stalled. Incomplete tasks without ready status. Attempting replan.")
+            # Check if graph is stalled (dependency deadlock or unrunnable pending tasks)
+            if self.graph.is_stalled():
+                blocked_tasks = self.graph.find_dependency_blocked_tasks()
+                logger.info("Execution stalled (%d blocked tasks). Incomplete tasks cannot run. Attempting replan.", len(blocked_tasks))
                 replanned = await self.request_replan(
                     reason=ReplanReason.RUNTIME_BLOCKED,
                     detail=f"{len(blocked_tasks)} tasks blocked by dependency failures",
@@ -404,9 +434,13 @@ class ReactiveJobEngine:
                 added_any = False
                 if ver_res.repair_recommendations:
                     for rec in ver_res.repair_recommendations:
-                        node = self.graph.add_task(rec)
-                        self.event_bridge.emit_task_created(node, reason="repair_recommendation")
-                        added_any = True
+                        try:
+                            node = self.graph.add_task(rec)
+                            node.max_attempts = min(node.max_attempts, self.limits.max_task_attempts)
+                            self.event_bridge.emit_task_created(node, reason="repair_recommendation")
+                            added_any = True
+                        except ValueError as e:
+                            logger.warning("Duplicate repair task skipped: %s", e)
 
                 # If planner is available, allow planner to generate repair tasks
                 if self.planner:
@@ -416,6 +450,10 @@ class ReactiveJobEngine:
                     )
                     added_any = True
 
+                # Terminal check after replanning (prevent transition from BLOCKED -> EXECUTING)
+                if self.is_terminal:
+                    return False
+
                 if not added_any:
                     # Default generic repair task if nothing was specified
                     r_task = TaskNode(
@@ -424,8 +462,15 @@ class ReactiveJobEngine:
                         description=f"Address verification issue: {ver_res.summary}",
                         required_capabilities=["implementation"],
                     )
-                    self.graph.add_task(r_task)
-                    self.event_bridge.emit_task_created(r_task, reason="default_repair")
+                    r_task.max_attempts = min(r_task.max_attempts, self.limits.max_task_attempts)
+                    try:
+                        self.graph.add_task(r_task)
+                        self.event_bridge.emit_task_created(r_task, reason="default_repair")
+                    except ValueError:
+                        pass
+
+                if self.is_terminal:
+                    return False
 
                 self.job.transition_to(
                     JobState.EXECUTING,

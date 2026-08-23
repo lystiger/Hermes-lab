@@ -50,6 +50,7 @@ from runtime.replanning import (
 from runtime.events import RuntimeEventBridge
 from runtime.scheduler import ReactiveScheduler, DispatchDecision
 from runtime.engine import ReactiveJobEngine
+from runtime.hermes_adapter import HermesActorAdapter, HermesVerifierAdapter
 
 __all__ = [
     "JobState",
@@ -88,4 +89,6 @@ __all__ = [
     "ReactiveScheduler",
     "DispatchDecision",
     "ReactiveJobEngine",
+    "HermesActorAdapter",
+    "HermesVerifierAdapter",
 ]

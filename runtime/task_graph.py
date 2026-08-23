@@ -23,8 +23,8 @@ class TaskStatus(str, Enum):
 class TaskNode:
     """An individual unit of work within the dynamic task graph."""
     task_id: str
-    job_id: str
-    description: str
+    job_id: str = ""
+    description: str = ""
     status: TaskStatus = TaskStatus.PENDING
     dependencies: List[str] = field(default_factory=list)
     required_capabilities: List[str] = field(default_factory=list)
@@ -58,6 +58,13 @@ class TaskNode:
     def to_dict(self) -> Dict[str, Any]:
         data = asdict(self)
         data["status"] = self.status.value
+        data["taskId"] = self.task_id
+        data["jobId"] = self.job_id
+        data["requiredCapabilities"] = self.required_capabilities
+        data["assignedActor"] = self.assigned_actor
+        data["createdAt"] = self.created_at
+        data["startedAt"] = self.started_at
+        data["completedAt"] = self.completed_at
         return data
 
     @classmethod
@@ -101,11 +108,34 @@ class TaskGraph:
         else:
             node = task
 
+        if node.task_id in self._tasks:
+            raise ValueError(
+                f"Task '{node.task_id}' already exists in task graph. Duplicate task IDs are forbidden."
+            )
+
         if not node.job_id and self.job_id:
             node.job_id = self.job_id
 
         self._tasks[node.task_id] = node
         return node
+
+    def _has_path(self, start_id: str, target_id: str) -> bool:
+        """Helper to determine if target_id is reachable from start_id via dependencies."""
+        visited = set()
+        queue = [start_id]
+        while queue:
+            curr = queue.pop(0)
+            if curr == target_id:
+                return True
+            if curr in visited:
+                continue
+            visited.add(curr)
+            node = self._tasks.get(curr)
+            if node:
+                for dep_id in node.dependencies:
+                    if dep_id not in visited:
+                        queue.append(dep_id)
+        return False
 
     def add_dependency(self, task_id: str, depends_on_task_id: str) -> None:
         if task_id not in self._tasks:
@@ -114,6 +144,12 @@ class TaskGraph:
             raise KeyError(f"Dependency task '{depends_on_task_id}' not found in task graph")
         if task_id == depends_on_task_id:
             raise ValueError(f"Task '{task_id}' cannot depend on itself")
+
+        # Cycle detection: check if depends_on_task_id already reaches task_id
+        if self._has_path(depends_on_task_id, task_id):
+            raise ValueError(
+                f"Dependency cycle detected: adding '{task_id}' -> '{depends_on_task_id}' creates a circular dependency."
+            )
 
         task = self._tasks[task_id]
         if depends_on_task_id not in task.dependencies:
@@ -126,12 +162,18 @@ class TaskGraph:
         return list(self._tasks.values())
 
     def remove_task(self, task_id: str) -> Optional[TaskNode]:
-        node = self._tasks.pop(task_id, None)
-        if node:
-            for t in self._tasks.values():
-                if task_id in t.dependencies:
-                    t.dependencies.remove(task_id)
-        return node
+        if task_id not in self._tasks:
+            return None
+
+        # Safe removal invariant: ensure no remaining tasks depend on task_id
+        dependents = [t for t in self._tasks.values() if task_id in t.dependencies]
+        if dependents:
+            dep_ids = [t.task_id for t in dependents]
+            raise ValueError(
+                f"Cannot remove task '{task_id}': dependent task(s) {dep_ids} exist. Use supersede_task() instead."
+            )
+
+        return self._tasks.pop(task_id, None)
 
     def mark_ready(self, task_id: str) -> None:
         task = self._tasks.get(task_id)
@@ -250,10 +292,43 @@ class TaskGraph:
             if task.status in {TaskStatus.PENDING, TaskStatus.READY}:
                 for dep_id in task.dependencies:
                     dep = self._tasks.get(dep_id)
-                    if dep and dep.status in {TaskStatus.FAILED, TaskStatus.BLOCKED, TaskStatus.CANCELLED}:
+                    if not dep or dep.status in {TaskStatus.FAILED, TaskStatus.BLOCKED, TaskStatus.CANCELLED}:
                         blocked_tasks.append(task)
                         break
         return blocked_tasks
+
+    def find_dependency_blocked_tasks(self) -> List[TaskNode]:
+        """
+        Identifies active tasks whose dependencies have failed, blocked, or been cancelled.
+        """
+        return self.find_blocked_tasks()
+
+    def has_running_tasks(self) -> bool:
+        """Returns True if any task is actively RUNNING."""
+        return any(t.status == TaskStatus.RUNNING for t in self._tasks.values())
+
+    def has_runnable_tasks(self) -> bool:
+        """Returns True if any task is ready for execution."""
+        return len(self.find_ready_tasks()) > 0
+
+    def is_stalled(self) -> bool:
+        """
+        Returns True if execution cannot naturally progress:
+        - No tasks are currently RUNNING
+        - No tasks are RUNNABLE / READY
+        - The graph is NOT all completed
+        - Incomplete work remains (dependency-blocked or failed tasks)
+        """
+        if self.has_running_tasks() or self.has_runnable_tasks():
+            return False
+        if self.is_all_completed():
+            return False
+        # If there are active tasks in graph that cannot run
+        incomplete = [
+            t for t in self._tasks.values()
+            if t.status not in {TaskStatus.SUCCEEDED, TaskStatus.SUPERSEDED, TaskStatus.CANCELLED}
+        ]
+        return len(incomplete) > 0
 
     def is_all_completed(self) -> bool:
         """Returns True if the graph is non-empty and all non-superseded, non-cancelled tasks are SUCCEEDED."""
@@ -263,8 +338,11 @@ class TaskGraph:
         return all(t.status == TaskStatus.SUCCEEDED for t in active_nodes)
 
     def has_active_tasks(self) -> bool:
-        """Returns True if any active tasks remain in PENDING, READY, or RUNNING."""
-        return any(t.status in {TaskStatus.PENDING, TaskStatus.READY, TaskStatus.RUNNING} for t in self._tasks.values())
+        """
+        Returns True if runnable or running work exists.
+        Does NOT return True for permanently dependency-blocked pending tasks.
+        """
+        return self.has_running_tasks() or self.has_runnable_tasks()
 
     def has_failed_tasks(self) -> bool:
         """Returns True if any active task is in FAILED status."""

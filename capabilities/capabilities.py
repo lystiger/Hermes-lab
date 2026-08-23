@@ -79,6 +79,20 @@ DEFAULT_CAPABILITY_PROFILES: Dict[str, List[str]] = {
         "git.inspect",
         "repo.read",
     ],
+    "antigravity": [
+        "implementation",
+        "code.python",
+        "code.typescript",
+        "backend.fastapi",
+        "frontend.react",
+        "review.architecture",
+        "testing.unit",
+        "testing.integration",
+        "verification",
+        "documentation",
+        "git.inspect",
+        "repo.read",
+    ],
 }
 
 
@@ -102,8 +116,11 @@ class CapabilityRegistry:
         return c_obj
 
     def register_actor(self, profile: Any) -> None:
-        """Registers an actor profile (AgentProfile or SubagentProfile)."""
-        actor_id = getattr(profile, "id", None)
+        """Registers an actor profile (AgentProfile, SubagentProfile, or dict)."""
+        if isinstance(profile, dict):
+            actor_id = profile.get("id")
+        else:
+            actor_id = getattr(profile, "id", None)
         if not actor_id:
             raise ValueError("Actor profile must have an 'id'")
         self._actors[actor_id] = profile
@@ -123,7 +140,10 @@ class CapabilityRegistry:
             if actor_id in DEFAULT_CAPABILITY_PROFILES:
                 return list(DEFAULT_CAPABILITY_PROFILES[actor_id])
             return []
-        raw_caps = getattr(profile, "capabilities", []) or []
+        if isinstance(profile, dict):
+            raw_caps = profile.get("capabilities", []) or []
+        else:
+            raw_caps = getattr(profile, "capabilities", []) or []
         res = []
         for c in raw_caps:
             if isinstance(c, str):
@@ -204,7 +224,12 @@ class CapabilityRegistry:
             results.append((profile, score, match_info))
 
         # 5. Deterministic tie-break sorting: highest score first, then alphabetical actor.id
-        results.sort(key=lambda item: (-item[1], getattr(item[0], "id", "")))
+        results.sort(
+            key=lambda item: (
+                -item[1],
+                item[0].get("id", "") if isinstance(item[0], dict) else getattr(item[0], "id", str(item[0])),
+            )
+        )
         return results
 
     def select_actor(

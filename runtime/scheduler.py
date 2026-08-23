@@ -29,7 +29,7 @@ class ReactiveScheduler:
     """
     Event-driven, capability-aware task scheduler.
     Determines newly ready tasks, maps capabilities to registered actors,
-    and dispatches eligible tasks concurrently up to configured concurrency limits.
+    and dispatches eligible tasks concurrently up to configured global and per-actor limits.
     """
 
     def __init__(
@@ -37,16 +37,45 @@ class ReactiveScheduler:
         capability_registry: Optional[CapabilityRegistry] = None,
         limits: Optional[RuntimeLimits] = None,
         event_bridge: Optional[RuntimeEventBridge] = None,
+        default_actor_concurrency: int = 1,
     ):
         self.capability_registry = capability_registry or default_capability_registry
         self.limits = limits or RuntimeLimits()
         self.event_bridge = event_bridge
+        self.default_actor_concurrency = default_actor_concurrency
+        self.actor_concurrency_limits: Dict[str, int] = {}
         self._running_tasks: Set[str] = set()
-        self._busy_actors: Set[str] = set()
+        self._busy_actors: Dict[str, int] = {}
 
     @property
     def active_running_count(self) -> int:
         return len(self._running_tasks)
+
+    def set_actor_concurrency(self, actor_id: str, concurrency_limit: int) -> None:
+        """Configures maximum concurrent tasks for a specific actor."""
+        self.actor_concurrency_limits[actor_id] = max(1, concurrency_limit)
+
+    def get_actor_concurrency_limit(self, actor_id: str) -> int:
+        return self.actor_concurrency_limits.get(actor_id, self.default_actor_concurrency)
+
+    def is_actor_available(self, actor_id: str) -> bool:
+        current_load = self._busy_actors.get(actor_id, 0)
+        return current_load < self.get_actor_concurrency_limit(actor_id)
+
+    def acquire_actor(self, actor_id: str) -> None:
+        self._busy_actors[actor_id] = self._busy_actors.get(actor_id, 0) + 1
+
+    def release_actor(self, actor_id: str) -> None:
+        if actor_id in self._busy_actors:
+            self._busy_actors[actor_id] = max(0, self._busy_actors[actor_id] - 1)
+            if self._busy_actors[actor_id] == 0:
+                self._busy_actors.pop(actor_id, None)
+
+    @staticmethod
+    def _resolve_actor_id(profile: Any) -> str:
+        if isinstance(profile, dict):
+            return str(profile.get("id", ""))
+        return str(getattr(profile, "id", profile))
 
     def can_dispatch_more(self) -> bool:
         return len(self._running_tasks) < self.limits.concurrency_limit
@@ -59,17 +88,25 @@ class ReactiveScheduler:
     ) -> DispatchDecision:
         """
         Capability-aware actor selection with explainable decision tracking.
+        Distinguishes NO_CAPABLE_ACTOR from ACTOR_BUSY.
         """
-        # If task already has an explicit valid assigned_actor specified and available
+        # If task already has an explicit valid assigned_actor specified
         if task.assigned_actor:
-            satisfies = self.capability_registry.actor_satisfies(task.assigned_actor, task.required_capabilities)
-            if satisfies:
+            if not task.required_capabilities or self.capability_registry.actor_satisfies(task.assigned_actor, task.required_capabilities):
+                if not self.is_actor_available(task.assigned_actor):
+                    return DispatchDecision(
+                        task_id=task.task_id,
+                        actor_id=None,
+                        dispatched=False,
+                        reason="actor_busy",
+                        required_capabilities=task.required_capabilities,
+                    )
                 matched = [c for c in task.required_capabilities if c in self.capability_registry.get_actor_capabilities(task.assigned_actor)]
                 return DispatchDecision(
                     task_id=task.task_id,
                     actor_id=task.assigned_actor,
                     dispatched=True,
-                    reason=f"Explicitly assigned actor '{task.assigned_actor}' satisfies required capabilities",
+                    reason=f"Explicitly assigned actor '{task.assigned_actor}' satisfies task requirements",
                     required_capabilities=task.required_capabilities,
                     matched_capabilities=matched,
                     score=10.0,
@@ -83,10 +120,9 @@ class ReactiveScheduler:
         )
 
         if not ranked_candidates:
-            # Check why candidates failed for explainability
             rejected = {}
             for actor in self.capability_registry.list_actors():
-                aid = getattr(actor, "id", str(actor))
+                aid = self._resolve_actor_id(actor)
                 caps = set(self.capability_registry.get_actor_capabilities(aid))
                 missing = [c for c in task.required_capabilities if c not in caps]
                 if missing:
@@ -96,20 +132,42 @@ class ReactiveScheduler:
                 task_id=task.task_id,
                 actor_id=None,
                 dispatched=False,
-                reason=f"No actor satisfies required capabilities: {', '.join(task.required_capabilities)}",
+                reason="no_capable_actor",
                 required_capabilities=task.required_capabilities,
                 matched_capabilities=[],
                 rejected_candidates=rejected,
             )
 
-        best_profile, best_score, match_info = ranked_candidates[0]
-        selected_actor_id = getattr(best_profile, "id", str(best_profile))
+        # Filter for available candidates
+        available_candidates = [
+            c for c in ranked_candidates
+            if self.is_actor_available(self._resolve_actor_id(c[0]))
+        ]
+
+        if not available_candidates:
+            # Capable actors exist, but all are busy
+            return DispatchDecision(
+                task_id=task.task_id,
+                actor_id=None,
+                dispatched=False,
+                reason="actor_busy",
+                required_capabilities=task.required_capabilities,
+                matched_capabilities=ranked_candidates[0][2].get("matchedCapabilities", []),
+            )
+
+        best_profile, best_score, match_info = available_candidates[0]
+        selected_actor_id = self._resolve_actor_id(best_profile)
 
         # Rejected candidates for explainability
         rejected = {}
-        for profile, score, info in ranked_candidates[1:]:
-            aid = getattr(profile, "id", str(profile))
-            rejected[aid] = f"Lower match score ({score:.2f} < {best_score:.2f})"
+        for profile, score, info in ranked_candidates:
+            aid = self._resolve_actor_id(profile)
+            if aid == selected_actor_id:
+                continue
+            if not self.is_actor_available(aid):
+                rejected[aid] = "Actor currently at max concurrency capacity"
+            else:
+                rejected[aid] = f"Lower match score ({score:.2f} < {best_score:.2f})"
 
         return DispatchDecision(
             task_id=task.task_id,
@@ -145,15 +203,22 @@ class ReactiveScheduler:
 
             decision = self.match_actor_for_task(task)
             if not decision.dispatched or not decision.actor_id:
-                logger.warning("Task %s cannot be dispatched: %s", task.task_id, decision.reason)
-                graph.mark_blocked(task.task_id, reason=decision.reason)
-                continue
+                if decision.reason == "actor_busy":
+                    # Temporarily busy: task remains READY / deferred
+                    logger.debug("Task %s deferred: capable actors are currently busy", task.task_id)
+                    continue
+                else:
+                    # No capable actor exists: mark blocked
+                    logger.warning("Task %s cannot be dispatched: %s", task.task_id, decision.reason)
+                    graph.mark_blocked(task.task_id, reason=decision.reason)
+                    continue
 
             actor_id = decision.actor_id
 
-            # Mark task running
+            # Mark task running and acquire actor
             graph.mark_running(task.task_id, actor_id=actor_id)
             self._running_tasks.add(task.task_id)
+            self.acquire_actor(actor_id)
 
             if self.event_bridge:
                 self.event_bridge.emit_task_assigned(
@@ -222,3 +287,4 @@ class ReactiveScheduler:
 
         finally:
             self._running_tasks.discard(task.task_id)
+            self.release_actor(actor_id)

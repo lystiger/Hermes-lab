@@ -1,3 +1,4 @@
+import asyncio
 from dataclasses import dataclass, field, asdict
 from datetime import datetime, timezone
 from enum import Enum
@@ -68,6 +69,7 @@ class TaskExecutionResult:
     """The structured outcome of an actor task execution."""
     status: str = "succeeded"  # "succeeded" | "failed"
     exit_reason: Optional[str] = None
+    output: Optional[Any] = None
     artifact_refs: List[Dict[str, Any]] = field(default_factory=list)
     observations: List[Observation] = field(default_factory=list)
     error: Optional[Union[Dict[str, Any], str]] = None
@@ -77,6 +79,7 @@ class TaskExecutionResult:
         return {
             "status": self.status,
             "exit_reason": self.exit_reason,
+            "output": self.output,
             "artifact_refs": self.artifact_refs,
             "observations": [o.to_dict() if hasattr(o, "to_dict") else o for o in self.observations],
             "error": self.error,
@@ -200,8 +203,28 @@ class ExecutionManager:
                 event_bridge.emit_agent_failed(run=run, task=task, error=error_msg)
             return TaskExecutionResult(status="failed", error=error_msg, exit_reason="missing_adapter")
 
+        # Resolve timeout
+        timeout_seconds = None
+        if isinstance(task.metadata, dict) and task.metadata.get("timeout_seconds"):
+            try:
+                timeout_seconds = float(task.metadata["timeout_seconds"])
+            except (ValueError, TypeError):
+                pass
+        elif isinstance(context, dict) and context.get("timeout_seconds"):
+            try:
+                timeout_seconds = float(context["timeout_seconds"])
+            except (ValueError, TypeError):
+                pass
+
         try:
-            result = await adapter.execute_task(task=task, run=run, context=context)
+            if timeout_seconds and timeout_seconds > 0:
+                result = await asyncio.wait_for(
+                    adapter.execute_task(task=task, run=run, context=context),
+                    timeout=timeout_seconds,
+                )
+            else:
+                result = await adapter.execute_task(task=task, run=run, context=context)
+
             run.finished_at = datetime.now(timezone.utc).isoformat()
 
             if result.status == "succeeded":
@@ -218,6 +241,19 @@ class ExecutionManager:
                     event_bridge.emit_agent_failed(run=run, task=task, error=str(result.error))
 
             return result
+
+        except asyncio.TimeoutError:
+            error_msg = f"Task execution timed out after {timeout_seconds} seconds"
+            run.status = AgentRunStatus.TIMED_OUT
+            run.finished_at = datetime.now(timezone.utc).isoformat()
+            run.exit_reason = "timeout"
+            run.error = error_msg
+            logger.warning("Task %s on actor %s timed out after %s seconds", task.task_id, actor_id, timeout_seconds)
+            if event_bridge and hasattr(event_bridge, "emit_agent_timed_out"):
+                event_bridge.emit_agent_timed_out(run=run, task=task, timeout_seconds=timeout_seconds)
+            elif event_bridge:
+                event_bridge.emit_agent_failed(run=run, task=task, error=error_msg)
+            return TaskExecutionResult(status="failed", error=error_msg, exit_reason="timeout")
 
         except Exception as exc:
             run.status = AgentRunStatus.FAILED

@@ -371,6 +371,7 @@ class CreateJobPayload(BaseModel):
     sprintId: str = Field(..., min_length=1, max_length=100)
     dryRun: bool = False
     skipAgentExec: bool = False
+    mode: Optional[str] = "reactive_runtime"
 
 
 @app.post("/jobs", status_code=status.HTTP_202_ACCEPTED)
@@ -384,6 +385,7 @@ async def create_job(payload: CreateJobPayload):
             sprint_id=payload.sprintId,
             dry_run=payload.dryRun,
             skip_agent_exec=payload.skipAgentExec,
+            mode=payload.mode or "reactive_runtime",
         )
         return result
     except ValueError as exc:

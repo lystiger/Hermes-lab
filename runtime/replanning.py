@@ -167,10 +167,15 @@ class BoundedReplanner:
                     continue
 
                 if mutation.task:
-                    node = graph.add_task(mutation.task)
-                    affected_task_ids.append(node.task_id)
-                    if event_bridge:
-                        event_bridge.emit_task_created(node, reason=mutation.reason)
+                    # Enforce runtime limits on task attempts
+                    mutation.task.max_attempts = min(mutation.task.max_attempts, self.limits.max_task_attempts)
+                    try:
+                        node = graph.add_task(mutation.task)
+                        affected_task_ids.append(node.task_id)
+                        if event_bridge:
+                            event_bridge.emit_task_created(node, reason=mutation.reason)
+                    except ValueError as e:
+                        logger.warning("Rejected duplicate task in replanner: %s", e)
 
             elif mutation.mutation_type == GraphMutationType.ADD_DEPENDENCY:
                 if mutation.task_id and mutation.depends_on_task_id:
@@ -201,7 +206,10 @@ class BoundedReplanner:
 
             elif mutation.mutation_type == GraphMutationType.REMOVE_TASK:
                 if mutation.task_id:
-                    graph.remove_task(mutation.task_id)
-                    affected_task_ids.append(mutation.task_id)
+                    try:
+                        graph.remove_task(mutation.task_id)
+                        affected_task_ids.append(mutation.task_id)
+                    except Exception as e:
+                        logger.warning("Failed removing task %s: %s. Prefer SUPERSEDE_TASK.", mutation.task_id, e)
 
         return affected_task_ids

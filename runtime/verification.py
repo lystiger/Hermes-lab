@@ -31,6 +31,10 @@ class VerificationCheck:
         return asdict(self)
 
 
+# Alias for compatibility
+VerificationCheckResult = VerificationCheck
+
+
 @dataclass
 class VerificationResult:
     """Structured result of the job verification stage."""

@@ -242,6 +242,16 @@ class RuntimeEventBridge:
             metadata={"runId": run.run_id, "taskId": task.task_id, "error": error},
         )
 
+    def emit_agent_timed_out(self, run: Any, task: Any, timeout_seconds: Optional[float] = None) -> None:
+        self._publish(
+            source_id=run.actor_id,
+            source_kind="agent",
+            kind="agent.timed_out",
+            detail=f"Agent '{run.actor_id}' timed out after {timeout_seconds}s for task {task.task_id}",
+            job_id=run.job_id,
+            metadata={"runId": run.run_id, "taskId": task.task_id, "attempt": run.attempt, "timeoutSeconds": timeout_seconds},
+        )
+
     def emit_observation_created(self, observation: Any) -> None:
         self._publish(
             source_id=observation.actor_id or "lysstack.runtime",

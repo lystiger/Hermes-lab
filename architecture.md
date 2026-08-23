@@ -222,6 +222,11 @@ Phase 8.1.3: Async Execution & Fail-Closed Runtime
    ├── context.root resolved once at launcher/spec-normalization time
    ├── No permissive default ToolPolicy; runtime-stamped tool requester identity
    └── Bounded OBSERVATION_DISCOVERY graph expansion
+
+Phase 8.1.4: Follow-Up Triggering & Cancellation Safety (Phase 8 freeze)
+   ├── Observations flagged requires_follow_up drive discovery replanning automatically
+   ├── Opportunistic replans that add nothing no longer BLOCK a healthy job
+   └── Cancellation stops in-flight workers, marks the graph, and releases actors
 ```
 
 ---
@@ -244,6 +249,9 @@ Phase 8.1.3: Async Execution & Fail-Closed Runtime
 14. **Runtime-Stamped Requester Identity**: Every tool invocation carries a requester assigned by the runtime. Identity on agent-emitted embedded requests is overwritten, so an agent cannot claim a privileged identity to bypass capability gating.
 15. **Bounded Discovery Expansion**: Observation-driven replanning expands the graph only for observations explicitly flagged `requires_follow_up`, capped per replan, gated on remaining replan budget, and idempotent through observation-derived task IDs.
 16. **Single Point of Path Resolution**: `context.root` is resolved and validated at launcher/spec-normalization time relative to the sprint specification directory; the adapter rejects an unresolved relative root rather than re-resolving it against a different base.
+17. **Self-Triggering Discovery**: An observation flagged `requires_follow_up` drives a discovery replan on its own, at most once per observation. Adapters do not need to also set `trigger_replan`.
+18. **Opportunistic vs. Blocking Replans**: A discovery replan that produces no mutations means no extra work is needed and leaves the job EXECUTING. Failure- and deadlock-driven replans keep the original semantics: a planner with nothing to offer transitions the job to `BLOCKED`.
+19. **Cancellation Containment**: Cancelling a job — by operator, by driver-task cancellation, or on any exit from `run_until_complete` — stops every in-flight execution task, marks unfinished graph tasks `CANCELLED`, and releases actor slots. No worker keeps mutating worktrees behind a job already reported as finished. `request_cancel` is synchronous and safe to call from outside the engine's loop.
 
 ---
 
@@ -251,8 +259,9 @@ Phase 8.1.3: Async Execution & Fail-Closed Runtime
 
 The system is validated across comprehensive test suites:
 
-- **Total Backend Pytest Tests**: **240 tests** (238 passed, 2 skipped, 0 failed).
+- **Total Backend Pytest Tests**: **250 tests** (248 passed, 2 skipped, 0 failed).
 - **Hardening Suite (`tests/test_phase8_1_runtime_hardening.py`)**: 14 tests verifying production launch, deadlocks, cycles, concurrency, timeouts, and reactivity.
 - **Async & Fail-Closed Suite (`tests/test_phase8_1_3_async_failclosed.py`)**: 20 tests verifying off-loop concurrent agent execution, serialized Git mutation, worktree and sync fail-closure, context resolution, tool policy and requester identity, and bounded discovery expansion.
+- **Follow-Up & Cancellation Suite (`tests/test_phase8_1_4_followup_cancellation.py`)**: 10 tests verifying automatic discovery triggering, opportunistic vs. blocking replan semantics, and cancellation containment across operator, driver-cancellation, and normal-exit paths.
 - **Frontend Vitest Suite (`LysControl`)**: 41 tests across 10 test suites covering UI views, adapters, delegation, and messaging.
 - **Cross-Process Integration**: Validates end-to-end FastAPI subprocess execution and live event synchronization.

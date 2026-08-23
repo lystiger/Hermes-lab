@@ -207,6 +207,14 @@ class TestPhase8ReactiveRuntimeScenarios(unittest.IsolatedAsyncioTestCase):
         # Execute T2 and T3 in parallel
         await engine.step()
         self.assertEqual(max_concurrency_seen, 2)
+
+        # step() returns on FIRST_COMPLETED, so the second branch may still be in flight.
+        # Drain it rather than assuming both timers fired in the same loop wakeup.
+        for _ in range(5):
+            if not engine.graph.has_running_tasks():
+                break
+            await engine.step()
+
         self.assertEqual(engine.graph.get_task("T2").status, TaskStatus.SUCCEEDED)
         self.assertEqual(engine.graph.get_task("T3").status, TaskStatus.SUCCEEDED)
 

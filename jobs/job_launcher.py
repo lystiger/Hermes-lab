@@ -378,11 +378,11 @@ class JobLauncher:
         # 1. Check active ReactiveJobEngine
         engine = job_service.get_engine(job_id)
         if engine and not engine.is_terminal:
-            engine.job.transition_to(
-                JobState.CANCELLED,
-                reason="Job cancelled by operator",
-                event_bridge=engine.event_bridge,
-            )
+            # Cancel the driving loop first so it cannot schedule further work, then stop the
+            # engine's in-flight execution tasks. Cancelling only the driver would leave the
+            # workers running against worktrees for a job already reported as cancelled.
+            engine.request_cancel("Job cancelled by operator")
+
             task = self._active_async_tasks.pop(job_id, None)
             if task and not task.done():
                 task.cancel()

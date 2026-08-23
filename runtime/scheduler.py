@@ -285,6 +285,15 @@ class ReactiveScheduler:
 
             return task, result
 
+        except asyncio.CancelledError:
+            # Record the cancellation on the graph so a cancelled job does not report its
+            # in-flight work as still RUNNING, then propagate so the awaiting engine sees it.
+            if graph.get_task(task.task_id) is not None and task.status == TaskStatus.RUNNING:
+                graph.mark_cancelled(task.task_id, reason="Execution cancelled")
+            if self.event_bridge and hasattr(self.event_bridge, "emit_task_failed"):
+                self.event_bridge.emit_task_failed(task=task, actor_id=actor_id, error="Execution cancelled")
+            raise
+
         finally:
             self._running_tasks.discard(task.task_id)
             self.release_actor(actor_id)

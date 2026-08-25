@@ -15,6 +15,7 @@ from runtime.capacity import (
     ProviderFailureClassifier,
     ProviderFailureClass,
     TaskBudgetEstimate,
+    UsageSnapshot,
     UsageSnapshotNormalizer,
 )
 from runtime.circuit_breaker import CircuitBreakerRegistry, default_circuit_registry
@@ -411,8 +412,8 @@ class ReactiveScheduler:
             if isinstance(result.metadata, dict):
                 usage_snap_dict = result.metadata.get("usage_snapshot")
                 if isinstance(usage_snap_dict, dict):
-                    snap = UsageSnapshotNormalizer.normalize(
-                        raw_data=usage_snap_dict,
+                    snap = UsageSnapshot.from_dict(
+                        usage_snap_dict,
                         provider_id=provider_id,
                         actor_id=actor_id,
                     )

@@ -147,3 +147,11 @@ class ClaudeAdapter(AgentAdapter):
                 result.runtime_metadata["usage"] = data["usage"]
             if "model" in data:
                 result.runtime_metadata["model"] = data["model"]
+            if "context_used" in data:
+                result.runtime_metadata["context_used"] = data["context_used"]
+            if "context_window" in data:
+                result.runtime_metadata["context_window"] = data["context_window"]
+            if "tokens_remaining" in data:
+                result.runtime_metadata["tokens_remaining"] = data["tokens_remaining"]
+            if "token_limit" in data:
+                result.runtime_metadata["token_limit"] = data["token_limit"]

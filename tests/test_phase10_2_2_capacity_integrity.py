@@ -333,3 +333,113 @@ async def test_true_rto_survives_reconstruction():
     assert reconstructed.job.metadata.get("recovery_rto_seconds") is not None
     assert reconstructed.job.metadata["recovery_rto_seconds"] >= 12.0
     assert reconstructed.job.metadata.get("recovery_resumed_at") is not None
+
+
+class ClaudeMockWithFullCapacityAgent:
+    name = "claude"
+
+    def build_command(self, prompt, options, worktree=None):
+        return ["echo", "mock_claude"]
+
+    def execute(self, context):
+        claude_out = json.dumps({
+            "type": "result",
+            "subtype": "success",
+            "is_error": False,
+            "model": "claude-3-5-sonnet-20241022",
+            "usage": {
+                "input_tokens": 2500,
+                "output_tokens": 420,
+            },
+            "tokens_remaining": 8000,
+            "token_limit": 100000,
+            "context_used": 90000,
+            "context_window": 100000,
+            "content": [{"type": "text", "text": "All tasks completed."}],
+        })
+        res = ExecutionResult(
+            command=("claude",),
+            returncode=0,
+            stdout=claude_out,
+            stderr="",
+            backend="cli",
+        )
+        ClaudeAdapter().validate_result(res, context=None)
+        return res
+
+
+@pytest.mark.anyio
+async def test_real_adapter_to_scheduler_canonical_snapshot_e2e(tmp_path: Path):
+    """
+    Test 8: Real Adapter -> Scheduler Canonical Snapshot Transfer E2E.
+    Validates that raw provider output normalized in HermesActorAdapter flows
+    into TaskExecutionResult and is deserialized directly by Scheduler into
+    CapacityRegistry without double-writes or renormalization.
+    """
+    from runner.agents.registry import AgentRegistry
+    from runtime.task_graph import TaskGraph
+    from runtime.execution import ExecutionManager
+
+    agent_reg = AgentRegistry()
+    agent_reg.register(ClaudeMockWithFullCapacityAgent())
+
+    cap_reg = CapabilityRegistry()
+    cap_reg.register_actor({
+        "id": "claude",
+        "name": "Claude Agent",
+        "capabilities": ["backend", "python"],
+    })
+
+    capacity_reg = CapacityRegistry()
+    capacity_reg.register_actor_provider("claude", "anthropic")
+
+    scheduler = Scheduler(
+        capability_registry=cap_reg,
+        capacity_registry=capacity_reg,
+    )
+
+    adapter = HermesActorAdapter(
+        target_repo=tmp_path,
+        worktree_root=tmp_path / "worktrees",
+        run_dir=tmp_path / "runs",
+        agent_registry=agent_reg,
+        dry_run=False,
+    )
+
+    exec_manager = ExecutionManager()
+    exec_manager.register_adapter("claude", adapter)
+
+    graph = TaskGraph()
+    task = TaskNode(
+        task_id="T_CLAUDE_E2E",
+        job_id="job_claude_e2e",
+        description="Production E2E Task",
+        assigned_actor="claude",
+        status=TaskStatus.READY,
+    )
+    graph.add_task(task)
+
+    # Schedule and execute task through real scheduler & execution manager
+    async_tasks = await scheduler.schedule_ready_tasks(
+        graph=graph,
+        execution_manager=exec_manager,
+        context={"job": {"job_id": "job_claude_e2e"}},
+    )
+    if async_tasks:
+        await asyncio.gather(*async_tasks)
+
+    # Verify task completed
+    assert task.status == TaskStatus.SUCCEEDED
+
+    # Verify CapacityRegistry state in scheduler
+    usage = capacity_reg.get_usage("anthropic")
+    assert usage is not None
+    assert usage.input_tokens == 2500
+    assert usage.output_tokens == 420
+    assert usage.tokens_used == 2920
+
+    assert usage.tokens_remaining == 8000
+    assert usage.token_limit == 100000
+    assert usage.context_used == 90000
+    assert usage.context_window == 100000
+    assert usage.source == "provider_reported"

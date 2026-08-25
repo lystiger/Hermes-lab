@@ -1,4 +1,4 @@
-from dataclasses import dataclass, field, asdict
+from dataclasses import dataclass, field, asdict, fields
 from datetime import datetime, timezone, timedelta
 from enum import Enum
 import logging
@@ -32,7 +32,7 @@ class ActorStatus(str, Enum):
 
 
 class ProviderFailureClass(str, Enum):
-    """Authoritative taxonomy for classifying model and provider errors."""
+    """Authoritative taxonomy for provider-level failure classification."""
     RATE_LIMITED = "rate_limited"
     TOKEN_QUOTA_EXHAUSTED = "token_quota_exhausted"
     CONTEXT_TOO_LARGE = "context_too_large"
@@ -75,6 +75,24 @@ class UsageSnapshot:
 
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
+
+    @classmethod
+    def from_dict(
+        cls,
+        data: Dict[str, Any],
+        provider_id: Optional[str] = None,
+        actor_id: Optional[str] = None,
+    ) -> "UsageSnapshot":
+        d = dict(data or {})
+        if provider_id:
+            d["provider_id"] = provider_id
+        if actor_id:
+            d["actor_id"] = actor_id
+        valid_fields = {f.name for f in fields(cls)}
+        filtered = {k: v for k, v in d.items() if k in valid_fields}
+        if "provider_id" not in filtered or not filtered["provider_id"]:
+            filtered["provider_id"] = provider_id or "unknown"
+        return cls(**filtered)
 
 
 @dataclass
@@ -170,6 +188,35 @@ class UsageSnapshotNormalizer:
             "ratelimit-limit-tokens",
         )
 
+        if tokens_rem is None:
+            raw_tr = raw_data.get("tokens_remaining") if raw_data.get("tokens_remaining") is not None else (usage_dict.get("tokens_remaining") if usage_dict.get("tokens_remaining") is not None else raw_data.get("remaining_tokens"))
+            if raw_tr is not None:
+                try:
+                    tokens_rem = int(raw_tr)
+                except (ValueError, TypeError):
+                    pass
+        if tok_limit is None:
+            raw_tl = raw_data.get("token_limit") if raw_data.get("token_limit") is not None else (usage_dict.get("token_limit") if usage_dict.get("token_limit") is not None else raw_data.get("limit_tokens"))
+            if raw_tl is not None:
+                try:
+                    tok_limit = int(raw_tl)
+                except (ValueError, TypeError):
+                    pass
+        if requests_rem is None:
+            raw_rr = raw_data.get("requests_remaining") if raw_data.get("requests_remaining") is not None else (usage_dict.get("requests_remaining") if usage_dict.get("requests_remaining") is not None else raw_data.get("remaining_requests"))
+            if raw_rr is not None:
+                try:
+                    requests_rem = int(raw_rr)
+                except (ValueError, TypeError):
+                    pass
+        if req_limit is None:
+            raw_rl = raw_data.get("request_limit") if raw_data.get("request_limit") is not None else (usage_dict.get("request_limit") if usage_dict.get("request_limit") is not None else raw_data.get("limit_requests"))
+            if raw_rl is not None:
+                try:
+                    req_limit = int(raw_rl)
+                except (ValueError, TypeError):
+                    pass
+
         # 3. Context metrics
         ctx_used = (
             raw_data.get("context_used")
@@ -190,8 +237,8 @@ class UsageSnapshotNormalizer:
             or raw_data.get("reset_at")
         )
 
-        has_provider_data = bool(headers) or bool(raw_data.get("usage")) or bool(raw_data.get("token_usage"))
-        source = "provider_reported" if has_provider_data else "unknown"
+        has_provider_data = bool(headers) or bool(raw_data.get("usage")) or bool(raw_data.get("token_usage")) or raw_data.get("source") == "provider_reported"
+        source = raw_data.get("source") if raw_data.get("source") and raw_data.get("source") != "unknown" else ("provider_reported" if has_provider_data else "unknown")
 
         return UsageSnapshot(
             provider_id=provider_id,

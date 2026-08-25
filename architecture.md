@@ -254,6 +254,16 @@ Phase 9.1.1: Production Cancellation & Terminal Atomicity
    ├── Unified list_unfinished_jobs() cross-dialect consistency checking event types and state payloads
    ├── Live PostgreSQL two-store concurrency and idempotency testing against Docker service
    └── Guaranteed job.created persistence before POST /jobs acknowledges creation (launch_async)
+
+Phase 10: Runtime Resilience, Recovery, Capacity Awareness & Rerouting
+   ├── Crash Recovery & Engine Rehydration from canonical event ledger (RecoveryManager, InterruptedTaskReconciler)
+   ├── Single-Active-Executor Job Lease Store (JobLeaseStore, InMemoryJobLeaseStore, PostgresJobLeaseStore)
+   ├── RTO / RPO measurement and telemetry tracking (rto_seconds, failure_detected_at, execution_resumed_at)
+   ├── Provider Capacity, Quota & Rate Limit Awareness (CapacityRegistry, ProviderFailureClassifier, UsageSnapshot)
+   ├── Dynamic Capability-Based Task Rerouting & Failover (ReroutePolicy)
+   ├── Closed/Open/Half-Open Circuit Breakers (CircuitBreaker, CircuitBreakerRegistry)
+   ├── Non-terminal JobState.WAITING_FOR_CAPACITY state and automatic capacity restoration
+   └── Control-Plane APIs: GET /jobs/recoverable, POST /jobs/{id}/resume, GET /jobs/{id}/recovery
 ```
 
 ---
@@ -285,6 +295,14 @@ Phase 9.1.1: Production Cancellation & Terminal Atomicity
 23. **Fail-Closed Persistence**: State transitions must persist to durable storage before execution advances. Storage unavailability halts or fails the job rather than quietly continuing in a non-reconstructable state.
 24. **Deterministic Reconstruction**: `RuntimeStateProjector` reconstructs identical `JobRecord`, `TaskGraph`, `AgentRun`, `Observation`, and artifact structures from the event stream without requiring live engine process memory.
 25. **No Silent Storage Fallback**: A configured PostgreSQL database that is unreachable at startup fails fast with `StorageUnavailableError` rather than silently degrading to transient in-memory storage.
+26. **Zero-RPO Crash Recovery**: Any state change acknowledged prior to process termination is fully preserved and reconstructed upon resumption without data loss.
+27. **Idempotent Task Resume**: Resume never blindly re-executes work whose durable side effects (commits, artifacts, integration mutations) are known to have succeeded.
+28. **Provider-Task Failure Disambiguation**: Provider outages, HTTP 429 rate limits, and quota exhaustion are classified separately from application task logic errors.
+29. **Non-Fatal Provider Quota Exhaustion**: An unavailable provider or token exhaustion does not immediately mark the job `FAILED`; the engine attempts capability-based rerouting or pauses in `WAITING_FOR_CAPACITY`.
+30. **Pure Capability-Based Rerouting**: Actor failover and rerouting are resolved dynamically against required capabilities and provider health; provider chains are never hardcoded.
+31. **Single-Active-Executor Leases**: An unexpired execution lease held by an active executor prevents duplicate concurrent execution of the same recovered job.
+32. **Terminal Resume Protection**: Completed and cancelled jobs reject resumption requests immediately (`ValueError`).
+33. **Durably Evented Recovery**: Recovery starts, rehydrations, interrupted task reconciliations/requeues, reroutes, and completions are themselves committed as canonical durable events.
 
 ---
 
@@ -292,7 +310,13 @@ Phase 9.1.1: Production Cancellation & Terminal Atomicity
 
 The system is validated across comprehensive test suites:
 
-- **Total Backend Pytest Tests**: **294 tests** (292 passed, 2 skipped, 0 failed).
+- **Total Backend Pytest Tests**: **315 tests** (312 passed, 3 skipped, 0 failed).
+- **Phase 10 Recovery Suite (`tests/test_phase10_recovery.py`)**: 7 tests verifying DAG rehydration, no re-execution of succeeded tasks, safe requeuing of side-effect-free interrupted tasks, reconciliation of committed work, counter survival across restart, terminal resume rejection, and single-active-executor lease takeover.
+- **Phase 10 Capacity & Failure Classification Suite (`tests/test_phase10_capacity.py`)**: 6 tests verifying 429 rate-limit classification, quota exhaustion provider status, Retry-After header parsing, context length limit handling, un-fabricated usage metrics, and multi-call token aggregation.
+- **Phase 10 Rerouting & Circuit Breakers Suite (`tests/test_phase10_rerouting.py`)**: 3 tests verifying quota failover to alternative capable actors, `WAITING_FOR_CAPACITY` pause and resume on capacity restoration, and circuit breaker CLOSED -> OPEN -> HALF_OPEN lifecycle transitions.
+- **Phase 10 RTO/RPO Telemetry Suite (`tests/test_phase10_rto_rpo.py`)**: 2 tests verifying zero RPO canonical event preservation across simulated crash and positive, monotonic RTO duration measurement.
+- **Phase 10 PostgreSQL Lease Suite (`tests/test_phase10_lease_postgres.py`)**: Tests verifying atomic lease acquisition, renewal, and release under memory and PostgreSQL backends.
+- **Phase 10 Full Acceptance Suite (`tests/test_phase10_acceptance.py`)**: End-to-end multi-agent reactive workflow verifying process crash recovery, zero RPO rehydration, task reconciliation, provider quota failover, capability rerouting, dependency progression, verification, and deterministic post-destruction reconstruction.
 - **Hardening Suite (`tests/test_phase8_1_runtime_hardening.py`)**: 14 tests verifying production launch, deadlocks, cycles, concurrency, timeouts, and reactivity.
 - **Async & Fail-Closed Suite (`tests/test_phase8_1_3_async_failclosed.py`)**: 20 tests verifying off-loop concurrent agent execution, serialized Git mutation, worktree and sync fail-closure, context resolution, tool policy and requester identity, and bounded discovery expansion.
 - **Follow-Up & Cancellation Suite (`tests/test_phase8_1_4_followup_cancellation.py`)**: 10 tests verifying automatic discovery triggering, opportunistic vs. blocking replan semantics, and cancellation containment across operator, driver-cancellation, and normal-exit paths.

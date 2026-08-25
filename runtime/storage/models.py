@@ -58,3 +58,25 @@ class RuntimeEventModel(Base):
         Index("ix_runtime_events_job_seq", "job_id", "sequence"),
         Index("ix_runtime_events_job_type", "job_id", "event_type"),
     )
+
+
+class JobLeaseModel(Base):
+    __tablename__ = "job_leases"
+
+    job_id: Mapped[str] = mapped_column(String(255), primary_key=True)
+    owner_id: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
+    acquired_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=lambda: datetime.now(timezone.utc),
+    )
+    lease_until: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        index=True,
+    )
+    heartbeat_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=lambda: datetime.now(timezone.utc),
+    )

@@ -52,6 +52,38 @@ from runtime.events import RuntimeEventBridge
 from runtime.scheduler import ReactiveScheduler, DispatchDecision
 from runtime.engine import ReactiveJobEngine
 from runtime.hermes_adapter import HermesActorAdapter, HermesVerifierAdapter, HermesPlannerAdapter
+from runtime.capacity import (
+    ProviderStatus,
+    ActorStatus,
+    ProviderFailureClass,
+    UsageSnapshot,
+    ProviderFailureClassifier,
+    CapacityRegistry,
+    default_capacity_registry,
+)
+from runtime.circuit_breaker import (
+    CircuitState,
+    CircuitBreaker,
+    CircuitBreakerRegistry,
+    default_circuit_registry,
+)
+from runtime.lease import (
+    JobLease,
+    JobLeaseStore,
+    InMemoryJobLeaseStore,
+    PostgresJobLeaseStore,
+    JobLeaseManager,
+)
+from runtime.recovery import (
+    RecoveryDisposition,
+    RecoveryMetrics,
+    InterruptedTaskReconciler,
+    RecoveryManager,
+)
+from runtime.routing import (
+    ReroutePolicy,
+    default_reroute_policy,
+)
 
 __all__ = [
     "JobState",
@@ -94,4 +126,26 @@ __all__ = [
     "HermesActorAdapter",
     "HermesVerifierAdapter",
     "HermesPlannerAdapter",
+    "ProviderStatus",
+    "ActorStatus",
+    "ProviderFailureClass",
+    "UsageSnapshot",
+    "ProviderFailureClassifier",
+    "CapacityRegistry",
+    "default_capacity_registry",
+    "CircuitState",
+    "CircuitBreaker",
+    "CircuitBreakerRegistry",
+    "default_circuit_registry",
+    "JobLease",
+    "JobLeaseStore",
+    "InMemoryJobLeaseStore",
+    "PostgresJobLeaseStore",
+    "JobLeaseManager",
+    "RecoveryDisposition",
+    "RecoveryMetrics",
+    "InterruptedTaskReconciler",
+    "RecoveryManager",
+    "ReroutePolicy",
+    "default_reroute_policy",
 ]

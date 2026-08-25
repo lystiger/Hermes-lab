@@ -422,6 +422,66 @@ async def cancel_job(job_id: str):
     return {"cancelled": True, "jobId": job_id}
 
 
+@app.get("/jobs/recoverable")
+async def get_recoverable_jobs(limit: int = Query(default=50, ge=1, le=100)):
+    """
+    Discovers unfinished jobs from the canonical event ledger eligible for recovery.
+    """
+    store = get_global_event_store()
+    unfinished_job_ids = await store.list_unfinished_jobs(limit=limit)
+    recoverable = []
+    for jid in unfinished_job_ids:
+        job = await job_service.get_job_async(jid)
+        if job and job.status not in ("COMPLETED", "CANCELLED"):
+            recoverable.append(job.to_summary_dict())
+    return recoverable
+
+
+@app.post("/jobs/{job_id}/resume")
+async def resume_job(job_id: str):
+    """
+    Recovers and resumes an unfinished job from the canonical event store with lease exclusivity.
+    """
+    try:
+        result = await job_launcher.resume_async(job_id)
+        return result
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc),
+        )
+    except RuntimeError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=str(exc),
+        )
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Recovery failed: {exc}",
+        )
+
+
+@app.get("/jobs/{job_id}/recovery")
+async def get_job_recovery_status(job_id: str):
+    """
+    Returns recovery status and measured RTO telemetry for a recovered job.
+    """
+    store = get_global_event_store()
+    events = await store.list_events(job_id)
+    if not events:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Job '{job_id}' not found in event store",
+        )
+    recovery_events = [e.to_dict() for e in events if e.event_type.startswith("recovery.")]
+    return {
+        "jobId": job_id,
+        "recoveryCount": len([e for e in events if e.event_type == "recovery.completed"]),
+        "events": recovery_events,
+    }
+
+
 # -------------------------------------------------------------
 # Operational Messaging, Threads, Mailbox & Artifacts (Phase 5)
 # -------------------------------------------------------------

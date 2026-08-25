@@ -534,3 +534,260 @@ class RuntimeEventBridge:
             job_id=job_id,
             metadata={"mutationsCount": mutations_count, "explanation": explanation},
         )
+
+    # --- Phase 10: Recovery Events ---
+    async def emit_recovery_started(self, job_id: str, recovery_id: str, detected_interruption_at: Optional[str] = None) -> StoredRuntimeEvent:
+        return await self.persist_and_publish(
+            source_id="lysstack.recovery",
+            source_kind="runtime",
+            kind="recovery.started",
+            detail=f"Recovery started for job {job_id} (session {recovery_id})",
+            job_id=job_id,
+            metadata={"recoveryId": recovery_id, "detectedInterruptionAt": detected_interruption_at},
+            accent_color="#38BDF8",
+        )
+
+    async def emit_recovery_job_rehydrated(self, job_id: str, tasks_count: int, runs_count: int) -> StoredRuntimeEvent:
+        return await self.persist_and_publish(
+            source_id="lysstack.recovery",
+            source_kind="runtime",
+            kind="recovery.job_rehydrated",
+            detail=f"Job {job_id} state rehydrated from event store ({tasks_count} tasks, {runs_count} runs)",
+            job_id=job_id,
+            metadata={"tasksCount": tasks_count, "runsCount": runs_count},
+        )
+
+    async def emit_recovery_task_interrupted(self, task_id: str, job_id: str, reason: str = "Process interrupted") -> StoredRuntimeEvent:
+        return await self.persist_and_publish(
+            source_id="lysstack.recovery",
+            source_kind="runtime",
+            kind="recovery.task_interrupted",
+            detail=f"Task {task_id} in job {job_id} was interrupted: {reason}",
+            job_id=job_id,
+            task_id=task_id,
+            metadata={"taskId": task_id, "reason": reason},
+            accent_color="#F59E0B",
+        )
+
+    async def emit_recovery_task_reconciled(self, task_id: str, job_id: str, evidence: Dict[str, Any]) -> StoredRuntimeEvent:
+        return await self.persist_and_publish(
+            source_id="lysstack.recovery",
+            source_kind="runtime",
+            kind="recovery.task_reconciled",
+            detail=f"Task {task_id} in job {job_id} reconciled from durable side-effect evidence",
+            job_id=job_id,
+            task_id=task_id,
+            metadata={"taskId": task_id, "evidence": evidence},
+            accent_color="#10B981",
+        )
+
+    async def emit_recovery_task_requeued(self, task_id: str, job_id: str, reason: str = "Safely requeued") -> StoredRuntimeEvent:
+        return await self.persist_and_publish(
+            source_id="lysstack.recovery",
+            source_kind="runtime",
+            kind="recovery.task_requeued",
+            detail=f"Task {task_id} in job {job_id} requeued for safe execution: {reason}",
+            job_id=job_id,
+            task_id=task_id,
+            metadata={"taskId": task_id, "reason": reason},
+            accent_color="#60A5FA",
+        )
+
+    async def emit_recovery_completed(self, job_id: str, rto_seconds: float, summary: Dict[str, Any]) -> StoredRuntimeEvent:
+        return await self.persist_and_publish(
+            source_id="lysstack.recovery",
+            source_kind="runtime",
+            kind="recovery.completed",
+            detail=f"Recovery completed for job {job_id} in {rto_seconds:.2f}s (RTO)",
+            job_id=job_id,
+            metadata={"rtoSeconds": rto_seconds, "summary": summary},
+            accent_color="#22C55E",
+        )
+
+    async def emit_recovery_failed(self, job_id: str, error: str) -> StoredRuntimeEvent:
+        return await self.persist_and_publish(
+            source_id="lysstack.recovery",
+            source_kind="runtime",
+            kind="recovery.failed",
+            detail=f"Recovery failed for job {job_id}: {error}",
+            job_id=job_id,
+            metadata={"error": error},
+            accent_color="#EF4444",
+        )
+
+    # --- Phase 10: Rerouting Events ---
+    async def emit_task_reroute_requested(self, task_id: str, job_id: str, from_actor: str, reason: str) -> StoredRuntimeEvent:
+        return await self.persist_and_publish(
+            source_id="lysstack.scheduler",
+            source_kind="runtime",
+            kind="task.reroute_requested",
+            detail=f"Reroute requested for task {task_id} from '{from_actor}': {reason}",
+            job_id=job_id,
+            task_id=task_id,
+            metadata={"taskId": task_id, "fromActor": from_actor, "reason": reason},
+            accent_color="#FB923C",
+        )
+
+    async def emit_task_rerouted(
+        self,
+        task_id: str,
+        job_id: str,
+        from_actor: str,
+        to_actor: str,
+        reason: str,
+        previous_run_id: Optional[str] = None,
+    ) -> StoredRuntimeEvent:
+        return await self.persist_and_publish(
+            source_id="lysstack.scheduler",
+            source_kind="runtime",
+            kind="task.rerouted",
+            detail=f"Task {task_id} rerouted from '{from_actor}' to '{to_actor}': {reason}",
+            job_id=job_id,
+            task_id=task_id,
+            actor_id=to_actor,
+            metadata={
+                "taskId": task_id,
+                "fromActor": from_actor,
+                "toActor": to_actor,
+                "reason": reason,
+                "previousRunId": previous_run_id,
+            },
+            accent_color="#A855F7",
+        )
+
+    async def emit_task_reroute_failed(self, task_id: str, job_id: str, reason: str) -> StoredRuntimeEvent:
+        return await self.persist_and_publish(
+            source_id="lysstack.scheduler",
+            source_kind="runtime",
+            kind="task.reroute_failed",
+            detail=f"Reroute failed for task {task_id}: {reason}",
+            job_id=job_id,
+            task_id=task_id,
+            metadata={"taskId": task_id, "reason": reason},
+            accent_color="#EF4444",
+        )
+
+    # --- Phase 10: Capacity Waiting Events ---
+    async def emit_job_waiting_for_capacity(self, job: Any, reason: str) -> StoredRuntimeEvent:
+        return await self.persist_and_publish(
+            source_id="lysstack.scheduler",
+            source_kind="runtime",
+            kind="job.waiting_for_capacity",
+            detail=f"Job {job.job_id} waiting for provider capacity: {reason}",
+            job_id=job.job_id,
+            metadata={"reason": reason},
+            accent_color="#F59E0B",
+        )
+
+    async def emit_job_capacity_restored(self, job: Any, reason: str = "Capacity restored") -> StoredRuntimeEvent:
+        return await self.persist_and_publish(
+            source_id="lysstack.scheduler",
+            source_kind="runtime",
+            kind="job.capacity_restored",
+            detail=f"Provider capacity restored for job {job.job_id}: {reason}",
+            job_id=job.job_id,
+            metadata={"reason": reason},
+            accent_color="#34D399",
+        )
+
+    # --- Phase 10: Provider & Circuit Events ---
+    async def emit_provider_rate_limited(self, provider_id: str, retry_after: Optional[float] = None, job_id: Optional[str] = None) -> StoredRuntimeEvent:
+        return await self.persist_and_publish(
+            source_id=f"provider.{provider_id}",
+            source_kind="provider",
+            kind="provider.rate_limited",
+            detail=f"Provider '{provider_id}' rate limited (retry-after: {retry_after}s)",
+            job_id=job_id or "system",
+            metadata={"providerId": provider_id, "retryAfter": retry_after},
+            accent_color="#F97316",
+        )
+
+    async def emit_provider_quota_exhausted(self, provider_id: str, reason: str = "Quota exhausted", job_id: Optional[str] = None) -> StoredRuntimeEvent:
+        return await self.persist_and_publish(
+            source_id=f"provider.{provider_id}",
+            source_kind="provider",
+            kind="provider.quota_exhausted",
+            detail=f"Provider '{provider_id}' quota exhausted: {reason}",
+            job_id=job_id or "system",
+            metadata={"providerId": provider_id, "reason": reason},
+            accent_color="#DC2626",
+        )
+
+    async def emit_circuit_opened(self, target_id: str, cooldown_seconds: float, job_id: Optional[str] = None) -> StoredRuntimeEvent:
+        return await self.persist_and_publish(
+            source_id=f"circuit.{target_id}",
+            source_kind="runtime",
+            kind="circuit.opened",
+            detail=f"Circuit opened for '{target_id}' (cooldown: {cooldown_seconds}s)",
+            job_id=job_id or "system",
+            metadata={"targetId": target_id, "cooldownSeconds": cooldown_seconds},
+            accent_color="#DC2626",
+        )
+
+    async def emit_circuit_half_opened(self, target_id: str, job_id: Optional[str] = None) -> StoredRuntimeEvent:
+        return await self.persist_and_publish(
+            source_id=f"circuit.{target_id}",
+            source_kind="runtime",
+            kind="circuit.half_opened",
+            detail=f"Circuit half-opened for '{target_id}' (probing recovery)",
+            job_id=job_id or "system",
+            metadata={"targetId": target_id},
+            accent_color="#FBBF24",
+        )
+
+    async def emit_circuit_closed(self, target_id: str, job_id: Optional[str] = None) -> StoredRuntimeEvent:
+        return await self.persist_and_publish(
+            source_id=f"circuit.{target_id}",
+            source_kind="runtime",
+            kind="circuit.closed",
+            detail=f"Circuit closed for '{target_id}' (healthy)",
+            job_id=job_id or "system",
+            metadata={"targetId": target_id},
+            accent_color="#10B981",
+        )
+
+    async def emit_model_call_started(self, provider: str, model: str, actor_id: str, task_id: str, run_id: str, job_id: str) -> StoredRuntimeEvent:
+        return await self.persist_and_publish(
+            source_id=actor_id,
+            source_kind="agent",
+            kind="model.call_started",
+            detail=f"Model call started ({provider}/{model}) for task {task_id}",
+            job_id=job_id,
+            task_id=task_id,
+            run_id=run_id,
+            actor_id=actor_id,
+            metadata={"provider": provider, "model": model, "actorId": actor_id, "taskId": task_id, "runId": run_id},
+        )
+
+    async def emit_model_call_completed(
+        self,
+        provider: str,
+        model: str,
+        actor_id: str,
+        task_id: str,
+        run_id: str,
+        job_id: str,
+        input_tokens: int = 0,
+        output_tokens: int = 0,
+        latency: float = 0.0,
+    ) -> StoredRuntimeEvent:
+        return await self.persist_and_publish(
+            source_id=actor_id,
+            source_kind="agent",
+            kind="model.call_completed",
+            detail=f"Model call completed ({provider}/{model}): {input_tokens} in / {output_tokens} out in {latency:.2f}s",
+            job_id=job_id,
+            task_id=task_id,
+            run_id=run_id,
+            actor_id=actor_id,
+            metadata={
+                "provider": provider,
+                "model": model,
+                "actorId": actor_id,
+                "taskId": task_id,
+                "runId": run_id,
+                "inputTokens": input_tokens,
+                "outputTokens": output_tokens,
+                "latency": latency,
+            },
+        )

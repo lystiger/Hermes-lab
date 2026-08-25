@@ -1,7 +1,7 @@
 import asyncio
 from datetime import datetime, timezone
 import logging
-from typing import Any, Callable, Dict, List, Optional, Set, Union
+from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Union
 
 from runtime.job_state import JobRecord, JobState, TERMINAL_JOB_STATES
 from runtime.task_graph import TaskGraph, TaskNode, TaskStatus
@@ -60,6 +60,9 @@ class ReactiveJobEngine:
         default_adapter: Optional[Union[ActorAdapter, Callable, Any]] = None,
         verifier: Optional[Union[VerifierAdapter, Callable, Any]] = None,
         planner: Optional[Union[PlannerAdapter, Callable, Any]] = None,
+        capacity_registry: Optional[Any] = None,
+        circuit_registry: Optional[Any] = None,
+        reroute_policy: Optional[Any] = None,
         event_bridge: Optional[RuntimeEventBridge] = None,
         event_store: Optional[Any] = None,
         metadata: Optional[Dict[str, Any]] = None,
@@ -88,8 +91,14 @@ class ReactiveJobEngine:
             self.execution_manager.set_default_adapter(adapter_to_set)
 
         self.bounded_replanner = BoundedReplanner(limits=self.limits)
+        self.capacity_registry = capacity_registry
+        self.circuit_registry = circuit_registry
+        self.reroute_policy = reroute_policy
         self.scheduler = ReactiveScheduler(
             capability_registry=self.capability_registry,
+            capacity_registry=self.capacity_registry,
+            circuit_registry=self.circuit_registry,
+            reroute_policy=self.reroute_policy,
             limits=self.limits,
             event_bridge=self.event_bridge,
         )
@@ -481,6 +490,24 @@ class ReactiveJobEngine:
             await self.initialize_and_plan()
             return not self.is_terminal
 
+        # State: WAITING_FOR_CAPACITY
+        if self.job.state == JobState.WAITING_FOR_CAPACITY:
+            ready = self.graph.find_ready_tasks()
+            can_run = False
+            for rt in ready:
+                dec = self.scheduler.match_actor_for_task(rt)
+                if dec.dispatched and dec.actor_id:
+                    can_run = True
+                    break
+            if can_run:
+                logger.info("Provider capacity restored for job %s; transitioning back to EXECUTING", self.job.job_id)
+                await self._transition_job(JobState.EXECUTING, reason="Provider capacity restored")
+                await self.event_bridge.emit_job_capacity_restored(self.job, reason="Provider capacity restored")
+                return True
+            # Briefly yield
+            await asyncio.sleep(0.01)
+            return True
+
         # 2. State: EXECUTING
         if self.job.state == JobState.EXECUTING:
             # Check if all tasks in graph are already succeeded
@@ -496,6 +523,27 @@ class ReactiveJobEngine:
             )
             for t in new_async_tasks:
                 self._active_async_tasks.add(t)
+
+            # Check if tasks are deferred due to capacity/throttling and no worker is active
+            if not self._active_async_tasks and not new_async_tasks:
+                ready = self.graph.find_ready_tasks()
+                if ready:
+                    capacity_reasons = []
+                    for rt in ready:
+                        dec = self.scheduler.match_actor_for_task(rt)
+                        if dec.reason != "no_capable_actor":
+                            capacity_reasons.append(dec.reason)
+                    if capacity_reasons:
+                        logger.info("Tasks deferred due to provider capacity (%s); entering WAITING_FOR_CAPACITY", capacity_reasons[0])
+                        await self._transition_job(
+                            JobState.WAITING_FOR_CAPACITY,
+                            reason=f"Waiting for provider capacity: {capacity_reasons[0]}",
+                        )
+                        await self.event_bridge.emit_job_waiting_for_capacity(
+                            self.job,
+                            reason=f"Waiting for provider capacity: {capacity_reasons[0]}",
+                        )
+                        return True
 
             if self._active_async_tasks:
                 done, pending = await asyncio.wait(
@@ -740,3 +788,32 @@ class ReactiveJobEngine:
             await self.event_bridge.flush()
 
         return self.job
+
+    @classmethod
+    async def resume(
+        cls,
+        job_id: str,
+        event_store: Any,
+        lease_store: Optional[Any] = None,
+        owner_id: Optional[str] = None,
+        capability_registry: Optional[CapabilityRegistry] = None,
+        limits: Optional[RuntimeLimits] = None,
+        event_bridge: Optional[RuntimeEventBridge] = None,
+        detected_interruption_at: Optional[str] = None,
+    ) -> Tuple["ReactiveJobEngine", Any]:
+        """
+        Durable crash recovery and engine rehydration from canonical event ledger.
+        """
+        from runtime.recovery import RecoveryManager
+        manager = RecoveryManager(
+            event_store=event_store,
+            lease_store=lease_store,
+            capability_registry=capability_registry,
+            limits=limits,
+        )
+        return await manager.recover_and_rehydrate(
+            job_id=job_id,
+            owner_id=owner_id,
+            detected_interruption_at=detected_interruption_at,
+            event_bridge=event_bridge,
+        )

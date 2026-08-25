@@ -325,12 +325,46 @@ class RuntimeStateProjector:
             elif event_type in {"verification.passed", "verification.failed"}:
                 last_verification = VerificationResult.from_dict(payload)
 
+            elif event_type == "job.waiting_for_capacity":
+                job.state = JobState.WAITING_FOR_CAPACITY
+                if payload.get("reason"):
+                    job.metadata["waiting_for_capacity_reason"] = payload["reason"]
+
+            elif event_type == "job.capacity_restored":
+                job.state = JobState.EXECUTING
+                job.metadata.pop("waiting_for_capacity_reason", None)
+
             # --- Replanning ---
             elif event_type == "replan.requested":
                 pass
 
             elif event_type == "replan.completed":
                 pass
+
+            # --- Task Rerouting ---
+            elif event_type == "task.rerouted":
+                task_id = payload.get("taskId") or payload.get("task_id") or event.task_id or ""
+                to_actor = payload.get("toActor") or payload.get("to_actor")
+                task = graph.get_task(task_id)
+                if task and to_actor:
+                    task.assigned_actor = to_actor
+
+            # --- Recovery Events ---
+            elif event_type == "recovery.job_rehydrated":
+                job.metadata["last_rehydrated_at"] = event.occurred_at
+
+            elif event_type == "recovery.task_reconciled":
+                task_id = payload.get("taskId") or payload.get("task_id") or event.task_id or ""
+                task = graph.get_task(task_id)
+                if task:
+                    task.status = TaskStatus.SUCCEEDED
+                    task.completed_at = event.occurred_at
+
+            elif event_type == "recovery.task_requeued":
+                task_id = payload.get("taskId") or payload.get("task_id") or event.task_id or ""
+                task = graph.get_task(task_id)
+                if task:
+                    task.status = TaskStatus.READY
 
         # If the job is in CANCELLED terminal state, guarantee no task or run remains RUNNING/READY/PENDING
         if job.state == JobState.CANCELLED:

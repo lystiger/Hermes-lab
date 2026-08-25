@@ -12,6 +12,7 @@ class JobState(str, Enum):
     CREATED = "created"
     PLANNING = "planning"
     EXECUTING = "executing"
+    WAITING_FOR_CAPACITY = "waiting_for_capacity"
     VERIFYING = "verifying"
     REPAIRING = "repairing"
     COMPLETED = "completed"
@@ -22,10 +23,11 @@ class JobState(str, Enum):
 
 LEGAL_JOB_TRANSITIONS: Dict[JobState, Set[JobState]] = {
     JobState.CREATED: {JobState.PLANNING, JobState.CANCELLED, JobState.FAILED},
-    JobState.PLANNING: {JobState.EXECUTING, JobState.BLOCKED, JobState.FAILED, JobState.CANCELLED},
-    JobState.EXECUTING: {JobState.VERIFYING, JobState.PLANNING, JobState.REPAIRING, JobState.BLOCKED, JobState.FAILED, JobState.CANCELLED},
-    JobState.VERIFYING: {JobState.COMPLETED, JobState.REPAIRING, JobState.BLOCKED, JobState.FAILED, JobState.CANCELLED},
-    JobState.REPAIRING: {JobState.EXECUTING, JobState.PLANNING, JobState.BLOCKED, JobState.FAILED, JobState.CANCELLED},
+    JobState.PLANNING: {JobState.EXECUTING, JobState.WAITING_FOR_CAPACITY, JobState.BLOCKED, JobState.FAILED, JobState.CANCELLED},
+    JobState.EXECUTING: {JobState.VERIFYING, JobState.PLANNING, JobState.WAITING_FOR_CAPACITY, JobState.REPAIRING, JobState.BLOCKED, JobState.FAILED, JobState.CANCELLED},
+    JobState.WAITING_FOR_CAPACITY: {JobState.EXECUTING, JobState.PLANNING, JobState.BLOCKED, JobState.FAILED, JobState.CANCELLED},
+    JobState.VERIFYING: {JobState.COMPLETED, JobState.REPAIRING, JobState.WAITING_FOR_CAPACITY, JobState.BLOCKED, JobState.FAILED, JobState.CANCELLED},
+    JobState.REPAIRING: {JobState.EXECUTING, JobState.PLANNING, JobState.WAITING_FOR_CAPACITY, JobState.BLOCKED, JobState.FAILED, JobState.CANCELLED},
     JobState.COMPLETED: set(),
     JobState.BLOCKED: set(),
     JobState.FAILED: set(),

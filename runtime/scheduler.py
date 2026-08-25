@@ -8,6 +8,9 @@ from runtime.execution import ExecutionManager, TaskExecutionResult
 from runtime.limits import RuntimeLimits
 from runtime.events import RuntimeEventBridge
 from capabilities.capabilities import CapabilityRegistry, default_capability_registry
+from runtime.capacity import CapacityRegistry, default_capacity_registry, ProviderStatus, ProviderFailureClassifier, ProviderFailureClass
+from runtime.circuit_breaker import CircuitBreakerRegistry, default_circuit_registry
+from runtime.routing import ReroutePolicy, default_reroute_policy
 
 logger = logging.getLogger("hermes.runtime.scheduler")
 
@@ -29,17 +32,23 @@ class ReactiveScheduler:
     """
     Event-driven, capability-aware task scheduler.
     Determines newly ready tasks, maps capabilities to registered actors,
-    and dispatches eligible tasks concurrently up to configured global and per-actor limits.
+    checks provider capacity and circuit breakers, and dispatches eligible tasks.
     """
 
     def __init__(
         self,
         capability_registry: Optional[CapabilityRegistry] = None,
+        capacity_registry: Optional[CapacityRegistry] = None,
+        circuit_registry: Optional[CircuitBreakerRegistry] = None,
+        reroute_policy: Optional[ReroutePolicy] = None,
         limits: Optional[RuntimeLimits] = None,
         event_bridge: Optional[RuntimeEventBridge] = None,
         default_actor_concurrency: int = 1,
     ):
         self.capability_registry = capability_registry or default_capability_registry
+        self.capacity_registry = capacity_registry or default_capacity_registry
+        self.circuit_registry = circuit_registry or default_circuit_registry
+        self.reroute_policy = reroute_policy or default_reroute_policy
         self.limits = limits or RuntimeLimits()
         self.event_bridge = event_bridge
         self.default_actor_concurrency = default_actor_concurrency
@@ -60,7 +69,25 @@ class ReactiveScheduler:
 
     def is_actor_available(self, actor_id: str) -> bool:
         current_load = self._busy_actors.get(actor_id, 0)
-        return current_load < self.get_actor_concurrency_limit(actor_id)
+        if current_load >= self.get_actor_concurrency_limit(actor_id):
+            return False
+        if not self.circuit_registry.allow_request(actor_id):
+            return False
+        if not self.capacity_registry.is_actor_available(actor_id):
+            return False
+        return True
+
+    def get_actor_rejection_reason(self, actor_id: str) -> str:
+        current_load = self._busy_actors.get(actor_id, 0)
+        if current_load >= self.get_actor_concurrency_limit(actor_id):
+            return "Actor currently at max concurrency capacity"
+        if not self.circuit_registry.allow_request(actor_id):
+            return "Actor circuit breaker is OPEN"
+        if not self.capacity_registry.is_actor_available(actor_id):
+            provider_id = self.capacity_registry.get_provider_for_actor(actor_id)
+            status = self.capacity_registry.get_provider_status(provider_id)
+            return f"Provider '{provider_id}' is {status.value}"
+        return "Unknown rejection"
 
     def acquire_actor(self, actor_id: str) -> None:
         self._busy_actors[actor_id] = self._busy_actors.get(actor_id, 0) + 1
@@ -88,17 +115,18 @@ class ReactiveScheduler:
     ) -> DispatchDecision:
         """
         Capability-aware actor selection with explainable decision tracking.
-        Distinguishes NO_CAPABLE_ACTOR from ACTOR_BUSY.
+        Distinguishes NO_CAPABLE_ACTOR from ACTOR_BUSY, CIRCUIT_OPEN, and QUOTA_EXHAUSTED.
         """
         # If task already has an explicit valid assigned_actor specified
         if task.assigned_actor:
             if not task.required_capabilities or self.capability_registry.actor_satisfies(task.assigned_actor, task.required_capabilities):
                 if not self.is_actor_available(task.assigned_actor):
+                    rejection = self.get_actor_rejection_reason(task.assigned_actor)
                     return DispatchDecision(
                         task_id=task.task_id,
                         actor_id=None,
                         dispatched=False,
-                        reason="actor_busy",
+                        reason=rejection,
                         required_capabilities=task.required_capabilities,
                     )
                 matched = [c for c in task.required_capabilities if c in self.capability_registry.get_actor_capabilities(task.assigned_actor)]
@@ -145,14 +173,20 @@ class ReactiveScheduler:
         ]
 
         if not available_candidates:
-            # Capable actors exist, but all are busy
+            # Capable actors exist, but none currently available
+            rejection_reasons = {
+                self._resolve_actor_id(c[0]): self.get_actor_rejection_reason(self._resolve_actor_id(c[0]))
+                for c in ranked_candidates
+            }
+            primary_reason = next(iter(rejection_reasons.values()), "actor_busy")
             return DispatchDecision(
                 task_id=task.task_id,
                 actor_id=None,
                 dispatched=False,
-                reason="actor_busy",
+                reason=primary_reason,
                 required_capabilities=task.required_capabilities,
                 matched_capabilities=ranked_candidates[0][2].get("matchedCapabilities", []),
+                rejected_candidates=rejection_reasons,
             )
 
         best_profile, best_score, match_info = available_candidates[0]
@@ -165,7 +199,7 @@ class ReactiveScheduler:
             if aid == selected_actor_id:
                 continue
             if not self.is_actor_available(aid):
-                rejected[aid] = "Actor currently at max concurrency capacity"
+                rejected[aid] = self.get_actor_rejection_reason(aid)
             else:
                 rejected[aid] = f"Lower match score ({score:.2f} < {best_score:.2f})"
 
@@ -203,9 +237,9 @@ class ReactiveScheduler:
 
             decision = self.match_actor_for_task(task)
             if not decision.dispatched or not decision.actor_id:
-                if decision.reason == "actor_busy":
-                    # Temporarily busy: task remains READY / deferred
-                    logger.debug("Task %s deferred: capable actors are currently busy", task.task_id)
+                if decision.reason != "no_capable_actor":
+                    # Temporarily unavailable: task remains READY / deferred
+                    logger.debug("Task %s deferred: %s", task.task_id, decision.reason)
                     continue
                 else:
                     # No capable actor exists: mark blocked
@@ -259,6 +293,7 @@ class ReactiveScheduler:
         execution_manager: ExecutionManager,
         context: Optional[Dict[str, Any]] = None,
     ) -> Tuple[TaskNode, TaskExecutionResult]:
+        provider_id = self.capacity_registry.get_provider_for_actor(actor_id)
         try:
             result = await execution_manager.execute(
                 task=task,
@@ -275,10 +310,67 @@ class ReactiveScheduler:
             )
 
             if result.status == "succeeded":
+                self.circuit_registry.record_success(actor_id)
+                self.capacity_registry.record_provider_success(provider_id)
                 if self.event_bridge:
                     await self.event_bridge.emit_task_completed(task=task, actor_id=actor_id, artifacts=result.artifact_refs)
                 graph.mark_success(task.task_id, artifacts=result.artifact_refs, metadata=result.metadata)
             else:
+                # Classify failure
+                status_code = getattr(result, "status_code", None) or (result.metadata.get("status_code") if isinstance(result.metadata, dict) else None)
+                headers = result.metadata.get("headers") if isinstance(result.metadata, dict) else None
+                failure_class, retry_after = ProviderFailureClassifier.classify(
+                    error=result.error or result.exit_reason,
+                    status_code=status_code,
+                    headers=headers,
+                )
+
+                if failure_class in (
+                    ProviderFailureClass.RATE_LIMITED,
+                    ProviderFailureClass.TOKEN_QUOTA_EXHAUSTED,
+                    ProviderFailureClass.PROVIDER_OUTAGE,
+                    ProviderFailureClass.BILLING,
+                ):
+                    # Provider/capacity failure -> update registries
+                    self.circuit_registry.record_failure(actor_id)
+                    self.capacity_registry.record_provider_failure(
+                        provider_id=provider_id,
+                        failure_class=failure_class,
+                        retry_after_seconds=retry_after,
+                        reason=str(result.error),
+                    )
+
+                    if self.event_bridge:
+                        if failure_class == ProviderFailureClass.RATE_LIMITED:
+                            await self.event_bridge.emit_provider_rate_limited(provider_id, retry_after=retry_after, job_id=task.job_id)
+                        elif failure_class in (ProviderFailureClass.TOKEN_QUOTA_EXHAUSTED, ProviderFailureClass.BILLING):
+                            await self.event_bridge.emit_provider_quota_exhausted(provider_id, reason=str(result.error), job_id=task.job_id)
+
+                    # Attempt capability-based rerouting
+                    alt_actor = self.reroute_policy.find_alternative_actor(task, failed_actor=actor_id)
+                    if alt_actor:
+                        if self.event_bridge:
+                            await self.event_bridge.emit_task_rerouted(
+                                task_id=task.task_id,
+                                job_id=task.job_id,
+                                from_actor=actor_id,
+                                to_actor=alt_actor,
+                                reason=f"Provider {failure_class.value}: rerouted to capable alternative",
+                            )
+                        task.assigned_actor = alt_actor
+                        task.status = TaskStatus.READY
+                        return task, result
+                    else:
+                        if self.event_bridge:
+                            await self.event_bridge.emit_task_reroute_failed(
+                                task_id=task.task_id,
+                                job_id=task.job_id,
+                                reason=f"Provider {failure_class.value} and no healthy capable alternative available",
+                            )
+                        task.status = TaskStatus.READY
+                        return task, result
+
+                # Standard task logic failure
                 if self.event_bridge:
                     await self.event_bridge.emit_task_failed(task=task, actor_id=actor_id, error=result.error)
                 graph.mark_failure(task.task_id, error=result.error, allow_retry=True)

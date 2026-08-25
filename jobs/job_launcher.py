@@ -530,5 +530,39 @@ class JobLauncher:
         # 2. Check legacy runner process
         return self._cancel_legacy_proc(job_id)
 
+    async def resume_async(
+        self,
+        job_id: str,
+        owner_id: Optional[str] = None,
+        detected_interruption_at: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """
+        Durable recovery and resumption of an unfinished job.
+        Acquires exclusive execution lease, reconciles tasks, and continues reactive execution.
+        """
+        from runtime.storage.config import get_global_event_store
+        from runtime.recovery import RecoveryManager
+
+        store = get_global_event_store()
+        manager = RecoveryManager(event_store=store)
+        engine, metrics = await manager.recover_and_rehydrate(
+            job_id=job_id,
+            owner_id=owner_id,
+            detected_interruption_at=detected_interruption_at,
+        )
+
+        # Register engine with job_service
+        job_service.register_engine(engine)
+
+        # Start background execution
+        self._start_engine_background(engine)
+
+        return {
+            "resumed": True,
+            "jobId": job_id,
+            "recovery": metrics.to_dict(),
+            "status": engine.job.state.value,
+        }
+
 
 job_launcher = JobLauncher()

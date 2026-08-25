@@ -93,6 +93,9 @@ class ObservationRegistry:
     def get_observation(self, observation_id: str) -> Optional[Observation]:
         return self._observations.get(observation_id)
 
+    def get(self, observation_id: str) -> Optional[Observation]:
+        return self.get_observation(observation_id)
+
     def list_for_job(self, job_id: str, kind: Optional[str] = None) -> List[Observation]:
         obs = [o for o in self._observations.values() if o.job_id == job_id]
         if kind:

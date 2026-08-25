@@ -6,7 +6,7 @@ from typing import Any, Callable, Dict, List, Optional, Set, Union
 from runtime.job_state import JobRecord, JobState, TERMINAL_JOB_STATES
 from runtime.task_graph import TaskGraph, TaskNode, TaskStatus
 from runtime.observations import Observation, ObservationRegistry, default_observation_registry
-from runtime.execution import ExecutionManager, ActorAdapter
+from runtime.execution import ExecutionManager, ActorAdapter, AgentRunStatus
 from runtime.verification import (
     VerificationResult,
     VerificationStatus,
@@ -386,8 +386,8 @@ class ReactiveJobEngine:
         for res in results:
             if isinstance(res, Exception) and not isinstance(res, asyncio.CancelledError):
                 logger.error("Exception occurred during task cancellation worker drain: %s", res)
-                from runtime.storage.event_store import StorageUnavailableError, SequenceConflictError, IdempotencyConflictError
-                if isinstance(res, (StorageUnavailableError, SequenceConflictError, IdempotencyConflictError)):
+                from runtime.storage.event_store import EventStoreError
+                if isinstance(res, EventStoreError):
                     raise res
         return len(pending)
 
@@ -456,6 +456,15 @@ class ReactiveJobEngine:
 
         # Milestone 3: Drain active tasks and ensure no durability failures occurred during worker cancel
         await self._cancel_active_tasks(reason)
+
+        # Milestone 4: Reconcile cancelled agent runs durably
+        if hasattr(self, "execution_manager") and self.execution_manager:
+            for run in self.execution_manager.list_runs_for_job(self.job.job_id):
+                if run.status == AgentRunStatus.CANCELLED:
+                    task = self.graph.get_task(run.task_id)
+                    if task:
+                        await self.event_bridge.emit_agent_cancelled(run=run, task=task, reason=reason)
+
         self._durable_cancel_completed = True
         return True
 

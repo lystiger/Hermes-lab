@@ -569,4 +569,103 @@ async def test_cancellation_retry_after_downstream_task_failure():
     assert len(t2_cancels_after) == 1, "Must contain exactly ONE task.cancelled event for T2"
 
 
+@pytest.mark.anyio
+async def test_active_running_agent_cancellation_retry_and_reconstruction():
+    """
+    Failure-Injection Test 5: When an active running AgentRun is cancelled and its initial
+    agent.cancelled persist fails:
+    - cancel() raises the storage failure.
+    - _durable_cancel_completed remains False.
+    - Exactly one job.cancelled exists in store.
+    - On cancel() retry, agent.cancelled is reconciled and persisted.
+    - Exactly one job.cancelled, one task.cancelled, and one agent.cancelled exist.
+    - Complete reconstructability from stored events projects run as CANCELLED.
+    """
+    from runtime.execution import AgentRun, AgentRunStatus, TaskExecutionResult
+    from runtime.storage.projector import RuntimeStateProjector
+
+    failing_store = FailingEventStore()
+    original_append = failing_store.append
+
+    async def fail_on_agent_cancel(event: StoredRuntimeEvent):
+        if event.event_type == "agent.cancelled" and failing_store.call_count < 10:
+            failing_store.call_count += 1
+            raise StorageUnavailableError("Injected failure on agent.cancelled")
+        return await original_append(event)
+
+    failing_store.append = fail_on_agent_cancel  # type: ignore
+
+    bridge = RuntimeEventBridge(event_store=failing_store)
+    registry = create_test_registry()
+
+    engine = ReactiveJobEngine(
+        job_id="job_active_run_cancel",
+        goal="Test active run cancellation retry",
+        capability_registry=registry,
+        event_bridge=bridge,
+    )
+
+    entered = asyncio.Event()
+
+    async def long_running_adapter(task: TaskNode, run: AgentRun, ctx: dict):
+        entered.set()
+        await asyncio.sleep(30)
+        return TaskExecutionResult(status="succeeded")
+
+    engine.set_default_execution_adapter(long_running_adapter)
+
+    t1 = TaskNode(task_id="T1", job_id="job_active_run_cancel", description="T1", required_capabilities=["code.edit"])
+    await engine.initialize_and_plan(initial_tasks=[t1])
+
+    # 1. Step to dispatch T1 to worker and start AgentRun
+    step_task = asyncio.create_task(engine.step())
+    await asyncio.wait_for(entered.wait(), timeout=5)
+
+    # Verify agent.started has been emitted and run is RUNNING
+    runs = engine.execution_manager.list_runs_for_job("job_active_run_cancel")
+    assert len(runs) == 1
+    assert runs[0].status == AgentRunStatus.RUNNING
+
+    # 2. First cancel attempt: job.cancelled succeeds, task.cancelled succeeds, worker agent.cancelled FAILS
+    with pytest.raises(StorageUnavailableError):
+        await engine.cancel("Cancel during active run")
+
+    assert engine._job_cancel_persisted is True
+    assert engine._durable_cancel_completed is False
+
+    events_before = await failing_store.list_events("job_active_run_cancel")
+    job_cancels_before = [e for e in events_before if e.event_type == "job.cancelled"]
+    assert len(job_cancels_before) == 1
+    agent_cancels_before = [e for e in events_before if e.event_type == "agent.cancelled"]
+    assert len(agent_cancels_before) == 0
+
+    # 3. Cleanly await the step_task
+    step_task.cancel()
+    await asyncio.gather(step_task, return_exceptions=True)
+
+    # 4. Retry cancellation after storage recovery
+    failing_store.call_count = 20  # disable failure
+    assert await engine.cancel("Cancel retry after storage recovery") is True
+    assert engine._durable_cancel_completed is True
+
+    # 5. Verify event ledger facts
+    events_after = await failing_store.list_events("job_active_run_cancel")
+    job_cancels = [e for e in events_after if e.event_type == "job.cancelled"]
+    assert len(job_cancels) == 1, "Must have exactly ONE job.cancelled"
+
+    task_cancels = [e for e in events_after if e.event_type == "task.cancelled" and e.task_id == "T1"]
+    assert len(task_cancels) == 1, "Must have exactly ONE task.cancelled for T1"
+
+    agent_cancels = [e for e in events_after if e.event_type == "agent.cancelled"]
+    assert len(agent_cancels) == 1, "Must have exactly ONE agent.cancelled for the active run"
+
+    # 6. Reconstruct exclusively from stored events
+    reconstructed = RuntimeStateProjector.project(events_after)
+    assert reconstructed.job.state == JobState.CANCELLED
+    assert reconstructed.graph.get_task("T1").status == TaskStatus.CANCELLED
+    assert len(reconstructed.runs) == 1
+    assert reconstructed.runs[0].status == AgentRunStatus.CANCELLED
+
+
+
 

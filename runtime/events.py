@@ -30,6 +30,7 @@ class RuntimeEventBridge:
         self._pending_persists: Set[asyncio.Task] = set()
         self._last_persistence_error: Optional[Exception] = None
         self._cancelled_tasks: Dict[str, Set[str]] = {}
+        self._cancelled_runs: Dict[str, Set[str]] = {}
 
     def set_bus(self, event_bus: Any) -> None:
         self._bus = event_bus
@@ -53,6 +54,7 @@ class RuntimeEventBridge:
         self._stored_events.clear()
         self._last_persistence_error = None
         self._cancelled_tasks.clear()
+        self._cancelled_runs.clear()
 
     async def flush(self) -> None:
         """
@@ -430,8 +432,16 @@ class RuntimeEventBridge:
             metadata={"runId": run.run_id, "taskId": task.task_id, "actorId": run.actor_id, "attempt": run.attempt, "timeoutSeconds": timeout_seconds},
         )
 
-    async def emit_agent_cancelled(self, run: Any, task: Any, reason: Optional[str] = None) -> StoredRuntimeEvent:
-        return await self.persist_and_publish(
+    async def emit_agent_cancelled(self, run: Any, task: Any, reason: Optional[str] = None) -> Optional[StoredRuntimeEvent]:
+        job_id = getattr(task, "job_id", None) or getattr(run, "job_id", "")
+        run_id = getattr(run, "run_id", "")
+        if job_id and run_id:
+            cancelled_runs_set = self._cancelled_runs.setdefault(job_id, set())
+            if run_id in cancelled_runs_set:
+                logger.debug("agent.cancelled already emitted for run %s (skipping duplicate)", run_id)
+                return None
+
+        res = await self.persist_and_publish(
             source_id=run.actor_id,
             source_kind="agent",
             kind="agent.cancelled",
@@ -443,6 +453,9 @@ class RuntimeEventBridge:
             metadata={"runId": run.run_id, "taskId": task.task_id, "actorId": run.actor_id, "attempt": run.attempt, "reason": reason or "cancelled"},
             accent_color="#F87171",
         )
+        if job_id and run_id:
+            self._cancelled_runs.setdefault(job_id, set()).add(run_id)
+        return res
 
     async def emit_observation_created(self, observation: Any) -> StoredRuntimeEvent:
         meta = observation.to_dict() if hasattr(observation, "to_dict") else dict(observation)

@@ -76,17 +76,12 @@ class InMemoryRuntimeEventStore(RuntimeEventStore):
             if event.sequence <= 0:
                 allocated_seq = current_seq + 1
             else:
-                # Explicit sequence validation
+                # Explicit sequence validation: must be exact next sequence (no gaps or duplicates)
+                if event.sequence != current_seq + 1:
+                    raise SequenceConflictError(
+                        f"Explicit sequence {event.sequence} is invalid; expected next sequence {current_seq + 1} for job '{event.job_id}'"
+                    )
                 allocated_seq = event.sequence
-                job_events = self._events_by_job.get(event.job_id, [])
-                if any(e.sequence == allocated_seq for e in job_events):
-                    raise SequenceConflictError(
-                        f"Sequence {allocated_seq} already exists for job '{event.job_id}'"
-                    )
-                if allocated_seq <= current_seq:
-                    raise SequenceConflictError(
-                        f"Explicit sequence {allocated_seq} must be greater than current latest sequence {current_seq}"
-                    )
 
             # Construct stored event with immutable copy
             stored = replace(

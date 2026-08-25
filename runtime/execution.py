@@ -194,7 +194,7 @@ class ExecutionManager:
         self._runs[run_id] = run
 
         if event_bridge:
-            event_bridge.emit_agent_started(run=run, task=task)
+            await event_bridge.emit_agent_started(run=run, task=task)
 
         adapter = self._adapters.get(actor_id) or self._default_adapter
         if not adapter:
@@ -204,7 +204,7 @@ class ExecutionManager:
             run.exit_reason = "missing_adapter"
             run.error = error_msg
             if event_bridge:
-                event_bridge.emit_agent_failed(run=run, task=task, error=error_msg)
+                await event_bridge.emit_agent_failed(run=run, task=task, error=error_msg)
             return TaskExecutionResult(status="failed", error=error_msg, exit_reason="missing_adapter")
 
         # Resolve timeout
@@ -236,15 +236,24 @@ class ExecutionManager:
                 run.exit_reason = result.exit_reason or "normal_completion"
                 run.artifact_refs.extend(result.artifact_refs)
                 if event_bridge:
-                    event_bridge.emit_agent_finished(run=run, task=task, result=result)
+                    await event_bridge.emit_agent_finished(run=run, task=task, result=result)
             else:
                 run.status = AgentRunStatus.FAILED
                 run.exit_reason = result.exit_reason or "execution_failure"
                 run.error = result.error
                 if event_bridge:
-                    event_bridge.emit_agent_failed(run=run, task=task, error=str(result.error))
+                    await event_bridge.emit_agent_failed(run=run, task=task, error=str(result.error))
 
             return result
+
+        except asyncio.CancelledError:
+            run.status = AgentRunStatus.CANCELLED
+            run.finished_at = datetime.now(timezone.utc).isoformat()
+            run.exit_reason = "cancelled"
+            run.error = "Run cancelled"
+            if event_bridge:
+                await event_bridge.emit_agent_cancelled(run=run, task=task, reason="cancelled")
+            raise
 
         except asyncio.TimeoutError:
             error_msg = f"Task execution timed out after {timeout_seconds} seconds"
@@ -253,10 +262,8 @@ class ExecutionManager:
             run.exit_reason = "timeout"
             run.error = error_msg
             logger.warning("Task %s on actor %s timed out after %s seconds", task.task_id, actor_id, timeout_seconds)
-            if event_bridge and hasattr(event_bridge, "emit_agent_timed_out"):
-                event_bridge.emit_agent_timed_out(run=run, task=task, timeout_seconds=timeout_seconds)
-            elif event_bridge:
-                event_bridge.emit_agent_failed(run=run, task=task, error=error_msg)
+            if event_bridge:
+                await event_bridge.emit_agent_timed_out(run=run, task=task, timeout_seconds=timeout_seconds)
             return TaskExecutionResult(status="failed", error=error_msg, exit_reason="timeout")
 
         except Exception as exc:
@@ -266,5 +273,5 @@ class ExecutionManager:
             run.error = str(exc)
             logger.exception("Exception executing task %s on actor %s: %s", task.task_id, actor_id, exc)
             if event_bridge:
-                event_bridge.emit_agent_failed(run=run, task=task, error=str(exc))
+                await event_bridge.emit_agent_failed(run=run, task=task, error=str(exc))
             return TaskExecutionResult(status="failed", error=str(exc), exit_reason="exception")

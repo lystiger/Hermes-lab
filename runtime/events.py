@@ -5,7 +5,7 @@ from typing import Any, Dict, List, Optional, Set
 import uuid
 
 from runtime.storage.schema_registry import StoredRuntimeEvent
-from runtime.storage.event_store import RuntimeEventStore
+from runtime.storage.event_store import RuntimeEventStore, StorageUnavailableError, EventPersistenceError
 
 logger = logging.getLogger("hermes.runtime.events")
 
@@ -14,6 +14,12 @@ class RuntimeEventBridge:
     """
     Bridge connecting reactive execution runtime state transitions to the canonical RuntimeEventBus (SSE/UI)
     and the durable RuntimeEventStore (append-only event store).
+
+    Guarantees strict durable commit semantics:
+    1. Canonical StoredRuntimeEvent is created.
+    2. Event is persisted to RuntimeEventStore.
+    3. Live SSE / EventBus notification is dispatched only AFTER successful persistence.
+    4. Storage failures fail fast and prevent uncommitted transitions from being acknowledged.
     """
 
     def __init__(self, event_bus: Any = None, event_store: Optional[RuntimeEventStore] = None):
@@ -48,8 +54,7 @@ class RuntimeEventBridge:
 
     async def flush(self) -> None:
         """
-        Awaits completion of all in-flight persistence tasks.
-        Raises any exception encountered during store append to ensure fail-closed durability.
+        Awaits completion of all in-flight persistence tasks and raises any stored persistence errors.
         """
         if self._pending_persists:
             pending = list(self._pending_persists)
@@ -63,29 +68,7 @@ class RuntimeEventBridge:
             self._last_persistence_error = None
             raise err
 
-    def _persist_background(self, event: StoredRuntimeEvent) -> None:
-        if not self._store:
-            return
-
-        async def _do_append():
-            try:
-                stored = await self._store.append(event)
-                self._stored_events.append(stored)
-            except Exception as exc:
-                logger.error("Failed to append event %s to event store: %s", event.event_id, exc)
-                self._last_persistence_error = exc
-                raise
-
-        try:
-            loop = asyncio.get_running_loop()
-            task = loop.create_task(_do_append(), name=f"persist-event-{event.event_id}")
-            self._pending_persists.add(task)
-            task.add_done_callback(self._pending_persists.discard)
-        except RuntimeError:
-            # No running event loop in current thread
-            pass
-
-    def _publish(
+    async def persist_and_publish(
         self,
         source_id: str,
         source_kind: str,
@@ -98,9 +81,17 @@ class RuntimeEventBridge:
         task_id: Optional[str] = None,
         run_id: Optional[str] = None,
         actor_id: Optional[str] = None,
+        parent_event_id: Optional[str] = None,
         causation_id: Optional[str] = None,
         correlation_id: Optional[str] = None,
     ) -> StoredRuntimeEvent:
+        """
+        Core durable emission path:
+        1. Construct canonical StoredRuntimeEvent.
+        2. Await append to durable event store.
+        3. Only after successful persistence, record captured event and publish to live SSE/event_bus.
+        4. If persistence fails, fail-closed without publishing live event.
+        """
         meta = dict(metadata or {})
         event_dict = {
             "source_id": source_id,
@@ -111,9 +102,40 @@ class RuntimeEventBridge:
             "duration": duration,
             "metadata": meta,
         }
+
+        # 1. Construct canonical StoredRuntimeEvent envelope
+        stored_event = StoredRuntimeEvent(
+            event_id=str(uuid.uuid4()),
+            job_id=job_id or "job_unspecified",
+            sequence=0,  # Allocated atomically by event store
+            event_type=kind,
+            occurred_at=datetime.now(timezone.utc).isoformat(),
+            schema_version=1,
+            task_id=task_id,
+            run_id=run_id,
+            actor_id=actor_id,
+            parent_event_id=parent_event_id,
+            causation_id=causation_id,
+            correlation_id=correlation_id,
+            payload=meta,
+        )
+
+        # 2. Persist to durable RuntimeEventStore (await directly)
+        if self._store:
+            try:
+                persisted = await self._store.append(stored_event)
+                self._stored_events.append(persisted)
+                stored_event = persisted
+            except Exception as exc:
+                logger.error("Failed to append event %s (%s) to event store: %s", stored_event.event_id, kind, exc)
+                self._last_persistence_error = exc
+                raise
+        else:
+            self._stored_events.append(stored_event)
+
+        # 3. Only after successful persistence, record captured event and publish to live SSE bus
         self._captured_events.append(event_dict)
 
-        # 1. Publish to live SSE bus
         if self._bus and hasattr(self._bus, "publish"):
             try:
                 self._bus.publish(
@@ -127,30 +149,11 @@ class RuntimeEventBridge:
                     accent_color=accent_color,
                 )
             except Exception as exc:
-                logger.debug("Failed publishing event to event_bus: %s", exc)
-
-        # 2. Construct canonical StoredRuntimeEvent envelope
-        stored_event = StoredRuntimeEvent(
-            event_id=str(uuid.uuid4()),
-            job_id=job_id or "job_unspecified",
-            sequence=0,  # Allocated atomically by event store
-            event_type=kind,
-            occurred_at=datetime.now(timezone.utc).isoformat(),
-            schema_version=1,
-            task_id=task_id,
-            run_id=run_id,
-            actor_id=actor_id,
-            causation_id=causation_id,
-            correlation_id=correlation_id,
-            payload=meta,
-        )
-
-        # 3. Persist to durable RuntimeEventStore
-        self._persist_background(stored_event)
+                logger.debug("Failed publishing event to live event_bus: %s", exc)
 
         return stored_event
 
-    def emit_job_created(self, job: Any) -> StoredRuntimeEvent:
+    async def emit_job_created(self, job: Any) -> StoredRuntimeEvent:
         payload = {
             "goal": job.goal,
             "priority": job.priority,
@@ -160,7 +163,7 @@ class RuntimeEventBridge:
             "createdAt": job.created_at,
             "metadata": job.metadata,
         }
-        return self._publish(
+        return await self.persist_and_publish(
             source_id="lysstack.scheduler",
             source_kind="runtime",
             kind="job.created",
@@ -170,7 +173,7 @@ class RuntimeEventBridge:
             accent_color="#CBA35C",
         )
 
-    def emit_job_state_changed(
+    async def emit_job_state_changed(
         self,
         job: Any,
         previous_state: Any,
@@ -183,7 +186,7 @@ class RuntimeEventBridge:
         if reason:
             meta["reason"] = reason
 
-        evt = self._publish(
+        evt = await self.persist_and_publish(
             source_id="lysstack.scheduler",
             source_kind="runtime",
             kind="job.state_changed",
@@ -193,10 +196,10 @@ class RuntimeEventBridge:
             accent_color="#CBA35C",
         )
 
-        # Also emit specialized terminal events
+        # Also emit specialized terminal events synchronously and durably
         state_str = meta["new_state"].lower()
         if state_str == "completed":
-            self._publish(
+            await self.persist_and_publish(
                 source_id="lysstack.scheduler",
                 source_kind="runtime",
                 kind="job.completed",
@@ -206,7 +209,7 @@ class RuntimeEventBridge:
                 accent_color="#4ADE80",
             )
         elif state_str == "blocked":
-            self._publish(
+            await self.persist_and_publish(
                 source_id="lysstack.scheduler",
                 source_kind="runtime",
                 kind="job.blocked",
@@ -216,7 +219,7 @@ class RuntimeEventBridge:
                 accent_color="#F87171",
             )
         elif state_str == "failed":
-            self._publish(
+            await self.persist_and_publish(
                 source_id="lysstack.scheduler",
                 source_kind="runtime",
                 kind="job.failed",
@@ -226,7 +229,7 @@ class RuntimeEventBridge:
                 accent_color="#EF4444",
             )
         elif state_str == "cancelled":
-            self._publish(
+            await self.persist_and_publish(
                 source_id="lysstack.scheduler",
                 source_kind="runtime",
                 kind="job.cancelled",
@@ -238,7 +241,7 @@ class RuntimeEventBridge:
 
         return evt
 
-    def emit_task_created(self, task: Any, reason: Optional[str] = None) -> StoredRuntimeEvent:
+    async def emit_task_created(self, task: Any, reason: Optional[str] = None) -> StoredRuntimeEvent:
         payload = {
             "taskId": task.task_id,
             "description": task.description,
@@ -249,7 +252,7 @@ class RuntimeEventBridge:
             "reason": reason,
             "metadata": task.metadata,
         }
-        return self._publish(
+        return await self.persist_and_publish(
             source_id="lysstack.planner",
             source_kind="runtime",
             kind="task.created",
@@ -259,8 +262,8 @@ class RuntimeEventBridge:
             metadata=payload,
         )
 
-    def emit_task_ready(self, task: Any) -> StoredRuntimeEvent:
-        return self._publish(
+    async def emit_task_ready(self, task: Any) -> StoredRuntimeEvent:
+        return await self.persist_and_publish(
             source_id="lysstack.scheduler",
             source_kind="runtime",
             kind="task.ready",
@@ -270,8 +273,8 @@ class RuntimeEventBridge:
             metadata={"taskId": task.task_id, "requiredCapabilities": task.required_capabilities},
         )
 
-    def emit_task_assigned(self, task: Any, actor_id: str, decision: Optional[Dict[str, Any]] = None) -> StoredRuntimeEvent:
-        return self._publish(
+    async def emit_task_assigned(self, task: Any, actor_id: str, decision: Optional[Dict[str, Any]] = None) -> StoredRuntimeEvent:
+        return await self.persist_and_publish(
             source_id="lysstack.scheduler",
             source_kind="runtime",
             kind="task.assigned",
@@ -286,8 +289,8 @@ class RuntimeEventBridge:
             },
         )
 
-    def emit_task_started(self, task: Any, actor_id: str) -> StoredRuntimeEvent:
-        return self._publish(
+    async def emit_task_started(self, task: Any, actor_id: str) -> StoredRuntimeEvent:
+        return await self.persist_and_publish(
             source_id=actor_id,
             source_kind="agent",
             kind="task.started",
@@ -298,8 +301,8 @@ class RuntimeEventBridge:
             metadata={"taskId": task.task_id, "actorId": actor_id, "attempt": task.attempt},
         )
 
-    def emit_task_completed(self, task: Any, actor_id: str, artifacts: Optional[List[Dict[str, Any]]] = None) -> StoredRuntimeEvent:
-        return self._publish(
+    async def emit_task_completed(self, task: Any, actor_id: str, artifacts: Optional[List[Dict[str, Any]]] = None) -> StoredRuntimeEvent:
+        return await self.persist_and_publish(
             source_id=actor_id,
             source_kind="agent",
             kind="task.completed",
@@ -315,8 +318,8 @@ class RuntimeEventBridge:
             },
         )
 
-    def emit_task_failed(self, task: Any, actor_id: str, error: Optional[Any] = None, allow_retry: bool = True) -> StoredRuntimeEvent:
-        return self._publish(
+    async def emit_task_failed(self, task: Any, actor_id: str, error: Optional[Any] = None, allow_retry: bool = True) -> StoredRuntimeEvent:
+        return await self.persist_and_publish(
             source_id=actor_id,
             source_kind="agent",
             kind="task.failed",
@@ -333,8 +336,8 @@ class RuntimeEventBridge:
             },
         )
 
-    def emit_task_superseded(self, task_id: str, job_id: str, superseded_by: Optional[str] = None, reason: Optional[str] = None) -> StoredRuntimeEvent:
-        return self._publish(
+    async def emit_task_superseded(self, task_id: str, job_id: str, superseded_by: Optional[str] = None, reason: Optional[str] = None) -> StoredRuntimeEvent:
+        return await self.persist_and_publish(
             source_id="lysstack.planner",
             source_kind="runtime",
             kind="task.superseded",
@@ -344,8 +347,33 @@ class RuntimeEventBridge:
             metadata={"taskId": task_id, "supersededBy": superseded_by, "reason": reason},
         )
 
-    def emit_agent_started(self, run: Any, task: Any) -> StoredRuntimeEvent:
-        return self._publish(
+    async def emit_task_cancelled(
+        self,
+        task_id: str,
+        job_id: str,
+        reason: Optional[str] = None,
+        attempt: int = 0,
+        assigned_actor: Optional[str] = None,
+    ) -> StoredRuntimeEvent:
+        return await self.persist_and_publish(
+            source_id="lysstack.scheduler",
+            source_kind="runtime",
+            kind="task.cancelled",
+            detail=f"Task {task_id} cancelled: {reason or 'no reason'}",
+            job_id=job_id,
+            task_id=task_id,
+            actor_id=assigned_actor,
+            metadata={
+                "taskId": task_id,
+                "reason": reason or "cancelled",
+                "attempt": attempt,
+                "assignedActor": assigned_actor,
+            },
+            accent_color="#F87171",
+        )
+
+    async def emit_agent_started(self, run: Any, task: Any) -> StoredRuntimeEvent:
+        return await self.persist_and_publish(
             source_id=run.actor_id,
             source_kind="agent",
             kind="agent.started",
@@ -357,8 +385,8 @@ class RuntimeEventBridge:
             metadata={"runId": run.run_id, "taskId": task.task_id, "actorId": run.actor_id, "attempt": run.attempt, "metadata": run.metadata},
         )
 
-    def emit_agent_finished(self, run: Any, task: Any, result: Any) -> StoredRuntimeEvent:
-        return self._publish(
+    async def emit_agent_finished(self, run: Any, task: Any, result: Any) -> StoredRuntimeEvent:
+        return await self.persist_and_publish(
             source_id=run.actor_id,
             source_kind="agent",
             kind="agent.finished",
@@ -370,8 +398,8 @@ class RuntimeEventBridge:
             metadata={"runId": run.run_id, "taskId": task.task_id, "actorId": run.actor_id, "exitReason": result.exit_reason, "artifact_refs": result.artifact_refs},
         )
 
-    def emit_agent_failed(self, run: Any, task: Any, error: str) -> StoredRuntimeEvent:
-        return self._publish(
+    async def emit_agent_failed(self, run: Any, task: Any, error: str) -> StoredRuntimeEvent:
+        return await self.persist_and_publish(
             source_id=run.actor_id,
             source_kind="agent",
             kind="agent.failed",
@@ -383,8 +411,8 @@ class RuntimeEventBridge:
             metadata={"runId": run.run_id, "taskId": task.task_id, "actorId": run.actor_id, "error": error},
         )
 
-    def emit_agent_timed_out(self, run: Any, task: Any, timeout_seconds: Optional[float] = None) -> StoredRuntimeEvent:
-        return self._publish(
+    async def emit_agent_timed_out(self, run: Any, task: Any, timeout_seconds: Optional[float] = None) -> StoredRuntimeEvent:
+        return await self.persist_and_publish(
             source_id=run.actor_id,
             source_kind="agent",
             kind="agent.timed_out",
@@ -396,9 +424,23 @@ class RuntimeEventBridge:
             metadata={"runId": run.run_id, "taskId": task.task_id, "actorId": run.actor_id, "attempt": run.attempt, "timeoutSeconds": timeout_seconds},
         )
 
-    def emit_observation_created(self, observation: Any) -> StoredRuntimeEvent:
+    async def emit_agent_cancelled(self, run: Any, task: Any, reason: Optional[str] = None) -> StoredRuntimeEvent:
+        return await self.persist_and_publish(
+            source_id=run.actor_id,
+            source_kind="agent",
+            kind="agent.cancelled",
+            detail=f"Agent '{run.actor_id}' cancelled run {run.run_id} for task {task.task_id}: {reason or 'cancelled'}",
+            job_id=run.job_id,
+            task_id=task.task_id,
+            run_id=run.run_id,
+            actor_id=run.actor_id,
+            metadata={"runId": run.run_id, "taskId": task.task_id, "actorId": run.actor_id, "attempt": run.attempt, "reason": reason or "cancelled"},
+            accent_color="#F87171",
+        )
+
+    async def emit_observation_created(self, observation: Any) -> StoredRuntimeEvent:
         meta = observation.to_dict() if hasattr(observation, "to_dict") else dict(observation)
-        return self._publish(
+        return await self.persist_and_publish(
             source_id=observation.actor_id or "lysstack.runtime",
             source_kind="agent" if observation.actor_id else "runtime",
             kind="observation.created",
@@ -409,10 +451,10 @@ class RuntimeEventBridge:
             metadata=meta,
         )
 
-    def emit_artifact_created(self, artifact: Any, job_id: Optional[str] = None) -> StoredRuntimeEvent:
+    async def emit_artifact_created(self, artifact: Any, job_id: Optional[str] = None) -> StoredRuntimeEvent:
         meta = artifact.to_dict() if hasattr(artifact, "to_dict") else dict(artifact)
         jid = job_id or meta.get("job_id") or meta.get("jobId")
-        return self._publish(
+        return await self.persist_and_publish(
             source_id="lysstack.artifacts",
             source_kind="runtime",
             kind="artifact.created",
@@ -422,8 +464,8 @@ class RuntimeEventBridge:
             metadata=meta,
         )
 
-    def emit_verification_started(self, job_id: str, verifier_id: str) -> StoredRuntimeEvent:
-        return self._publish(
+    async def emit_verification_started(self, job_id: str, verifier_id: str) -> StoredRuntimeEvent:
+        return await self.persist_and_publish(
             source_id="lysstack.verifier",
             source_kind="runtime",
             kind="verification.started",
@@ -432,8 +474,8 @@ class RuntimeEventBridge:
             metadata={"verifierId": verifier_id},
         )
 
-    def emit_verification_passed(self, job_id: str, result: Any) -> StoredRuntimeEvent:
-        return self._publish(
+    async def emit_verification_passed(self, job_id: str, result: Any) -> StoredRuntimeEvent:
+        return await self.persist_and_publish(
             source_id="lysstack.verifier",
             source_kind="runtime",
             kind="verification.passed",
@@ -443,8 +485,8 @@ class RuntimeEventBridge:
             accent_color="#4ADE80",
         )
 
-    def emit_verification_failed(self, job_id: str, result: Any) -> StoredRuntimeEvent:
-        return self._publish(
+    async def emit_verification_failed(self, job_id: str, result: Any) -> StoredRuntimeEvent:
+        return await self.persist_and_publish(
             source_id="lysstack.verifier",
             source_kind="runtime",
             kind="verification.failed",
@@ -454,8 +496,8 @@ class RuntimeEventBridge:
             accent_color="#EF4444",
         )
 
-    def emit_replan_requested(self, job_id: str, reason: str, remaining_budget: int) -> StoredRuntimeEvent:
-        return self._publish(
+    async def emit_replan_requested(self, job_id: str, reason: str, remaining_budget: int) -> StoredRuntimeEvent:
+        return await self.persist_and_publish(
             source_id="lysstack.scheduler",
             source_kind="runtime",
             kind="replan.requested",
@@ -464,8 +506,8 @@ class RuntimeEventBridge:
             metadata={"reason": reason, "remainingBudget": remaining_budget},
         )
 
-    def emit_replan_completed(self, job_id: str, mutations_count: int, explanation: str) -> StoredRuntimeEvent:
-        return self._publish(
+    async def emit_replan_completed(self, job_id: str, mutations_count: int, explanation: str) -> StoredRuntimeEvent:
+        return await self.persist_and_publish(
             source_id="lysstack.planner",
             source_kind="runtime",
             kind="replan.completed",

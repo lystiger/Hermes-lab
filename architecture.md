@@ -236,6 +236,16 @@ Phase 9: Durable Event-Sourced Runtime Sessions
    ├── Deterministic RuntimeStateProjector reconstructing JobRecord, TaskGraph, Runs, Observations
    ├── Alembic migrations (001_initial_runtime_events.py) and local Docker Compose PostgreSQL
    └── Seamless API recovery enabling historical inspection without live in-memory engines
+
+Phase 9.1: Durable Commit Semantics & Reconstruction Completeness
+   ├── Asynchronous store append strictly precedes external publication and execution advancement
+   ├── Fail-closed persistence failure handling: never swallow errors, halt immediately, cancel workers
+   ├── Gap-free monotonic sequence verification: explicit sequence gaps rejected with SequenceConflictError
+   ├── Canonical task.cancelled and agent.cancelled events with full execution metadata
+   ├── Reconstructed state cleanup guaranteeing no RUNNING/READY task or run leftovers on cancelled jobs
+   ├── Advisory lock acquisition precedes event_id check; fails closed on lock error under PostgreSQL
+   ├── Multi-store concurrent sequence allocation and race-safe duplicate event_id deduplication
+   └── Deterministic artifact deduplication across created events, task completions, and agent runs
 ```
 
 ---
@@ -260,12 +270,12 @@ Phase 9: Durable Event-Sourced Runtime Sessions
 16. **Single Point of Path Resolution**: `context.root` is resolved and validated at launcher/spec-normalization time relative to the sprint specification directory; the adapter rejects an unresolved relative root rather than re-resolving it against a different base.
 17. **Self-Triggering Discovery**: An observation flagged `requires_follow_up` drives a discovery replan on its own, at most once per observation. Adapters do not need to also set `trigger_replan`.
 18. **Opportunistic vs. Blocking Replans**: A discovery replan that produces no mutations means no extra work is needed and leaves the job EXECUTING. Failure- and deadlock-driven replans keep the original semantics: a planner with nothing to offer transitions the job to `BLOCKED`.
-19. **Cancellation Containment**: Cancelling a job — by operator, by driver-task cancellation, or on any exit from `run_until_complete` — stops every in-flight execution task, marks unfinished graph tasks `CANCELLED`, and releases actor slots. No worker keeps mutating worktrees behind a job already reported as finished. `request_cancel` is synchronous and safe to call from outside the engine's loop.
+19. **Cancellation Containment**: Cancelling a job — by operator, by driver-task cancellation, or on any exit from `run_until_complete` — stops every in-flight execution task, marks unfinished graph tasks `CANCELLED`, emits canonical cancellation events, and releases actor slots.
 20. **Durable Canonical Ledger**: Process-memory state is transient; the append-only event store is the authoritative, immutable source of truth for runtime history.
-21. **Strict Monotonic Sequencing**: Events for each job receive consecutive integer sequences (1, 2, 3...) allocated atomically under transaction locks, guaranteeing exact total ordering per job.
+21. **Strict Monotonic Sequencing**: Events for each job receive consecutive integer sequences (1, 2, 3...) allocated atomically under transaction locks, guaranteeing exact total ordering per job with no gaps.
 22. **Idempotent Deduplication**: Appending an event with an existing `event_id` and identical payload succeeds idempotently; conflicting payloads fail fast with `IdempotencyConflictError`.
 23. **Fail-Closed Persistence**: State transitions must persist to durable storage before execution advances. Storage unavailability halts or fails the job rather than quietly continuing in a non-reconstructable state.
-24. **Deterministic Reconstruction**: `RuntimeStateProjector` reconstructs identical `JobRecord`, `TaskGraph`, `AgentRun`, and `Observation` structures from the event stream without requiring live engine process memory.
+24. **Deterministic Reconstruction**: `RuntimeStateProjector` reconstructs identical `JobRecord`, `TaskGraph`, `AgentRun`, `Observation`, and artifact structures from the event stream without requiring live engine process memory.
 25. **No Silent Storage Fallback**: A configured PostgreSQL database that is unreachable at startup fails fast with `StorageUnavailableError` rather than silently degrading to transient in-memory storage.
 
 ---
@@ -274,14 +284,16 @@ Phase 9: Durable Event-Sourced Runtime Sessions
 
 The system is validated across comprehensive test suites:
 
-- **Total Backend Pytest Tests**: **270 tests** (268 passed, 2 skipped, 0 failed).
+- **Total Backend Pytest Tests**: **283 tests** (281 passed, 2 skipped, 0 failed).
 - **Hardening Suite (`tests/test_phase8_1_runtime_hardening.py`)**: 14 tests verifying production launch, deadlocks, cycles, concurrency, timeouts, and reactivity.
 - **Async & Fail-Closed Suite (`tests/test_phase8_1_3_async_failclosed.py`)**: 20 tests verifying off-loop concurrent agent execution, serialized Git mutation, worktree and sync fail-closure, context resolution, tool policy and requester identity, and bounded discovery expansion.
 - **Follow-Up & Cancellation Suite (`tests/test_phase8_1_4_followup_cancellation.py`)**: 10 tests verifying automatic discovery triggering, opportunistic vs. blocking replan semantics, and cancellation containment across operator, driver-cancellation, and normal-exit paths.
+- **Phase 9.1 Durability Suite (`tests/test_phase9_1_durability.py`)**: 6 tests verifying synchronous persist precedence, fail-closed task and job completion errors, unswallowed exceptions in run loops, valid ledger prefixes, and gap rejection.
+- **Phase 9.1 Cancellation & Reconstruction Suite (`tests/test_phase9_1_cancellation_reconstruction.py`)**: 4 tests verifying `task.cancelled` and `agent.cancelled` persistence, state projection with no RUNNING leftovers, and artifact set equivalence.
 - **Event Store Suite (`tests/test_phase9_event_store.py`)**: 7 tests verifying ordered history, per-job sequences, concurrent appends, idempotency, envelope validation, immutability, and unfinished job queries.
 - **Reconstruction Suite (`tests/test_phase9_reconstruction.py`)**: 5 tests verifying pure deterministic projection of JobRecord, TaskGraph, AgentRuns, Observations, Artifacts, and Replan/Repair counters.
-- **Postgres Concurrency Suite (`tests/test_phase9_postgres_concurrency.py`)**: 4 tests verifying async database storage, advisory lock concurrency, deduplication, and failure translation.
+- **Postgres Concurrency & Multi-Store Suite (`tests/test_phase9_postgres_concurrency.py`, `tests/test_phase9_postgres_integration.py`)**: 7 tests verifying async database storage, advisory lock concurrency, multi-store concurrent sequences, multi-store idempotency, and fail-closed lock errors.
 - **API & Durability Suite (`tests/test_phase9_api_and_durability.py`)**: 3 tests verifying historical API reconstruction without engines, startup fail-fast behavior, and backward compatibility.
-- **Acceptance Scenario Suite (`tests/test_phase9_acceptance_scenario.py`)**: End-to-end multi-agent reactive workflow with discovery, replan, verification failure, repair, and complete post-destruction event reconstruction.
+- **Acceptance Scenario Suite (`tests/test_phase9_acceptance_scenario.py`)**: End-to-end multi-agent reactive workflow with discovery, replan, verification failure, repair, artifact tracking, and complete post-destruction event reconstruction.
 - **Frontend Vitest Suite (`LysControl`)**: 41 tests across 10 test suites covering UI views, adapters, delegation, and messaging.
 - **Cross-Process Integration**: Validates end-to-end FastAPI subprocess execution and live event synchronization.

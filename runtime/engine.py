@@ -38,6 +38,10 @@ class ReactiveJobEngine:
     Orchestrates the entire job lifecycle:
     goal -> job -> PLANNING -> initial graph -> event-driven scheduler -> execution ->
     observations + artifacts -> VERIFYING -> bounded repair/replan -> COMPLETED/BLOCKED.
+
+    Enforces strict durable commit semantics:
+    Every state change, task transition, and execution outcome is persisted
+    to the canonical event store before advancing runtime orchestration.
     """
 
     def __init__(
@@ -113,12 +117,8 @@ class ReactiveJobEngine:
         self._artifacts: List[Dict[str, Any]] = []
         self._last_verification_result: Optional[VerificationResult] = None
         self._active_async_tasks: Set[asyncio.Task] = set()
-        # Observations that have already driven a discovery replan. Re-triggering on the
-        # same observation would spend replan budget to produce no mutations.
         self._discovery_triggered: Set[str] = set()
-
-        # Emit initial job created
-        self.event_bridge.emit_job_created(self.job)
+        self._job_created_emitted = False
 
     @property
     def state(self) -> JobState:
@@ -165,6 +165,33 @@ class ReactiveJobEngine:
         else:
             self.verifier = DefaultPassVerifierAdapter()
 
+    async def _ensure_job_created_emitted(self) -> None:
+        if not self._job_created_emitted:
+            await self.event_bridge.emit_job_created(self.job)
+            self._job_created_emitted = True
+
+    async def _transition_job(
+        self,
+        target_state: Union[JobState, str],
+        reason: Optional[Union[Dict[str, Any], str]] = None,
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> JobState:
+        """
+        Durable job state transition helper.
+        Transitions the JobRecord state machine and immediately awaits durable emission of job.state_changed.
+        """
+        await self._ensure_job_created_emitted()
+        prev_state = self.job.state
+        new_state = self.job.transition_to(target_state, reason=reason, metadata=metadata)
+        if prev_state != new_state:
+            await self.event_bridge.emit_job_state_changed(
+                job=self.job,
+                previous_state=prev_state,
+                reason=reason,
+                metadata=metadata,
+            )
+        return new_state
+
     async def initialize_and_plan(
         self,
         initial_tasks: Optional[List[Union[TaskNode, Dict[str, Any]]]] = None,
@@ -172,11 +199,12 @@ class ReactiveJobEngine:
         """
         Initial decomposition phase: transitions job CREATED -> PLANNING -> EXECUTING.
         """
+        await self._ensure_job_created_emitted()
         if self.job.state != JobState.CREATED:
             logger.warning("Job %s is not in CREATED state; skipping initialize_and_plan", self.job.job_id)
             return
 
-        self.job.transition_to(JobState.PLANNING, reason="Starting initial plan decomposition", event_bridge=self.event_bridge)
+        await self._transition_job(JobState.PLANNING, reason="Starting initial plan decomposition")
 
         # 1. Add provided initial tasks (enforcing authoritative runtime limits)
         if initial_tasks:
@@ -191,7 +219,7 @@ class ReactiveJobEngine:
                 node.max_attempts = min(node.max_attempts, self.limits.max_task_attempts)
                 try:
                     added_node = self.graph.add_task(node)
-                    self.event_bridge.emit_task_created(added_node, reason="initial_task")
+                    await self.event_bridge.emit_task_created(added_node, reason="initial_task")
                 except ValueError as e:
                     logger.warning("Initial task addition skipped: %s", e)
 
@@ -209,19 +237,29 @@ class ReactiveJobEngine:
                 replan_budget_remaining=max(0, self.limits.max_replans_per_job - self.job.replan_count),
             )
             plan_res = await self.planner.plan(replan_req)
-            self.bounded_replanner.apply_mutations(self.graph, plan_res, self.job.job_id, self.event_bridge)
-            self.event_bridge.emit_replan_completed(self.job.job_id, len(plan_res.mutations), plan_res.explanation)
+            self.bounded_replanner.apply_mutations(self.graph, plan_res, self.job.job_id)
+            for mutation in plan_res.mutations:
+                if mutation.mutation_type == GraphMutationType.ADD_TASK and mutation.task:
+                    if self.graph.get_task(mutation.task.task_id):
+                        await self.event_bridge.emit_task_created(mutation.task, reason=mutation.reason)
+                elif mutation.mutation_type == GraphMutationType.SUPERSEDE_TASK and mutation.task_id:
+                    await self.event_bridge.emit_task_superseded(
+                        task_id=mutation.task_id,
+                        job_id=self.job.job_id,
+                        superseded_by=mutation.depends_on_task_id,
+                        reason=mutation.reason,
+                    )
+            await self.event_bridge.emit_replan_completed(self.job.job_id, len(plan_res.mutations), plan_res.explanation)
 
         if self.graph.count() == 0:
-            self.job.transition_to(
+            await self._transition_job(
                 JobState.BLOCKED,
                 reason="Initial planning produced zero executable tasks",
-                event_bridge=self.event_bridge,
             )
             await self.event_bridge.flush()
             return
 
-        self.job.transition_to(JobState.EXECUTING, reason="Initial plan decomposition completed", event_bridge=self.event_bridge)
+        await self._transition_job(JobState.EXECUTING, reason="Initial plan decomposition completed")
         await self.event_bridge.flush()
 
     async def request_replan(
@@ -232,19 +270,12 @@ class ReactiveJobEngine:
     ) -> bool:
         """
         Bounded replan trigger. Invokes planner with current state and observations.
-
-        `block_on_no_progress=False` marks the replan opportunistic: a planner that adds
-        nothing means "no extra work is needed", not "the job is stuck", so the job returns
-        to EXECUTING instead of transitioning to BLOCKED. Discovery-driven replans use this;
-        failure- and deadlock-driven replans do not, since for those a planner with nothing
-        to offer genuinely leaves the job unable to proceed.
         """
         if self.job.replan_count >= self.limits.max_replans_per_job:
             logger.warning("Replan limit reached for job %s (%d/%d)", self.job.job_id, self.job.replan_count, self.limits.max_replans_per_job)
-            self.job.transition_to(
+            await self._transition_job(
                 JobState.BLOCKED,
                 reason=f"Exhausted maximum allowed replans ({self.limits.max_replans_per_job}): {detail or reason}",
-                event_bridge=self.event_bridge,
             )
             return False
 
@@ -254,15 +285,14 @@ class ReactiveJobEngine:
 
         # Transition to PLANNING
         if self.job.can_transition_to(JobState.PLANNING):
-            self.job.transition_to(
+            await self._transition_job(
                 JobState.PLANNING,
                 reason=f"Replanning triggered: {reason}",
-                event_bridge=self.event_bridge,
                 metadata={"replan_reason": str(reason), "replan_detail": detail},
             )
 
         budget_remaining = max(0, self.limits.max_replans_per_job - self.job.replan_count)
-        self.event_bridge.emit_replan_requested(self.job.job_id, str(reason), budget_remaining)
+        await self.event_bridge.emit_replan_requested(self.job.job_id, str(reason), budget_remaining)
 
         completed_tasks = [t for t in self.graph.list_tasks() if t.status == TaskStatus.SUCCEEDED]
         failed_tasks = [t for t in self.graph.list_tasks() if t.status == TaskStatus.FAILED]
@@ -281,26 +311,35 @@ class ReactiveJobEngine:
         )
 
         plan_res = await self.planner.plan(replan_req)
-        affected = self.bounded_replanner.apply_mutations(self.graph, plan_res, self.job.job_id, self.event_bridge)
-        self.event_bridge.emit_replan_completed(self.job.job_id, len(plan_res.mutations), plan_res.explanation)
+        self.bounded_replanner.apply_mutations(self.graph, plan_res, self.job.job_id)
+        for mutation in plan_res.mutations:
+            if mutation.mutation_type == GraphMutationType.ADD_TASK and mutation.task:
+                if self.graph.get_task(mutation.task.task_id):
+                    await self.event_bridge.emit_task_created(mutation.task, reason=mutation.reason)
+            elif mutation.mutation_type == GraphMutationType.SUPERSEDE_TASK and mutation.task_id:
+                await self.event_bridge.emit_task_superseded(
+                    task_id=mutation.task_id,
+                    job_id=self.job.job_id,
+                    superseded_by=mutation.depends_on_task_id,
+                    reason=mutation.reason,
+                )
+        await self.event_bridge.emit_replan_completed(self.job.job_id, len(plan_res.mutations), plan_res.explanation)
 
         made_no_progress = not plan_res.should_continue or (
             not self.graph.has_active_tasks() and not self.graph.is_all_completed()
         )
         if made_no_progress and block_on_no_progress:
-            self.job.transition_to(
+            await self._transition_job(
                 JobState.BLOCKED,
                 reason=f"Planner concluded execution cannot proceed: {plan_res.explanation}",
-                event_bridge=self.event_bridge,
             )
             return False
 
         # Transition back to EXECUTING
         if self.job.can_transition_to(JobState.EXECUTING):
-            self.job.transition_to(
+            await self._transition_job(
                 JobState.EXECUTING,
                 reason="Applying replanned task graph",
-                event_bridge=self.event_bridge,
             )
         await self.event_bridge.flush()
         return not made_no_progress
@@ -308,10 +347,6 @@ class ReactiveJobEngine:
     async def _cancel_active_tasks(self, reason: str) -> int:
         """
         Cancels every in-flight execution task and waits for the cancellations to settle.
-
-        Without this, a job that reaches a terminal state (cancelled by an operator, blocked,
-        or verified complete) leaves its worker tasks running: they keep mutating worktrees
-        and Git for a job the runtime has already reported as finished.
         """
         pending = {t for t in self._active_async_tasks if not t.done()}
         self._active_async_tasks = set()
@@ -322,8 +357,6 @@ class ReactiveJobEngine:
         for t in pending:
             t.cancel()
 
-        # Adapters run blocking work in worker threads that cancellation cannot interrupt;
-        # gather() returns once each wrapper observes the cancellation and releases its actor.
         await asyncio.gather(*pending, return_exceptions=True)
         return len(pending)
 
@@ -331,16 +364,11 @@ class ReactiveJobEngine:
         """
         Synchronously cancels the job: transitions to CANCELLED, marks unfinished tasks
         cancelled, and signals every in-flight execution task to stop.
-
-        Safe to call from outside the engine's event loop (the operator control plane runs
-        on a different loop, or none at all), so cancellation is dispatched through each
-        task's own loop rather than touching it cross-thread. Returns False when the job is
-        already terminal.
         """
         if self.is_terminal:
             return False
 
-        self.job.transition_to(JobState.CANCELLED, reason=reason, event_bridge=self.event_bridge)
+        self.job.transition_to(JobState.CANCELLED, reason=reason)
         for task in self.graph.list_tasks():
             if task.status in (TaskStatus.RUNNING, TaskStatus.READY, TaskStatus.PENDING):
                 self.graph.mark_cancelled(task.task_id, reason=reason)
@@ -362,11 +390,24 @@ class ReactiveJobEngine:
 
     async def cancel(self, reason: str = "Job cancelled by operator") -> bool:
         """
-        Cancels the job and waits for in-flight execution to settle.
-        Returns False when the job is already terminal.
+        Cancels the job and waits for in-flight execution to settle, emitting canonical cancellation events.
         """
-        if not self.request_cancel(reason):
+        if self.is_terminal:
             return False
+
+        await self._transition_job(JobState.CANCELLED, reason=reason)
+
+        for task in self.graph.list_tasks():
+            if task.status in (TaskStatus.RUNNING, TaskStatus.READY, TaskStatus.PENDING):
+                self.graph.mark_cancelled(task.task_id, reason=reason)
+                await self.event_bridge.emit_task_cancelled(
+                    task_id=task.task_id,
+                    job_id=self.job.job_id,
+                    reason=reason,
+                    attempt=task.attempt,
+                    assigned_actor=task.assigned_actor,
+                )
+
         await self._cancel_active_tasks(reason)
         return True
 
@@ -387,7 +428,7 @@ class ReactiveJobEngine:
         if self.job.state == JobState.EXECUTING:
             # Check if all tasks in graph are already succeeded
             if self.graph.is_all_completed():
-                self.job.transition_to(JobState.VERIFYING, reason="All tasks succeeded; entering verification", event_bridge=self.event_bridge)
+                await self._transition_job(JobState.VERIFYING, reason="All tasks succeeded; entering verification")
                 return True
 
             # Schedule and launch any newly ready tasks
@@ -400,7 +441,6 @@ class ReactiveJobEngine:
                 self._active_async_tasks.add(t)
 
             if self._active_async_tasks:
-                # Wait for FIRST completed task (allows newly ready dependent tasks to dispatch immediately without waiting for unrelated slow tasks)
                 done, pending = await asyncio.wait(
                     self._active_async_tasks,
                     return_when=asyncio.FIRST_COMPLETED,
@@ -421,7 +461,7 @@ class ReactiveJobEngine:
                             for obs in exec_res.observations:
                                 if isinstance(obs, Observation):
                                     self.observation_registry.register(obs)
-                                    self.event_bridge.emit_observation_created(obs)
+                                    await self.event_bridge.emit_observation_created(obs)
                                     registered = obs
                                 elif isinstance(obs, dict):
                                     registered = self.observation_registry.add_observation(
@@ -432,7 +472,7 @@ class ReactiveJobEngine:
                                         actor_id=task_node.assigned_actor,
                                         metadata=obs.get("metadata", {}),
                                     )
-                                    self.event_bridge.emit_observation_created(registered)
+                                    await self.event_bridge.emit_observation_created(registered)
                                 else:
                                     continue
 
@@ -448,11 +488,8 @@ class ReactiveJobEngine:
                         continue
                     except Exception as exc:
                         logger.error("Error processing completed task: %s", exc)
+                        raise
 
-                # Observations flagged requires_follow_up trigger discovery replanning on their
-                # own: the adapter does not have to also set trigger_replan metadata. Each
-                # observation triggers at most once, and the replan is opportunistic so a
-                # planner with nothing to add does not block an otherwise healthy job.
                 new_follow_ups = [o for o in follow_up_observations if o.id not in self._discovery_triggered]
                 if new_follow_ups or explicit_replan_details:
                     for obs in new_follow_ups:
@@ -475,7 +512,7 @@ class ReactiveJobEngine:
 
             # Check after execution batch
             if self.graph.is_all_completed():
-                self.job.transition_to(JobState.VERIFYING, reason="All tasks succeeded; entering verification", event_bridge=self.event_bridge)
+                await self._transition_job(JobState.VERIFYING, reason="All tasks succeeded; entering verification")
                 return True
 
             # Check for permanent task failures (exhausted retries)
@@ -488,10 +525,9 @@ class ReactiveJobEngine:
                     detail=f"Task(s) {failed_desc} exhausted max attempts",
                 )
                 if not replanned and not self.is_terminal:
-                    self.job.transition_to(
+                    await self._transition_job(
                         JobState.BLOCKED,
                         reason=f"Task failure exhausted retries and replan failed: {failed_desc}",
-                        event_bridge=self.event_bridge,
                     )
                 return not self.is_terminal
 
@@ -504,10 +540,9 @@ class ReactiveJobEngine:
                     detail=f"{len(blocked_tasks)} tasks blocked by dependency failures",
                 )
                 if not replanned and not self.is_terminal:
-                    self.job.transition_to(
+                    await self._transition_job(
                         JobState.BLOCKED,
                         reason="Task graph blocked: no tasks are ready and all paths are exhausted",
-                        event_bridge=self.event_bridge,
                     )
                 return not self.is_terminal
 
@@ -516,7 +551,7 @@ class ReactiveJobEngine:
         # 3. State: VERIFYING
         if self.job.state == JobState.VERIFYING:
             verifier_id = getattr(self.verifier, "verifier_id", "verifier")
-            self.event_bridge.emit_verification_started(self.job.job_id, verifier_id)
+            await self.event_bridge.emit_verification_started(self.job.job_id, verifier_id)
 
             artifacts = self.get_artifacts()
             ver_res = await self.verifier.verify(
@@ -528,29 +563,26 @@ class ReactiveJobEngine:
             self._last_verification_result = ver_res
 
             if ver_res.is_passed:
-                self.event_bridge.emit_verification_passed(self.job.job_id, ver_res)
-                self.job.transition_to(
+                await self.event_bridge.emit_verification_passed(self.job.job_id, ver_res)
+                await self._transition_job(
                     JobState.COMPLETED,
                     reason=f"Verification passed: {ver_res.summary}",
-                    event_bridge=self.event_bridge,
                 )
                 return False
 
             elif ver_res.is_repairable:
-                self.event_bridge.emit_verification_failed(self.job.job_id, ver_res)
+                await self.event_bridge.emit_verification_failed(self.job.job_id, ver_res)
 
                 if self.job.repair_count >= self.limits.max_repairs_per_job:
-                    self.job.transition_to(
+                    await self._transition_job(
                         JobState.BLOCKED,
                         reason=f"Verification failed after {self.limits.max_repairs_per_job} repair cycles: {ver_res.summary}",
-                        event_bridge=self.event_bridge,
                     )
                     return False
 
-                self.job.transition_to(
+                await self._transition_job(
                     JobState.REPAIRING,
                     reason=f"Verification failed (repairable cycle {self.job.repair_count + 1}): {ver_res.summary}",
-                    event_bridge=self.event_bridge,
                 )
 
                 # Add repair recommendations to graph
@@ -560,7 +592,7 @@ class ReactiveJobEngine:
                         try:
                             node = self.graph.add_task(rec)
                             node.max_attempts = min(node.max_attempts, self.limits.max_task_attempts)
-                            self.event_bridge.emit_task_created(node, reason="repair_recommendation")
+                            await self.event_bridge.emit_task_created(node, reason="repair_recommendation")
                             added_any = True
                         except ValueError as e:
                             logger.warning("Duplicate repair task skipped: %s", e)
@@ -588,27 +620,25 @@ class ReactiveJobEngine:
                     r_task.max_attempts = min(r_task.max_attempts, self.limits.max_task_attempts)
                     try:
                         self.graph.add_task(r_task)
-                        self.event_bridge.emit_task_created(r_task, reason="default_repair")
+                        await self.event_bridge.emit_task_created(r_task, reason="default_repair")
                     except ValueError:
                         pass
 
                 if self.is_terminal:
                     return False
 
-                self.job.transition_to(
+                await self._transition_job(
                     JobState.EXECUTING,
                     reason="Repair tasks scheduled; resuming execution",
-                    event_bridge=self.event_bridge,
                 )
                 return True
 
             else:
                 # Hard failure
-                self.event_bridge.emit_verification_failed(self.job.job_id, ver_res)
-                self.job.transition_to(
+                await self.event_bridge.emit_verification_failed(self.job.job_id, ver_res)
+                await self._transition_job(
                     JobState.FAILED,
                     reason=f"Verification failed irreversibly: {ver_res.summary}",
-                    event_bridge=self.event_bridge,
                 )
                 return False
 
@@ -617,6 +647,7 @@ class ReactiveJobEngine:
     async def run_until_complete(self, max_steps: int = 100) -> JobRecord:
         """
         Drives the engine in a loop until a terminal state is reached or max_steps is exceeded.
+        Fails closed on storage/persistence failures: halts orchestration and cancels workers.
         """
         step_count = 0
         try:
@@ -627,28 +658,28 @@ class ReactiveJobEngine:
                     break
 
             if not self.is_terminal:
-                self.job.transition_to(
+                await self._transition_job(
                     JobState.BLOCKED,
                     reason=f"Execution exceeded maximum step limit ({max_steps})",
-                    event_bridge=self.event_bridge,
                 )
         except asyncio.CancelledError:
-            # The driving task was cancelled (operator cancellation, shutdown). Stop the
-            # workers before unwinding so nothing keeps mutating Git behind a dead job.
             await self._cancel_active_tasks("Engine run cancelled")
             if not self.is_terminal:
-                self.job.transition_to(
-                    JobState.CANCELLED,
-                    reason="Engine run cancelled",
-                    event_bridge=self.event_bridge,
-                )
+                try:
+                    await self._transition_job(
+                        JobState.CANCELLED,
+                        reason="Engine run cancelled",
+                    )
+                except Exception:
+                    pass
+            raise
+        except Exception as exc:
+            # Storage or execution error: halt immediately, cancel workers, do not acknowledge success
+            logger.error("Engine execution halted due to failure: %s", exc)
+            await self._cancel_active_tasks(f"Execution halted: {exc}")
             raise
         finally:
-            # Never leave workers running past the run loop, whatever ended it.
             await self._cancel_active_tasks("Engine run finished")
-            try:
-                await self.event_bridge.flush()
-            except Exception as e:
-                logger.warning("Error during event bridge flush: %s", e)
+            await self.event_bridge.flush()
 
         return self.job

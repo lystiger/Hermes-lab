@@ -439,8 +439,15 @@ class BoundedReplanner:
                     try:
                         node = graph.add_task(mutation.task)
                         affected_task_ids.append(node.task_id)
-                        if event_bridge:
-                            event_bridge.emit_task_created(node, reason=mutation.reason)
+                        if event_bridge and hasattr(event_bridge, "emit_task_created"):
+                            res = event_bridge.emit_task_created(node, reason=mutation.reason)
+                            if asyncio.iscoroutine(res):
+                                try:
+                                    loop = asyncio.get_running_loop()
+                                    if loop.is_running():
+                                        loop.create_task(res)
+                                except RuntimeError:
+                                    pass
                     except ValueError as e:
                         logger.warning("Rejected duplicate task in replanner: %s", e)
 
@@ -461,13 +468,20 @@ class BoundedReplanner:
                             reason=mutation.reason,
                         )
                         affected_task_ids.append(mutation.task_id)
-                        if event_bridge:
-                            event_bridge.emit_task_superseded(
+                        if event_bridge and hasattr(event_bridge, "emit_task_superseded"):
+                            res = event_bridge.emit_task_superseded(
                                 task_id=mutation.task_id,
                                 job_id=job_id,
                                 superseded_by=mutation.depends_on_task_id,
                                 reason=mutation.reason,
                             )
+                            if asyncio.iscoroutine(res):
+                                try:
+                                    loop = asyncio.get_running_loop()
+                                    if loop.is_running():
+                                        loop.create_task(res)
+                                except RuntimeError:
+                                    pass
                     except Exception as e:
                         logger.warning("Failed superseding task %s: %s", mutation.task_id, e)
 

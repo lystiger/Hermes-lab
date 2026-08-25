@@ -296,3 +296,8 @@ async def test_complete_phase9_acceptance_scenario():
     assert "verification.failed" in event_types
     assert "verification.passed" in event_types
     assert event_types[-1] == "job.completed"
+
+    # 7. Assert Artifact set matches exactly
+    orig_art_keys = {a.get("id") or a.get("ref"): a for a in original_artifacts}
+    rec_art_keys = {a.get("id") or a.get("ref"): a for a in reconstructed.artifacts}
+    assert orig_art_keys == rec_art_keys

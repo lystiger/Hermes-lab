@@ -221,7 +221,7 @@ class ReactiveScheduler:
             self.acquire_actor(actor_id)
 
             if self.event_bridge:
-                self.event_bridge.emit_task_assigned(
+                await self.event_bridge.emit_task_assigned(
                     task=task,
                     actor_id=actor_id,
                     decision={
@@ -232,7 +232,7 @@ class ReactiveScheduler:
                         "score": decision.score,
                     },
                 )
-                self.event_bridge.emit_task_started(task=task, actor_id=actor_id)
+                await self.event_bridge.emit_task_started(task=task, actor_id=actor_id)
 
             # Spawn execution worker
             async_task = asyncio.create_task(
@@ -275,23 +275,29 @@ class ReactiveScheduler:
             )
 
             if result.status == "succeeded":
+                if self.event_bridge:
+                    await self.event_bridge.emit_task_completed(task=task, actor_id=actor_id, artifacts=result.artifact_refs)
                 graph.mark_success(task.task_id, artifacts=result.artifact_refs, metadata=result.metadata)
-                if self.event_bridge:
-                    self.event_bridge.emit_task_completed(task=task, actor_id=actor_id, artifacts=result.artifact_refs)
             else:
-                graph.mark_failure(task.task_id, error=result.error, allow_retry=True)
                 if self.event_bridge:
-                    self.event_bridge.emit_task_failed(task=task, actor_id=actor_id, error=result.error)
+                    await self.event_bridge.emit_task_failed(task=task, actor_id=actor_id, error=result.error)
+                graph.mark_failure(task.task_id, error=result.error, allow_retry=True)
 
             return task, result
 
         except asyncio.CancelledError:
             # Record the cancellation on the graph so a cancelled job does not report its
             # in-flight work as still RUNNING, then propagate so the awaiting engine sees it.
-            if graph.get_task(task.task_id) is not None and task.status == TaskStatus.RUNNING:
+            if graph.get_task(task.task_id) is not None and task.status in (TaskStatus.RUNNING, TaskStatus.READY):
                 graph.mark_cancelled(task.task_id, reason="Execution cancelled")
-            if self.event_bridge and hasattr(self.event_bridge, "emit_task_failed"):
-                self.event_bridge.emit_task_failed(task=task, actor_id=actor_id, error="Execution cancelled")
+            if self.event_bridge:
+                await self.event_bridge.emit_task_cancelled(
+                    task_id=task.task_id,
+                    job_id=task.job_id,
+                    reason="Execution cancelled",
+                    attempt=task.attempt,
+                    assigned_actor=actor_id,
+                )
             raise
 
         finally:

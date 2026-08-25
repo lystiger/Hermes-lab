@@ -226,6 +226,16 @@ class RuntimeStateProjector:
                     task.supersede_reason = reason
                     task.completed_at = event.occurred_at
 
+            elif event_type == "task.cancelled":
+                task_id = payload.get("taskId") or payload.get("task_id") or event.task_id or ""
+                reason = payload.get("reason")
+                task = graph.get_task(task_id)
+                if task and task.status not in {TaskStatus.SUCCEEDED, TaskStatus.SUPERSEDED, TaskStatus.FAILED}:
+                    task.status = TaskStatus.CANCELLED
+                    task.completed_at = event.occurred_at
+                    if reason:
+                        task.metadata["cancelled_reason"] = reason
+
             # --- Agent Run Events ---
             elif event_type == "agent.started":
                 run_id = payload.get("runId") or event.run_id or f"run_{event.event_id}"
@@ -274,6 +284,15 @@ class RuntimeStateProjector:
                     run.error = f"Timed out after {timeout_sec}s" if timeout_sec else "Timed out"
                     run.exit_reason = "timeout"
 
+            elif event_type == "agent.cancelled":
+                run_id = payload.get("runId") or event.run_id
+                if run_id and run_id in runs_map:
+                    run = runs_map[run_id]
+                    run.status = AgentRunStatus.CANCELLED
+                    run.finished_at = event.occurred_at
+                    run.exit_reason = payload.get("reason") or "cancelled"
+                    run.error = payload.get("error") or "cancelled"
+
             # --- Observations ---
             elif event_type == "observation.created":
                 obs_id = payload.get("observation_id") or payload.get("observationId") or payload.get("id") or f"obs_{event.event_id}"
@@ -308,11 +327,43 @@ class RuntimeStateProjector:
 
             # --- Replanning ---
             elif event_type == "replan.requested":
-                # replan_count is also tracked via job.state_changed to PLANNING
                 pass
 
             elif event_type == "replan.completed":
                 pass
+
+        # If the job is in CANCELLED terminal state, guarantee no task or run remains RUNNING/READY/PENDING
+        if job.state == JobState.CANCELLED:
+            for t in graph.list_tasks():
+                if t.status in {TaskStatus.PENDING, TaskStatus.READY, TaskStatus.RUNNING}:
+                    t.status = TaskStatus.CANCELLED
+                    t.completed_at = t.completed_at or job.completed_at
+            for r in runs_map.values():
+                if r.status in {AgentRunStatus.INITIALIZING, AgentRunStatus.RUNNING}:
+                    r.status = AgentRunStatus.CANCELLED
+                    r.finished_at = r.finished_at or job.completed_at
+                    r.exit_reason = r.exit_reason or "cancelled"
+
+        # Deterministically aggregate and deduplicate artifacts across artifact.created, tasks, and runs
+        deduped_artifacts_map: Dict[str, Dict[str, Any]] = {}
+        # 1. From artifact.created events
+        for art in artifacts:
+            art_key = str(art.get("id") or art.get("ref") or f"art_{len(deduped_artifacts_map)}")
+            deduped_artifacts_map[art_key] = dict(art)
+        # 2. From task completed artifact_refs
+        for t in graph.list_tasks():
+            for art in t.artifact_refs:
+                art_key = str(art.get("id") or art.get("ref") or f"art_{len(deduped_artifacts_map)}")
+                if art_key not in deduped_artifacts_map:
+                    deduped_artifacts_map[art_key] = dict(art)
+        # 3. From agent finished artifact_refs
+        for r in runs_map.values():
+            for art in r.artifact_refs:
+                art_key = str(art.get("id") or art.get("ref") or f"art_{len(deduped_artifacts_map)}")
+                if art_key not in deduped_artifacts_map:
+                    deduped_artifacts_map[art_key] = dict(art)
+
+        final_artifacts = list(deduped_artifacts_map.values())
 
         # Sort runs and observations chronologically
         runs_list = list(runs_map.values())
@@ -326,6 +377,6 @@ class RuntimeStateProjector:
             graph=graph,
             runs=runs_list,
             observations=obs_list,
-            artifacts=artifacts,
+            artifacts=final_artifacts,
             last_verification=last_verification,
         )

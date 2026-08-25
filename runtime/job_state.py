@@ -140,13 +140,20 @@ class JobRecord:
 
         logger.info("Job %s transitioned %s -> %s (reason: %s)", self.job_id, previous_state.value, target.value, reason)
 
-        if event_bridge:
-            event_bridge.emit_job_state_changed(
+        if event_bridge and hasattr(event_bridge, "emit_job_state_changed"):
+            res = event_bridge.emit_job_state_changed(
                 job=self,
                 previous_state=previous_state,
                 reason=reason,
                 metadata=metadata,
             )
+            if asyncio.iscoroutine(res):
+                try:
+                    loop = asyncio.get_running_loop()
+                    if loop.is_running():
+                        loop.create_task(res)
+                except RuntimeError:
+                    pass
 
         return self.state
 

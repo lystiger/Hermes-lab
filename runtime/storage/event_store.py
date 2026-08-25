@@ -13,6 +13,16 @@ class StorageUnavailableError(EventStoreError):
     pass
 
 
+class DurabilityError(EventStoreError):
+    """Raised when a durable state persist operation fails."""
+    pass
+
+
+class EventPersistenceError(DurabilityError):
+    """Raised when appending an event to the persistent event store fails."""
+    pass
+
+
 class DuplicateEventError(EventStoreError):
     """Raised when an event with the same ID or sequence already exists with different data."""
     pass
@@ -24,7 +34,7 @@ class IdempotencyConflictError(EventStoreError):
 
 
 class SequenceConflictError(EventStoreError):
-    """Raised when an explicit sequence assignment conflicts with an existing event sequence."""
+    """Raised when an explicit sequence assignment conflicts with an existing event sequence or introduces a sequence gap."""
     pass
 
 

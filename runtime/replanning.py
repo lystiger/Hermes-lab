@@ -76,6 +76,10 @@ class ReplanRequest:
     produced_artifacts: List[Dict[str, Any]]
     replan_budget_remaining: int
     detail: Optional[str] = None
+    target_repo: Optional[Any] = None
+    constraints: List[str] = field(default_factory=list)
+    available_capabilities: List[str] = field(default_factory=list)
+    evidence: Optional[Any] = None
 
 
 @dataclass

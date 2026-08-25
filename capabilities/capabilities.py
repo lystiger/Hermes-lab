@@ -154,6 +154,15 @@ class CapabilityRegistry:
                 res.append(str(c.id).strip())
         return res
 
+    def list_available_capabilities(self) -> List[str]:
+        """Returns all distinct capabilities known or registered across all actors."""
+        caps = set(self._capabilities.keys())
+        for actor_id in self._actors:
+            caps.update(self.get_actor_capabilities(actor_id))
+        for actor_id, d_caps in DEFAULT_CAPABILITY_PROFILES.items():
+            caps.update(d_caps)
+        return sorted(list(caps))
+
     def actor_satisfies(self, actor_id: str, required_capabilities: Sequence[str]) -> bool:
         """
         Determines whether a specific actor satisfies all required capabilities.

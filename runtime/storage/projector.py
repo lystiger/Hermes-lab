@@ -127,6 +127,37 @@ class RuntimeStateProjector:
                 job.state = JobState.CANCELLED
                 job.completed_at = job.completed_at or event.occurred_at
 
+            # --- Phase 11.1: Initial Planning Events ---
+            elif event_type == "planning.started":
+                goal = payload.get("goal") or ""
+                if goal and not job.goal:
+                    job.goal = goal
+                job.metadata.setdefault("planning", {})["started_at"] = event.occurred_at
+                if payload.get("constraints"):
+                    job.metadata.setdefault("planning", {})["constraints"] = payload["constraints"]
+                if payload.get("repoDir"):
+                    job.metadata.setdefault("planning", {})["repo_dir"] = payload["repoDir"]
+
+            elif event_type == "repository.evidence_collected":
+                job.metadata.setdefault("planning", {})["evidence_collected"] = {
+                    "file_count": payload.get("fileCount", 0),
+                    "summary": payload.get("summary", ""),
+                    "uncertainty": payload.get("uncertainty", []),
+                }
+
+            elif event_type == "planning.generated":
+                job.metadata.setdefault("planning", {})["generated_plan"] = payload.get("plan") or {}
+                job.metadata.setdefault("planning", {})["summary"] = payload.get("summary", "")
+
+            elif event_type == "planning.validated":
+                job.metadata.setdefault("planning", {})["validated"] = payload.get("valid", True)
+                job.metadata.setdefault("planning", {})["task_count"] = payload.get("taskCount", 0)
+
+            elif event_type == "planning.failed":
+                job.metadata.setdefault("planning", {})["failed"] = True
+                job.metadata.setdefault("planning", {})["error"] = payload.get("error", "")
+                job.metadata.setdefault("planning", {})["reasons"] = payload.get("reasons", [])
+
             # --- Task Graph Events ---
             elif event_type == "task.created":
                 task_id = payload.get("taskId") or payload.get("task_id") or event.task_id or ""

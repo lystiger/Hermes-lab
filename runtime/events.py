@@ -9,6 +9,18 @@ from runtime.storage.event_store import RuntimeEventStore, StorageUnavailableErr
 
 logger = logging.getLogger("hermes.runtime.events")
 
+def _make_json_safe(obj: Any) -> Any:
+    from pathlib import Path
+    if isinstance(obj, dict):
+        return {str(k): _make_json_safe(v) for k, v in obj.items()}
+    if isinstance(obj, (list, tuple, set)):
+        return [_make_json_safe(x) for x in obj]
+    if isinstance(obj, Path):
+        return str(obj)
+    if hasattr(obj, "to_dict") and callable(obj.to_dict):
+        return _make_json_safe(obj.to_dict())
+    return obj
+
 
 class RuntimeEventBridge:
     """
@@ -96,7 +108,7 @@ class RuntimeEventBridge:
         3. Only after successful persistence, record captured event and publish to live SSE/event_bus.
         4. If persistence fails, fail-closed without publishing live event.
         """
-        meta = dict(metadata or {})
+        meta = _make_json_safe(dict(metadata or {}))
         event_dict = {
             "source_id": source_id,
             "source_kind": source_kind,
@@ -533,6 +545,90 @@ class RuntimeEventBridge:
             detail=f"Replanning completed for job {job_id} with {mutations_count} mutations: {explanation}",
             job_id=job_id,
             metadata={"mutationsCount": mutations_count, "explanation": explanation},
+        )
+
+    # --- Phase 11.1: Initial Planning Events ---
+    async def emit_planning_started(
+        self,
+        job_id: str,
+        goal: str,
+        constraints: Optional[List[str]] = None,
+        repo_dir: Optional[str] = None,
+    ) -> StoredRuntimeEvent:
+        return await self.persist_and_publish(
+            source_id="lysstack.planner",
+            source_kind="runtime",
+            kind="planning.started",
+            detail=f"Initial planning started for goal: {goal[:80]}",
+            job_id=job_id,
+            metadata={"goal": goal, "constraints": constraints or [], "repoDir": repo_dir},
+            accent_color="#6366F1",
+        )
+
+    async def emit_repository_evidence_collected(
+        self,
+        job_id: str,
+        file_count: int,
+        summary: str,
+        uncertainty: Optional[List[str]] = None,
+    ) -> StoredRuntimeEvent:
+        return await self.persist_and_publish(
+            source_id="lysstack.reconnaissance",
+            source_kind="runtime",
+            kind="repository.evidence_collected",
+            detail=f"Collected {file_count} evidence files from repository",
+            job_id=job_id,
+            metadata={"fileCount": file_count, "summary": summary, "uncertainty": uncertainty or []},
+            accent_color="#8B5CF6",
+        )
+
+    async def emit_planning_generated(
+        self,
+        job_id: str,
+        task_count: int,
+        summary: str,
+        plan_dict: Optional[Dict[str, Any]] = None,
+    ) -> StoredRuntimeEvent:
+        return await self.persist_and_publish(
+            source_id="lysstack.planner",
+            source_kind="runtime",
+            kind="planning.generated",
+            detail=f"Generated structured plan with {task_count} tasks: {summary[:80]}",
+            job_id=job_id,
+            metadata={"taskCount": task_count, "summary": summary, "plan": plan_dict or {}},
+            accent_color="#3B82F6",
+        )
+
+    async def emit_planning_validated(
+        self,
+        job_id: str,
+        task_count: int,
+        valid: bool = True,
+    ) -> StoredRuntimeEvent:
+        return await self.persist_and_publish(
+            source_id="lysstack.planner",
+            source_kind="runtime",
+            kind="planning.validated",
+            detail=f"Plan validation passed for {task_count} tasks",
+            job_id=job_id,
+            metadata={"taskCount": task_count, "valid": valid},
+            accent_color="#10B981",
+        )
+
+    async def emit_planning_failed(
+        self,
+        job_id: str,
+        error: str,
+        reasons: Optional[List[str]] = None,
+    ) -> StoredRuntimeEvent:
+        return await self.persist_and_publish(
+            source_id="lysstack.planner",
+            source_kind="runtime",
+            kind="planning.failed",
+            detail=f"Planning failed for job {job_id}: {error}",
+            job_id=job_id,
+            metadata={"error": error, "reasons": reasons or []},
+            accent_color="#EF4444",
         )
 
     # --- Phase 10: Recovery Events ---

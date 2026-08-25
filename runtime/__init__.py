@@ -84,6 +84,17 @@ from runtime.routing import (
     ReroutePolicy,
     default_reroute_policy,
 )
+from runtime.planning import (
+    EvidenceFile,
+    RepositoryEvidence,
+    RepositoryReconnaissance,
+    PlannedTask,
+    StructuredPlan,
+    PlanningRequest,
+    PlanValidator,
+    PlanValidationResult,
+    GroundedPlanner,
+)
 
 __all__ = [
     "JobState",
@@ -148,4 +159,13 @@ __all__ = [
     "RecoveryManager",
     "ReroutePolicy",
     "default_reroute_policy",
+    "EvidenceFile",
+    "RepositoryEvidence",
+    "RepositoryReconnaissance",
+    "PlannedTask",
+    "StructuredPlan",
+    "PlanningRequest",
+    "PlanValidator",
+    "PlanValidationResult",
+    "GroundedPlanner",
 ]

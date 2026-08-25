@@ -263,6 +263,12 @@ class ReactiveJobEngine:
 
         # 2. If planner is configured and graph is still empty (or planner wants to augment)
         if self.planner:
+            target_repo = self.job.metadata.get("target_repo") or self.job.repository
+            constraints = self.job.metadata.get("constraints", [])
+            avail_caps = []
+            if hasattr(self.capability_registry, "list_available_capabilities"):
+                avail_caps = self.capability_registry.list_available_capabilities()
+
             replan_req = ReplanRequest(
                 job_id=self.job.job_id,
                 goal=self.job.goal,
@@ -273,6 +279,9 @@ class ReactiveJobEngine:
                 new_observations=self.observation_registry.list_for_job(self.job.job_id),
                 produced_artifacts=self.get_artifacts(),
                 replan_budget_remaining=max(0, self.limits.max_replans_per_job - self.job.replan_count),
+                target_repo=target_repo,
+                constraints=constraints,
+                available_capabilities=avail_caps,
             )
             plan_res = await self.planner.plan(replan_req)
             self.bounded_replanner.apply_mutations(self.graph, plan_res, self.job.job_id)

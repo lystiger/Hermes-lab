@@ -12,6 +12,10 @@ class RuntimeLimits:
     max_subagent_depth: int = 2
     max_tasks_per_job: int = 50
     concurrency_limit: int = 4
+    max_initial_tasks: int = 12
+    max_evidence_files: int = 20
+    max_evidence_bytes: int = 50000
+    max_plan_repair_attempts: int = 1
 
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
@@ -26,4 +30,8 @@ class RuntimeLimits:
             max_subagent_depth=int(data.get("max_subagent_depth") or data.get("maxSubagentDepth", 2)),
             max_tasks_per_job=int(data.get("max_tasks_per_job") or data.get("maxTasksPerJob", 50)),
             concurrency_limit=int(data.get("concurrency_limit") or data.get("concurrencyLimit", 4)),
+            max_initial_tasks=int(data.get("max_initial_tasks") or data.get("maxInitialTasks", 12)),
+            max_evidence_files=int(data.get("max_evidence_files") or data.get("maxEvidenceFiles", 20)),
+            max_evidence_bytes=int(data.get("max_evidence_bytes") or data.get("maxEvidenceBytes", 50000)),
+            max_plan_repair_attempts=int(data.get("max_plan_repair_attempts") or data.get("maxPlanRepairAttempts", 1)),
         )

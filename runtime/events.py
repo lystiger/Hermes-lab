@@ -188,20 +188,9 @@ class RuntimeEventBridge:
         if reason:
             meta["reason"] = reason
 
-        evt = await self.persist_and_publish(
-            source_id="lysstack.scheduler",
-            source_kind="runtime",
-            kind="job.state_changed",
-            detail=f"Job {job.job_id} transitioned from {meta['previous_state']} to {meta['new_state']}",
-            job_id=job.job_id,
-            metadata=meta,
-            accent_color="#CBA35C",
-        )
-
-        # Also emit specialized terminal events synchronously and durably
         state_str = meta["new_state"].lower()
         if state_str == "completed":
-            await self.persist_and_publish(
+            return await self.persist_and_publish(
                 source_id="lysstack.scheduler",
                 source_kind="runtime",
                 kind="job.completed",
@@ -211,7 +200,7 @@ class RuntimeEventBridge:
                 accent_color="#4ADE80",
             )
         elif state_str == "blocked":
-            await self.persist_and_publish(
+            return await self.persist_and_publish(
                 source_id="lysstack.scheduler",
                 source_kind="runtime",
                 kind="job.blocked",
@@ -221,7 +210,7 @@ class RuntimeEventBridge:
                 accent_color="#F87171",
             )
         elif state_str == "failed":
-            await self.persist_and_publish(
+            return await self.persist_and_publish(
                 source_id="lysstack.scheduler",
                 source_kind="runtime",
                 kind="job.failed",
@@ -231,7 +220,7 @@ class RuntimeEventBridge:
                 accent_color="#EF4444",
             )
         elif state_str == "cancelled":
-            await self.persist_and_publish(
+            return await self.persist_and_publish(
                 source_id="lysstack.scheduler",
                 source_kind="runtime",
                 kind="job.cancelled",
@@ -240,8 +229,16 @@ class RuntimeEventBridge:
                 metadata=meta,
                 accent_color="#F87171",
             )
-
-        return evt
+        else:
+            return await self.persist_and_publish(
+                source_id="lysstack.scheduler",
+                source_kind="runtime",
+                kind="job.state_changed",
+                detail=f"Job {job.job_id} transitioned from {meta['previous_state']} to {meta['new_state']}",
+                job_id=job.job_id,
+                metadata=meta,
+                accent_color="#CBA35C",
+            )
 
     async def emit_task_created(self, task: Any, reason: Optional[str] = None) -> StoredRuntimeEvent:
         payload = {
@@ -361,9 +358,8 @@ class RuntimeEventBridge:
         if task_id in cancelled_set:
             logger.debug("task.cancelled already emitted for task %s (skipping duplicate)", task_id)
             return None
-        cancelled_set.add(task_id)
 
-        return await self.persist_and_publish(
+        res = await self.persist_and_publish(
             source_id="lysstack.scheduler",
             source_kind="runtime",
             kind="task.cancelled",
@@ -379,6 +375,8 @@ class RuntimeEventBridge:
             },
             accent_color="#F87171",
         )
+        cancelled_set.add(task_id)
+        return res
 
     async def emit_agent_started(self, run: Any, task: Any) -> StoredRuntimeEvent:
         return await self.persist_and_publish(

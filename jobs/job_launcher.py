@@ -382,7 +382,7 @@ class JobLauncher:
         start_background: bool = True,
     ) -> Dict[str, Any]:
         """
-        Async version of launch that durably persists initial job state before returning.
+        Async version of launch that durably persists initial job state BEFORE starting background engine.
         """
         res = self.launch(
             sprint_id=sprint_id,
@@ -391,14 +391,17 @@ class JobLauncher:
             control_url_override=control_url_override,
             mode=mode,
             agent_registry=agent_registry,
-            start_background=start_background,
+            start_background=False,
         )
         job_id = res.get("jobId")
         if job_id:
             engine = job_service.get_engine(job_id)
             if engine:
-                # Ensure job.created is durably persisted
+                # 1. Durably persist job.created and initial tasks BEFORE starting background runner
                 await engine._ensure_job_created_emitted()
+                # 2. Start execution in background only after successful persistence
+                if start_background:
+                    self._start_engine_background(engine)
         return res
 
     def _cancel_legacy_proc(self, job_id: str) -> bool:
@@ -451,17 +454,20 @@ class JobLauncher:
     async def cancel_async(self, job_id: str, reason: str = "Job cancelled by operator") -> bool:
         """
         Asynchronously and durably cancels an active job across event loops and processes.
+        Awaits engine.cancel() to guarantee durable event emissions before cancelling the driver task.
         """
         self.reap_finished()
 
         # 1. Check active ReactiveJobEngine
         engine = job_service.get_engine(job_id)
         if engine and not engine.is_terminal:
+            # Await durable engine cancellation first
+            await engine.cancel(reason=reason)
+
+            # Then cancel the driving background loop
             task = self._active_async_tasks.pop(job_id, None)
             if task and not task.done():
                 task.cancel()
-
-            await engine.cancel(reason=reason)
 
             job_state_reducer.apply(
                 kind="job.cancelled",
@@ -490,12 +496,6 @@ class JobLauncher:
         # 1. Check active ReactiveJobEngine
         engine = job_service.get_engine(job_id)
         if engine and not engine.is_terminal:
-            engine.request_cancel(reason)
-
-            task = self._active_async_tasks.pop(job_id, None)
-            if task and not task.done():
-                task.cancel()
-
             try:
                 loop = asyncio.get_running_loop()
                 loop.create_task(engine.cancel(reason=reason))
@@ -504,6 +504,12 @@ class JobLauncher:
                     asyncio.run(engine.cancel(reason=reason))
                 except Exception as exc:
                     logger.debug("Async engine cancel run failed: %s", exc)
+
+            engine.request_cancel(reason)
+
+            task = self._active_async_tasks.pop(job_id, None)
+            if task and not task.done():
+                task.cancel()
 
             job_state_reducer.apply(
                 kind="job.cancelled",

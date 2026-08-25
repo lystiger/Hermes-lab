@@ -32,6 +32,7 @@ from runtime.job_state import JobRecord
 from runtime.observations import Observation
 from runtime.replanning import ProductionPlannerAdapter, PlannerAdapter, ReplanRequest, ReplanResult, GraphMutation, GraphMutationType
 from runtime.capacity import UsageSnapshotNormalizer, default_capacity_registry
+from runner.agents.errors import SprintRunnerError
 from tools.tools import (
     ToolProfile,
     ToolInvocationRequest,
@@ -599,6 +600,22 @@ class HermesActorAdapter(ActorAdapter):
             if mb_sec:
                 parts.append(mb_sec)
 
+        # Inject explicit verifier contract for verifier-role execution
+        if role == "verifier" or (task and isinstance(task.metadata, dict) and task.metadata.get("role") == "verifier"):
+            verifier_contract = (
+                "--- HERMES VERIFICATION CONTRACT ---\n"
+                "Your final response MUST contain a verification result in this JSON form:\n\n"
+                "{\n"
+                '  "verdict": "passed" | "failed",\n'
+                '  "summary": "short explanation",\n'
+                '  "repairable": true | false,\n'
+                '  "findings": ["finding 1", "finding 2"]\n'
+                "}\n\n"
+                "Do not omit verdict.\n"
+                "--- END VERIFICATION CONTRACT ---"
+            )
+            parts.append(verifier_contract)
+
         return "\n\n".join(parts)
 
     def build_tool_job_config(self, task: TaskNode) -> Dict[str, Any]:
@@ -986,13 +1003,6 @@ class HermesActorAdapter(ActorAdapter):
                             **eo,
                         }))
 
-            if obs_reg:
-                for o in obs_list:
-                    try:
-                        obs_reg.register(o)
-                    except Exception:
-                        pass
-
             # If agent reported a semantic failure verdict (e.g. Codex structured verification failure)
             verdict = runtime_meta.get("verdict")
             if verdict in ("failed", "fail"):
@@ -1037,6 +1047,15 @@ class HermesActorAdapter(ActorAdapter):
                 error=str(exc),
                 exit_reason="worktree_error",
                 metadata={"actor": actor_id, "fail_closed": True},
+            )
+
+        except SprintRunnerError as exc:
+            logger.warning("Agent runner error for task %s on actor %s: %s (%s)", task.task_id, actor_id, exc.code, exc.message)
+            return TaskExecutionResult(
+                status="failed",
+                error=f"{exc.code}: {exc.message}",
+                exit_reason=exc.code.lower(),
+                metadata={"actor": actor_id, "fail_closed": True, "runner_error_code": exc.code},
             )
 
         except Exception as exc:

@@ -1,6 +1,6 @@
 import json
 import re
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Mapping, Optional
 
 from .base import AgentAdapter
 from .errors import SprintRunnerError
@@ -27,21 +27,32 @@ class CodexAdapter(AgentAdapter):
         if not cleaned:
             raise SprintRunnerError("FAILED_CODEX_EMPTY_OUTPUT", "Codex emitted no output")
 
+        role = ""
+        if context and hasattr(context, "phase") and isinstance(context.phase, (dict, Mapping)):
+            role = str(context.phase.get("role", "")).lower()
+
         parsed = self.parse_verification_output(cleaned, result.stderr or "")
-        if parsed:
-            try:
-                if hasattr(result, "runtime_metadata") and isinstance(result.runtime_metadata, dict):
-                    result.runtime_metadata.update(parsed)
-                else:
-                    object.__setattr__(result, "runtime_metadata", {**(getattr(result, "runtime_metadata", None) or {}), **parsed})
-            except Exception:
-                pass
+        if parsed is None or "verdict" not in parsed:
+            if role == "verifier":
+                raise SprintRunnerError(
+                    "FAILED_CODEX_INVALID_VERDICT",
+                    "Codex verifier did not emit a valid verification contract with an explicit verdict",
+                )
+            return
+
+        try:
+            if hasattr(result, "runtime_metadata") and isinstance(result.runtime_metadata, dict):
+                result.runtime_metadata.update(parsed)
+            else:
+                object.__setattr__(result, "runtime_metadata", {**(getattr(result, "runtime_metadata", None) or {}), **parsed})
+        except Exception:
+            pass
 
     @classmethod
     def parse_verification_output(cls, stdout_text: str, stderr_text: str = "") -> Optional[Dict[str, Any]]:
         """
         Parses structured verifier contract from Codex output (JSON or structured text blocks).
-        Returns normalized dictionary with verdict, summary, repairable, findings, and observations.
+        Fails closed: returns None if no explicit verdict is provided.
         """
         cleaned = stdout_text.strip()
         if not cleaned:
@@ -64,20 +75,22 @@ class CodexAdapter(AgentAdapter):
                     pass
 
         if isinstance(json_obj, dict):
-            raw_verdict = str(json_obj.get("verdict") or json_obj.get("status") or "").lower()
+            raw_verdict = str(json_obj.get("verdict") or json_obj.get("status") or "").lower().strip()
             summary = str(json_obj.get("summary") or json_obj.get("message") or "")
-            repairable = bool(json_obj.get("repairable", True if raw_verdict in ("failed", "fail", "error") else False))
             findings = list(json_obj.get("findings") or [])
-            if not raw_verdict:
-                if json_obj.get("is_error") is False or json_obj.get("success") is True:
-                    raw_verdict = "passed"
-                elif json_obj.get("is_error") is True:
-                    raw_verdict = "failed"
-                else:
-                    raw_verdict = "passed"
 
-            is_pass = raw_verdict in ("passed", "pass", "success", "ok")
-            norm_verdict = "passed" if is_pass else "failed"
+            # Fail closed: verdict MUST be explicitly passed/success or failed/fail/error
+            if raw_verdict in ("passed", "pass", "success", "ok"):
+                is_pass = True
+                norm_verdict = "passed"
+                repairable = bool(json_obj.get("repairable", False))
+            elif raw_verdict in ("failed", "fail", "error"):
+                is_pass = False
+                norm_verdict = "failed"
+                repairable = bool(json_obj.get("repairable", True))
+            else:
+                # Do NOT fabricate or infer verdict from generic flags like {"success": true} or {"summary": "looks fine"}
+                return None
 
             obs_list = []
             if is_pass:
@@ -110,7 +123,7 @@ class CodexAdapter(AgentAdapter):
             }
 
         # 2. Try parsing structured text format (e.g. VERDICT: PASS / FAIL)
-        verdict_match = re.search(r"VERDICT\s*:\s*(PASS|FAIL|PASSED|FAILED|SUCCESS|ERROR)", cleaned, re.IGNORECASE)
+        verdict_match = re.search(r"VERDICT\s*:\s*(PASS|FAIL|PASSED|FAILED|SUCCESS|ERROR)\b", cleaned, re.IGNORECASE)
         if verdict_match:
             v_str = verdict_match.group(1).upper()
             is_pass = v_str in ("PASS", "PASSED", "SUCCESS")
@@ -119,7 +132,7 @@ class CodexAdapter(AgentAdapter):
             summary_match = re.search(r"SUMMARY\s*:\s*([^\n]+)", cleaned, re.IGNORECASE)
             summary = summary_match.group(1).strip() if summary_match else ""
 
-            repairable_match = re.search(r"REPAIRABLE\s*:\s*(TRUE|FALSE)", cleaned, re.IGNORECASE)
+            repairable_match = re.search(r"REPAIRABLE\s*:\s*(TRUE|FALSE)\b", cleaned, re.IGNORECASE)
             repairable = (repairable_match.group(1).upper() == "TRUE") if repairable_match else (not is_pass)
 
             findings = []
@@ -163,36 +176,6 @@ class CodexAdapter(AgentAdapter):
                 "trigger_replan": not is_pass,
                 "replan_reason": f"Codex verification failure: {summary}" if not is_pass else None,
                 "observations": obs_list,
-            }
-
-        # 3. Text fallback
-        if "verification passed" in cleaned.lower() or "passed:" in cleaned.lower():
-            return {
-                "verdict": "passed",
-                "summary": cleaned[:200],
-                "repairable": False,
-                "findings": [],
-                "structured_verdict": {"verdict": "passed", "summary": cleaned[:200]},
-                "observations": [{
-                    "kind": "verification_success",
-                    "content": f"Codex verification passed: {cleaned[:200]}",
-                    "metadata": {"verdict": "passed"},
-                }],
-            }
-        elif "verification failed" in cleaned.lower() or "failed:" in cleaned.lower():
-            return {
-                "verdict": "failed",
-                "summary": cleaned[:200],
-                "repairable": True,
-                "findings": [cleaned[:200]],
-                "structured_verdict": {"verdict": "failed", "summary": cleaned[:200]},
-                "trigger_replan": True,
-                "replan_reason": f"Codex verification failure: {cleaned[:200]}",
-                "observations": [{
-                    "kind": "verification_failure",
-                    "content": f"Codex verification failed: {cleaned[:200]}",
-                    "metadata": {"verdict": "failed", "repairable": True, "requires_follow_up": True},
-                }],
             }
 
         return None

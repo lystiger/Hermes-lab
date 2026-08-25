@@ -288,11 +288,19 @@ def _setup_disposable_git_repo(repo_dir: Path) -> Path:
 
 def test_codex_adapter_structured_contract_parsing():
     """
-    Tests that CodexAdapter parses various structured verifier contracts:
-    - Pure JSON
-    - Markdown code fence JSON
+    Tests that CodexAdapter parses various structured verifier contracts
+    and fails closed on missing, ambiguous, or unparseable verdicts:
+    - Pure JSON pass & fail
+    - Markdown code fence JSON pass & fail
     - Structured text blocks (VERDICT: PASS / FAIL)
+    - Missing verdict: {"summary": "looks fine"} -> INVALID (None / SprintRunnerError)
+    - Unstructured text: "I found a critical regression" -> INVALID (None / SprintRunnerError)
+    - Ambiguous flags: {"success": true} -> INVALID (None / SprintRunnerError)
     """
+    from runner.agents.errors import SprintRunnerError
+    from runner.agents.base import AgentContext
+    from types import SimpleNamespace
+
     adapter = CodexAdapter()
 
     # 1. Pure JSON - Failure
@@ -359,6 +367,41 @@ def test_codex_adapter_structured_contract_parsing():
     assert res_text_pass is not None
     assert res_text_pass["verdict"] == "passed"
     assert res_text_pass["trigger_replan"] is False
+
+    # 4. Regression Case: {"summary": "looks fine"} -> INVALID, NOT PASS
+    missing_verdict_json = json.dumps({"summary": "looks fine"})
+    assert adapter.parse_verification_output(missing_verdict_json) is None
+
+    # 5. Regression Case: "I found a critical regression" without VERDICT: header -> INVALID, NOT PASS
+    unstructured_text = "I found a critical regression in the payment processor"
+    assert adapter.parse_verification_output(unstructured_text) is None
+
+    # 6. Regression Case: {"success": true} without explicit verdict -> INVALID, NOT PASS
+    generic_success_json = json.dumps({"success": True, "output": "Done"})
+    assert adapter.parse_verification_output(generic_success_json) is None
+
+    # 7. Validation in verifier role context raises SprintRunnerError on invalid contracts
+    dummy_ctx = SimpleNamespace(phase={"role": "verifier", "name": "verification_step"})
+    
+    mock_res_missing = ExecutionResult(command=["codex"], returncode=0, stdout=missing_verdict_json, stderr="", backend="test")
+    with pytest.raises(SprintRunnerError) as exc_info:
+        adapter.validate_result(mock_res_missing, dummy_ctx)
+    assert exc_info.value.code == "FAILED_CODEX_INVALID_VERDICT"
+
+    mock_res_unstructured = ExecutionResult(command=["codex"], returncode=0, stdout=unstructured_text, stderr="", backend="test")
+    with pytest.raises(SprintRunnerError) as exc_info:
+        adapter.validate_result(mock_res_unstructured, dummy_ctx)
+    assert exc_info.value.code == "FAILED_CODEX_INVALID_VERDICT"
+
+    mock_res_valid_fail = ExecutionResult(command=["codex"], returncode=0, stdout=raw_json_fail, stderr="", backend="test")
+    adapter.validate_result(mock_res_valid_fail, dummy_ctx)
+    assert mock_res_valid_fail.runtime_metadata["verdict"] == "failed"
+    assert mock_res_valid_fail.runtime_metadata["trigger_replan"] is True
+
+    mock_res_valid_pass = ExecutionResult(command=["codex"], returncode=0, stdout=raw_fenced_pass, stderr="", backend="test")
+    adapter.validate_result(mock_res_valid_pass, dummy_ctx)
+    assert mock_res_valid_pass.runtime_metadata["verdict"] == "passed"
+    assert mock_res_valid_pass.runtime_metadata["trigger_replan"] is False
 
 
 @pytest.mark.anyio
@@ -481,6 +524,8 @@ async def test_phase11_0_three_agent_pass_path(tmp_path: Path):
 
     codex_prompt = backend_instance.captured_prompts.get("codex", "")
     assert CLAUDE_MARKER in codex_prompt
+    assert "--- HERMES VERIFICATION CONTRACT ---" in codex_prompt
+    assert '"verdict": "passed" | "failed"' in codex_prompt
 
     # Structured verification success observation recorded
     codex_success_obs = [o for o in obs_reg.list_for_task("T3") if o.kind == "verification_success"]
@@ -672,6 +717,11 @@ async def test_phase11_0_three_agent_fail_and_repair_workflow_e2e(tmp_path: Path
     repair_prompt = backend_instance.captured_prompts.get("claude", "")
     assert "ZeroDivisionError" in repair_prompt or "divide" in repair_prompt
 
+    # Codex prompt contained explicit verifier contract
+    codex_prompt = backend_instance.captured_prompts.get("codex", "")
+    assert "--- HERMES VERIFICATION CONTRACT ---" in codex_prompt
+    assert '"verdict": "passed" | "failed"' in codex_prompt
+
     # 3. T5 produced verification_success observation
     success_obs = [o for o in obs_reg.list_for_task("T5_reverify") if o.kind == "verification_success"]
     assert len(success_obs) >= 1
@@ -699,19 +749,19 @@ async def test_phase11_0_three_agent_fail_and_repair_workflow_e2e(tmp_path: Path
 async def test_phase11_0_live_agents_acceptance(tmp_path: Path):
     """
     Opt-in live agent acceptance test invoking locally installed CLIs
-    (agy/antigravity, claude, codex) against a tiny disposable repository.
+    (agy, claude, codex) against a tiny disposable repository.
     Skipped by default in CI unless HERMES_RUN_LIVE_AGENTS=1 is set.
     """
     if os.environ.get("HERMES_RUN_LIVE_AGENTS") != "1":
         pytest.skip("Live agent tests are opt-in. Set HERMES_RUN_LIVE_AGENTS=1 to execute with real local CLIs.")
 
-    agy_bin = shutil.which("agy") or shutil.which("antigravity")
+    agy_bin = shutil.which("agy")
     claude_bin = shutil.which("claude")
     codex_bin = shutil.which("codex")
 
     missing = []
     if not agy_bin:
-        missing.append("antigravity/agy")
+        missing.append("agy")
     if not claude_bin:
         missing.append("claude")
     if not codex_bin:

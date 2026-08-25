@@ -95,13 +95,17 @@ class JobService:
     Reconstructs historical runs from run summaries on startup and maintains live runtime state.
     """
 
-    def __init__(self, runs_root: Optional[Path] = None, sprints_root: Optional[Path] = None):
+    def __init__(self, runs_root: Optional[Path] = None, sprints_root: Optional[Path] = None, event_store: Optional[Any] = None):
         self._jobs: Dict[str, JobDetailDTO] = {}
         self._engines: Dict[str, Any] = {}
+        self._store = event_store
         self.runs_root = runs_root or (Path(__file__).resolve().parent.parent / "hermes-runs")
         self.sprints_root = sprints_root or (Path(__file__).resolve().parent.parent / "sprints")
         artifact_registry.add_allowed_root(self.runs_root)
         self._recover_recent_runs()
+
+    def set_store(self, event_store: Any) -> None:
+        self._store = event_store
 
     def _recover_recent_runs(self) -> None:
         """Scan configured hermes-runs directory to reconstruct recent finished sprint jobs."""
@@ -374,6 +378,108 @@ class JobService:
         job = self.get_job(job_id)
         if job and job.observations:
             return job.observations
+        return []
+
+    async def get_job_async(self, job_id: str) -> Optional[JobDetailDTO]:
+        # 1. Check in-memory state first
+        job = self.get_job(job_id)
+        if job:
+            return job
+
+        # 2. Reconstruct from durable event store if available
+        from runtime.storage.config import get_global_event_store
+        store = self._store or get_global_event_store()
+        if store:
+            try:
+                events = await store.list_events(job_id)
+                if events:
+                    from runtime.storage.projector import RuntimeStateProjector
+                    state = RuntimeStateProjector.project(events)
+                    task_nodes = state.graph.list_tasks()
+                    phases = []
+                    for idx, t in enumerate(task_nodes, start=1):
+                        phases.append(
+                            JobPhaseDTO(
+                                id=t.task_id,
+                                name=t.description,
+                                order=idx,
+                                role=t.assigned_actor or "builder",
+                                agentId=t.assigned_actor or "unknown",
+                                status=t.status.value,
+                                attempt=t.attempt,
+                                startedAt=t.started_at,
+                                completedAt=t.completed_at,
+                                dependencies=t.dependencies,
+                                requiredCapabilities=t.required_capabilities,
+                            )
+                        )
+                    succeeded_count = len([t for t in task_nodes if t.status.value == "SUCCEEDED"])
+                    progress = 1.0 if state.job.state.value.upper() == "COMPLETED" else round(succeeded_count / max(len(task_nodes), 1), 2)
+                    job_dto = JobDetailDTO(
+                        id=job_id,
+                        sprintId=job_id,
+                        title=state.job.title or state.job.goal,
+                        repository=state.job.repository or "—",
+                        branch=state.job.branch or "main",
+                        priority=state.job.priority,
+                        status=state.job.state.value.upper(),
+                        createdAt=state.job.created_at,
+                        startedAt=state.job.started_at,
+                        completedAt=state.job.completed_at,
+                        progress=progress,
+                        phases=phases,
+                        tasks=[t.to_dict() for t in task_nodes],
+                        blockedReason=state.job.blocked_reason,
+                        repairCount=state.job.repair_count,
+                        replanCount=state.job.replan_count,
+                        observations=[o.to_dict() for o in state.observations],
+                    )
+                    self._jobs[job_id] = job_dto
+                    return job_dto
+            except Exception as exc:
+                logger.warning("Error reconstructing job %s from event store: %s", job_id, exc)
+
+        return None
+
+    async def get_job_tasks_async(self, job_id: str) -> List[Dict[str, Any]]:
+        tasks = self.get_job_tasks(job_id)
+        if tasks:
+            return tasks
+        job = await self.get_job_async(job_id)
+        return job.tasks if job else []
+
+    async def get_job_runs_async(self, job_id: str) -> List[Dict[str, Any]]:
+        runs = self.get_job_runs(job_id)
+        if runs:
+            return runs
+        from runtime.storage.config import get_global_event_store
+        store = self._store or get_global_event_store()
+        if store:
+            try:
+                events = await store.list_events(job_id)
+                if events:
+                    from runtime.storage.projector import RuntimeStateProjector
+                    state = RuntimeStateProjector.project(events)
+                    return [r.to_dict() for r in state.runs]
+            except Exception as exc:
+                logger.warning("Error reconstructing runs for job %s: %s", job_id, exc)
+        return []
+
+    async def get_job_observations_async(self, job_id: str) -> List[Dict[str, Any]]:
+        obs = self.get_job_observations(job_id)
+        if obs:
+            return obs
+        from runtime.storage.config import get_global_event_store
+        store = self._store or get_global_event_store()
+        if store:
+            try:
+                events = await store.list_events(job_id)
+                if events:
+                    from runtime.storage.projector import RuntimeStateProjector
+                    state = RuntimeStateProjector.project(events)
+                    return [o.to_dict() for o in state.observations]
+            except Exception as exc:
+                logger.warning("Error reconstructing observations for job %s: %s", job_id, exc)
         return []
 
 

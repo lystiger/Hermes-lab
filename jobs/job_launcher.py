@@ -240,7 +240,9 @@ class JobLauncher:
                 raise ValueError(f"Invalid context specification in sprint '{sprint_id}': {exc}") from exc
 
         # Build production ReactiveJobEngine
-        event_bridge = RuntimeEventBridge(event_bus)
+        from runtime.storage.config import get_global_event_store
+        event_store = get_global_event_store()
+        event_bridge = RuntimeEventBridge(event_bus, event_store=event_store)
 
         # Decompose initial tasks from sprint spec phases with normalized metadata
         initial_tasks: List[TaskNode] = []

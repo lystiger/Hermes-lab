@@ -21,10 +21,15 @@ from capabilities.normalization import normalize_agent_id
 from artifacts.artifact_registry import ArtifactRef, artifact_registry
 from messaging.message_store import message_store
 from messaging.message_router import message_router
+from runtime.storage.config import init_storage_lifespan, get_global_event_store
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # Initialize and validate storage connectivity (fails fast if configured DB is down)
+    store = await init_storage_lifespan()
+    job_service.set_store(store)
+
     # Recover historical messages from runs
     try:
         message_store.recover_from_runs(job_service.runs_root)
@@ -50,6 +55,10 @@ async def lifespan(app: FastAPI):
         detail="LysStack control-plane runtime shutting down",
         accent_color="#CBA35C",
     )
+    await store.close()
+    from runtime.storage.in_memory_store import InMemoryRuntimeEventStore
+    if isinstance(store, InMemoryRuntimeEventStore):
+        store._closed = False
 
 
 app = FastAPI(title="LysStack Control Plane", version="0.1.0", lifespan=lifespan)
@@ -301,7 +310,7 @@ async def get_job(job_id: str):
     """
     Returns detailed runtime execution state for a specific job.
     """
-    job = job_service.get_job(job_id)
+    job = await job_service.get_job_async(job_id)
     if not job:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -315,13 +324,13 @@ async def get_job_tasks(job_id: str):
     """
     Returns the reactive task dependency graph nodes for a specific job.
     """
-    job = job_service.get_job(job_id)
+    job = await job_service.get_job_async(job_id)
     if not job:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Job '{job_id}' not found",
         )
-    return job_service.get_job_tasks(job_id)
+    return await job_service.get_job_tasks_async(job_id)
 
 
 @app.get("/jobs/{job_id}/runs")
@@ -329,13 +338,13 @@ async def get_job_runs(job_id: str):
     """
     Returns all actor execution run records for a specific job.
     """
-    job = job_service.get_job(job_id)
+    job = await job_service.get_job_async(job_id)
     if not job:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Job '{job_id}' not found",
         )
-    return job_service.get_job_runs(job_id)
+    return await job_service.get_job_runs_async(job_id)
 
 
 @app.get("/jobs/{job_id}/observations")
@@ -343,26 +352,30 @@ async def get_job_observations(job_id: str):
     """
     Returns all runtime observations discovered during job execution.
     """
-    job = job_service.get_job(job_id)
+    job = await job_service.get_job_async(job_id)
     if not job:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Job '{job_id}' not found",
         )
-    return job_service.get_job_observations(job_id)
+    return await job_service.get_job_observations_async(job_id)
 
 
 @app.get("/jobs/{job_id}/events")
 async def get_job_events(job_id: str, limit: int = Query(default=100, ge=1, le=500)):
     """
-    Returns historical runtime events scoped to a specific job.
+    Returns historical runtime events scoped to a specific job from durable event store.
     """
-    job = job_service.get_job(job_id)
+    job = await job_service.get_job_async(job_id)
     if not job:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Job '{job_id}' not found",
         )
+    store = get_global_event_store()
+    stored_events = await store.list_events(job_id, limit=limit)
+    if stored_events:
+        return [e.to_dict() for e in stored_events]
     events = [e for e in event_bus.recent(limit=limit) if e.job_id == job_id]
     return [e.to_dict() for e in events]
 

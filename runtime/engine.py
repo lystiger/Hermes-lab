@@ -57,10 +57,13 @@ class ReactiveJobEngine:
         verifier: Optional[Union[VerifierAdapter, Callable, Any]] = None,
         planner: Optional[Union[PlannerAdapter, Callable, Any]] = None,
         event_bridge: Optional[RuntimeEventBridge] = None,
+        event_store: Optional[Any] = None,
         metadata: Optional[Dict[str, Any]] = None,
     ):
         self.limits = limits or RuntimeLimits()
         self.event_bridge = event_bridge or RuntimeEventBridge()
+        if event_store is not None:
+            self.event_bridge.set_store(event_store)
 
         self.job = JobRecord(
             job_id=job_id,
@@ -215,9 +218,11 @@ class ReactiveJobEngine:
                 reason="Initial planning produced zero executable tasks",
                 event_bridge=self.event_bridge,
             )
+            await self.event_bridge.flush()
             return
 
         self.job.transition_to(JobState.EXECUTING, reason="Initial plan decomposition completed", event_bridge=self.event_bridge)
+        await self.event_bridge.flush()
 
     async def request_replan(
         self,
@@ -297,6 +302,7 @@ class ReactiveJobEngine:
                 reason="Applying replanned task graph",
                 event_bridge=self.event_bridge,
             )
+        await self.event_bridge.flush()
         return not made_no_progress
 
     async def _cancel_active_tasks(self, reason: str) -> int:
@@ -640,5 +646,9 @@ class ReactiveJobEngine:
         finally:
             # Never leave workers running past the run loop, whatever ended it.
             await self._cancel_active_tasks("Engine run finished")
+            try:
+                await self.event_bridge.flush()
+            except Exception as e:
+                logger.warning("Error during event bridge flush: %s", e)
 
         return self.job

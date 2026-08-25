@@ -29,6 +29,7 @@ class RuntimeEventBridge:
         self._stored_events: List[StoredRuntimeEvent] = []
         self._pending_persists: Set[asyncio.Task] = set()
         self._last_persistence_error: Optional[Exception] = None
+        self._cancelled_tasks: Dict[str, Set[str]] = {}
 
     def set_bus(self, event_bus: Any) -> None:
         self._bus = event_bus
@@ -51,6 +52,7 @@ class RuntimeEventBridge:
         self._captured_events.clear()
         self._stored_events.clear()
         self._last_persistence_error = None
+        self._cancelled_tasks.clear()
 
     async def flush(self) -> None:
         """
@@ -354,7 +356,13 @@ class RuntimeEventBridge:
         reason: Optional[str] = None,
         attempt: int = 0,
         assigned_actor: Optional[str] = None,
-    ) -> StoredRuntimeEvent:
+    ) -> Optional[StoredRuntimeEvent]:
+        cancelled_set = self._cancelled_tasks.setdefault(job_id, set())
+        if task_id in cancelled_set:
+            logger.debug("task.cancelled already emitted for task %s (skipping duplicate)", task_id)
+            return None
+        cancelled_set.add(task_id)
+
         return await self.persist_and_publish(
             source_id="lysstack.scheduler",
             source_kind="runtime",

@@ -371,40 +371,37 @@ class JobLauncher:
             "mode": mode,
         }
 
-    def cancel(self, job_id: str) -> bool:
+    async def launch_async(
+        self,
+        sprint_id: str,
+        dry_run: bool = False,
+        skip_agent_exec: bool = False,
+        control_url_override: Optional[str] = None,
+        mode: str = "reactive_runtime",
+        agent_registry: Any = None,
+        start_background: bool = True,
+    ) -> Dict[str, Any]:
         """
-        Cleanly terminates an active job (reactive engine or legacy process).
+        Async version of launch that durably persists initial job state before returning.
         """
-        self.reap_finished()
+        res = self.launch(
+            sprint_id=sprint_id,
+            dry_run=dry_run,
+            skip_agent_exec=skip_agent_exec,
+            control_url_override=control_url_override,
+            mode=mode,
+            agent_registry=agent_registry,
+            start_background=start_background,
+        )
+        job_id = res.get("jobId")
+        if job_id:
+            engine = job_service.get_engine(job_id)
+            if engine:
+                # Ensure job.created is durably persisted
+                await engine._ensure_job_created_emitted()
+        return res
 
-        # 1. Check active ReactiveJobEngine
-        engine = job_service.get_engine(job_id)
-        if engine and not engine.is_terminal:
-            # Cancel the driving loop first so it cannot schedule further work, then stop the
-            # engine's in-flight execution tasks. Cancelling only the driver would leave the
-            # workers running against worktrees for a job already reported as cancelled.
-            engine.request_cancel("Job cancelled by operator")
-
-            task = self._active_async_tasks.pop(job_id, None)
-            if task and not task.done():
-                task.cancel()
-
-            job_state_reducer.apply(
-                kind="job.cancelled",
-                detail=f"Job {job_id} cancelled by operator",
-                job_id=job_id,
-            )
-            event_bus.publish(
-                source_id="lysstack",
-                source_kind="runtime",
-                source_name="JobLauncher",
-                kind="job.cancelled",
-                detail=f"Job {job_id} cancelled by operator",
-                job_id=job_id,
-            )
-            return True
-
-        # 2. Check legacy runner process
+    def _cancel_legacy_proc(self, job_id: str) -> bool:
         proc = self._active_processes.get(job_id)
         if not proc or proc.poll() is not None:
             return False
@@ -449,8 +446,82 @@ class JobLauncher:
                 job_id=job_id,
             )
             return True
-
         return False
+
+    async def cancel_async(self, job_id: str, reason: str = "Job cancelled by operator") -> bool:
+        """
+        Asynchronously and durably cancels an active job across event loops and processes.
+        """
+        self.reap_finished()
+
+        # 1. Check active ReactiveJobEngine
+        engine = job_service.get_engine(job_id)
+        if engine and not engine.is_terminal:
+            task = self._active_async_tasks.pop(job_id, None)
+            if task and not task.done():
+                task.cancel()
+
+            await engine.cancel(reason=reason)
+
+            job_state_reducer.apply(
+                kind="job.cancelled",
+                detail=f"Job {job_id} cancelled by operator",
+                job_id=job_id,
+            )
+            event_bus.publish(
+                source_id="lysstack",
+                source_kind="runtime",
+                source_name="JobLauncher",
+                kind="job.cancelled",
+                detail=f"Job {job_id} cancelled by operator",
+                job_id=job_id,
+            )
+            return True
+
+        # 2. Check legacy runner process
+        return self._cancel_legacy_proc(job_id)
+
+    def cancel(self, job_id: str, reason: str = "Job cancelled by operator") -> bool:
+        """
+        Synchronously cancels an active job (reactive engine or legacy process).
+        """
+        self.reap_finished()
+
+        # 1. Check active ReactiveJobEngine
+        engine = job_service.get_engine(job_id)
+        if engine and not engine.is_terminal:
+            engine.request_cancel(reason)
+
+            task = self._active_async_tasks.pop(job_id, None)
+            if task and not task.done():
+                task.cancel()
+
+            try:
+                loop = asyncio.get_running_loop()
+                loop.create_task(engine.cancel(reason=reason))
+            except RuntimeError:
+                try:
+                    asyncio.run(engine.cancel(reason=reason))
+                except Exception as exc:
+                    logger.debug("Async engine cancel run failed: %s", exc)
+
+            job_state_reducer.apply(
+                kind="job.cancelled",
+                detail=f"Job {job_id} cancelled by operator",
+                job_id=job_id,
+            )
+            event_bus.publish(
+                source_id="lysstack",
+                source_kind="runtime",
+                source_name="JobLauncher",
+                kind="job.cancelled",
+                detail=f"Job {job_id} cancelled by operator",
+                job_id=job_id,
+            )
+            return True
+
+        # 2. Check legacy runner process
+        return self._cancel_legacy_proc(job_id)
 
 
 job_launcher = JobLauncher()

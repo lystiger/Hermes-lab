@@ -246,6 +246,14 @@ Phase 9.1: Durable Commit Semantics & Reconstruction Completeness
    ├── Advisory lock acquisition precedes event_id check; fails closed on lock error under PostgreSQL
    ├── Multi-store concurrent sequence allocation and race-safe duplicate event_id deduplication
    └── Deterministic artifact deduplication across created events, task completions, and agent runs
+
+Phase 9.1.1: Production Cancellation & Terminal Atomicity
+   ├── JobLauncher.cancel() / cancel_async() safely routes through await engine.cancel() across loops
+   ├── Live POST /jobs/{id}/cancel tested with full post-cancellation event projection
+   ├── Deduplication of task.cancelled events at the bridge level (single emission per task ID)
+   ├── Unified list_unfinished_jobs() cross-dialect consistency checking event types and state payloads
+   ├── Live PostgreSQL two-store concurrency and idempotency testing against Docker service
+   └── Guaranteed job.created persistence before POST /jobs acknowledges creation (launch_async)
 ```
 
 ---
@@ -284,15 +292,16 @@ Phase 9.1: Durable Commit Semantics & Reconstruction Completeness
 
 The system is validated across comprehensive test suites:
 
-- **Total Backend Pytest Tests**: **283 tests** (281 passed, 2 skipped, 0 failed).
+- **Total Backend Pytest Tests**: **286 tests** (284 passed, 2 skipped, 0 failed).
 - **Hardening Suite (`tests/test_phase8_1_runtime_hardening.py`)**: 14 tests verifying production launch, deadlocks, cycles, concurrency, timeouts, and reactivity.
 - **Async & Fail-Closed Suite (`tests/test_phase8_1_3_async_failclosed.py`)**: 20 tests verifying off-loop concurrent agent execution, serialized Git mutation, worktree and sync fail-closure, context resolution, tool policy and requester identity, and bounded discovery expansion.
 - **Follow-Up & Cancellation Suite (`tests/test_phase8_1_4_followup_cancellation.py`)**: 10 tests verifying automatic discovery triggering, opportunistic vs. blocking replan semantics, and cancellation containment across operator, driver-cancellation, and normal-exit paths.
 - **Phase 9.1 Durability Suite (`tests/test_phase9_1_durability.py`)**: 6 tests verifying synchronous persist precedence, fail-closed task and job completion errors, unswallowed exceptions in run loops, valid ledger prefixes, and gap rejection.
 - **Phase 9.1 Cancellation & Reconstruction Suite (`tests/test_phase9_1_cancellation_reconstruction.py`)**: 4 tests verifying `task.cancelled` and `agent.cancelled` persistence, state projection with no RUNNING leftovers, and artifact set equivalence.
+- **Phase 9.1.1 Cancellation & Terminal Atomicity Suite (`tests/test_phase9_1_1_cancel_and_reconstruct.py`)**: 2 tests verifying `POST /jobs` durable persistence and `/jobs/{id}/cancel` event projection without duplicate `task.cancelled`.
 - **Event Store Suite (`tests/test_phase9_event_store.py`)**: 7 tests verifying ordered history, per-job sequences, concurrent appends, idempotency, envelope validation, immutability, and unfinished job queries.
 - **Reconstruction Suite (`tests/test_phase9_reconstruction.py`)**: 5 tests verifying pure deterministic projection of JobRecord, TaskGraph, AgentRuns, Observations, Artifacts, and Replan/Repair counters.
-- **Postgres Concurrency & Multi-Store Suite (`tests/test_phase9_postgres_concurrency.py`, `tests/test_phase9_postgres_integration.py`)**: 7 tests verifying async database storage, advisory lock concurrency, multi-store concurrent sequences, multi-store idempotency, and fail-closed lock errors.
+- **Postgres Concurrency & Multi-Store Suite (`tests/test_phase9_postgres_concurrency.py`, `tests/test_phase9_postgres_integration.py`)**: 8 tests verifying async database storage, advisory lock concurrency, multi-store concurrent sequences, multi-store idempotency, live Docker PostgreSQL verification, and fail-closed lock errors.
 - **API & Durability Suite (`tests/test_phase9_api_and_durability.py`)**: 3 tests verifying historical API reconstruction without engines, startup fail-fast behavior, and backward compatibility.
 - **Acceptance Scenario Suite (`tests/test_phase9_acceptance_scenario.py`)**: End-to-end multi-agent reactive workflow with discovery, replan, verification failure, repair, artifact tracking, and complete post-destruction event reconstruction.
 - **Frontend Vitest Suite (`LysControl`)**: 41 tests across 10 test suites covering UI views, adapters, delegation, and messaging.

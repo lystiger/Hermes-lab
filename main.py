@@ -391,10 +391,10 @@ class CreateJobPayload(BaseModel):
 async def create_job(payload: CreateJobPayload):
     """
     Safely triggers execution of a registered Hermes sprint definition.
-    Rejects unknown sprint IDs or arbitrary command injection.
+    Persists initial job state before acknowledging creation.
     """
     try:
-        result = job_launcher.launch(
+        result = await job_launcher.launch_async(
             sprint_id=payload.sprintId,
             dry_run=payload.dryRun,
             skip_agent_exec=payload.skipAgentExec,
@@ -411,9 +411,9 @@ async def create_job(payload: CreateJobPayload):
 @app.post("/jobs/{job_id}/cancel")
 async def cancel_job(job_id: str):
     """
-    Cleanly cancels an active job runner process.
+    Cleanly and durably cancels an active job across event loops and processes.
     """
-    success = job_launcher.cancel(job_id)
+    success = await job_launcher.cancel_async(job_id)
     if not success:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,

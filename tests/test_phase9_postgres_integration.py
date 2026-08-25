@@ -44,6 +44,38 @@ async def multi_store_setup(tmp_path):
     await store2.close()
 
 
+@pytest.fixture
+async def live_postgres_multi_store():
+    """
+    Creates two independent PostgresRuntimeEventStore instances pointing to live PostgreSQL container.
+    Gracefully skips if live PostgreSQL is not reachable.
+    """
+    pg_url = os.environ.get("DATABASE_URL") or "postgresql+asyncpg://postgres:postgres@localhost:5432/hermes_lab"
+    if pg_url.startswith("postgresql://") and "+asyncpg" not in pg_url:
+        pg_url = pg_url.replace("postgresql://", "postgresql+asyncpg://", 1)
+
+    try:
+        init_engine = create_async_engine(pg_url, pool_size=2)
+        async with init_engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+        await init_engine.dispose()
+
+        store1 = PostgresRuntimeEventStore(database_url=pg_url)
+        store2 = PostgresRuntimeEventStore(database_url=pg_url)
+        is_healthy = await store1.health_check()
+        if not is_healthy:
+            await store1.close()
+            await store2.close()
+            pytest.skip("Live PostgreSQL database is not reachable")
+    except Exception:
+        pytest.skip("Live PostgreSQL container not reachable")
+
+    yield store1, store2
+
+    await store1.close()
+    await store2.close()
+
+
 @pytest.mark.anyio
 async def test_two_store_concurrent_sequence_allocation(multi_store_setup):
     """
@@ -135,9 +167,65 @@ async def test_two_store_concurrent_duplicate_event_id_idempotency(multi_store_s
 
 
 @pytest.mark.anyio
+async def test_live_postgres_concurrent_sequence_allocation_and_idempotency(live_postgres_multi_store):
+    """
+    Scenario 13: True live PostgreSQL test verifying transaction advisory locking,
+    concurrent sequence allocation across independent sessions, and idempotent deduplication.
+    """
+    store1, store2 = live_postgres_multi_store
+    import uuid
+    job_id = f"job_live_pg_{uuid.uuid4().hex[:8]}"
+
+    # Concurrent appends across 2 distinct stores backed by real PostgreSQL
+    async def worker(store: PostgresRuntimeEventStore, prefix: str, count: int) -> List[StoredRuntimeEvent]:
+        events = []
+        for i in range(count):
+            evt = create_event(job_id=job_id, event_type="task.created", payload={"taskId": f"{prefix}_{i}"})
+            res = await store.append(evt)
+            events.append(res)
+        return events
+
+    r1, r2 = await asyncio.gather(
+        worker(store1, "p1", 10),
+        worker(store2, "p2", 10),
+    )
+
+    persisted = await store1.list_events(job_id)
+    assert len(persisted) == 20
+    seqs = [e.sequence for e in persisted]
+    assert seqs == list(range(1, 21))
+
+    # Duplicate append idempotency on real PostgreSQL
+    shared_id = f"evt_live_{uuid.uuid4().hex[:8]}"
+    dup_evt1 = StoredRuntimeEvent(
+        event_id=shared_id,
+        job_id=job_id,
+        sequence=0,
+        event_type="task.completed",
+        occurred_at="2026-08-25T10:00:00Z",
+        payload={"taskId": "T_final"},
+    )
+    dup_evt2 = StoredRuntimeEvent(
+        event_id=shared_id,
+        job_id=job_id,
+        sequence=0,
+        event_type="task.completed",
+        occurred_at="2026-08-25T10:00:00Z",
+        payload={"taskId": "T_final"},
+    )
+
+    d_res1, d_res2 = await asyncio.gather(
+        store1.append(dup_evt1),
+        store2.append(dup_evt2),
+    )
+    assert d_res1.event_id == shared_id
+    assert d_res2.event_id == shared_id
+
+
+@pytest.mark.anyio
 async def test_postgres_advisory_lock_failure_fails_closed(tmp_path):
     """
-    Scenario 13: When dialect is PostgreSQL and advisory lock acquisition fails,
+    Scenario 14: When dialect is PostgreSQL and advisory lock acquisition fails,
     append() must raise StorageUnavailableError fail-closed.
     """
     db_file = tmp_path / "pg_lock_test.db"
@@ -151,7 +239,6 @@ async def test_postgres_advisory_lock_failure_fails_closed(tmp_path):
 
     evt = create_event(job_id="job_lock_fail", event_type="job.created", payload={"goal": "Lock test"})
 
-    # Since engine is sqlite, let's verify that when is_postgres is simulated and execute raises, it fails closed
     with patch("sqlalchemy.ext.asyncio.AsyncSession.execute") as mock_exec:
         mock_exec.side_effect = RuntimeError("Advisory lock acquisition timeout or dead connection")
         with pytest.raises(StorageUnavailableError) as exc_info:

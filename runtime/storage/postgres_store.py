@@ -327,17 +327,29 @@ class PostgresRuntimeEventStore(RuntimeEventStore):
             raise StorageUnavailableError("Event store is closed")
         try:
             async with self.session_factory() as session:
-                # Find all distinct job_ids that do not have terminal events
-                stmt_terminal = select(RuntimeEventModel.job_id).where(
-                    RuntimeEventModel.event_type.in_(TERMINAL_EVENT_TYPES)
-                )
-                stmt = (
-                    select(RuntimeEventModel.job_id)
-                    .where(~RuntimeEventModel.job_id.in_(stmt_terminal))
-                    .distinct()
-                )
-                res = await session.execute(stmt)
-                return sorted([r[0] for r in res.all()])
+                stmt_all = select(RuntimeEventModel.job_id, RuntimeEventModel.event_type, RuntimeEventModel.payload)
+                res = await session.execute(stmt_all)
+                rows = res.all()
+
+                events_by_job: Dict[str, List[Any]] = {}
+                for job_id, event_type, payload in rows:
+                    events_by_job.setdefault(job_id, []).append((event_type, payload))
+
+                unfinished = []
+                for job_id, evts in events_by_job.items():
+                    has_terminal = False
+                    for event_type, payload in evts:
+                        if event_type in TERMINAL_EVENT_TYPES:
+                            has_terminal = True
+                            break
+                        if event_type == "job.state_changed":
+                            ns = ((payload or {}).get("new_state") or "").lower()
+                            if ns in {"completed", "blocked", "failed", "cancelled"}:
+                                has_terminal = True
+                                break
+                    if not has_terminal:
+                        unfinished.append(job_id)
+                return sorted(unfinished)
         except OperationalError as exc:
             raise StorageUnavailableError(f"PostgreSQL storage unavailable: {exc}") from exc
 

@@ -161,6 +161,7 @@ class HermesActorAdapter(ActorAdapter):
         job_id: Optional[str] = None,
         base_ref: str = "main",
         target_branch: str = "sprint/integration",
+        observation_registry: Any = None,
     ):
         self.control_root = Path.cwd().resolve()
         self.target_repo = Path(target_repo).resolve() if target_repo else self.control_root
@@ -171,6 +172,7 @@ class HermesActorAdapter(ActorAdapter):
         self.agent_registry = agent_registry
         self.backend_registry = backend_registry
         self.tool_registry = tool_registry or default_tool_registry
+        self.observation_registry = observation_registry
         self.spec = spec or {}
         self.job_id = job_id or f"job_{int(time.time())}"
         self.thread_id = self.job_id
@@ -801,12 +803,34 @@ class HermesActorAdapter(ActorAdapter):
                     base_prompt = p_path.read_text(encoding="utf-8")
 
             # Gather task observations and prior failure telemetry for continuity
+            obs_reg = getattr(self, "observation_registry", None)
+            if obs_reg is None:
+                try:
+                    from runtime.observations import default_observation_registry
+                    obs_reg = default_observation_registry
+                except Exception:
+                    pass
+
             prior_obs = []
-            try:
-                from runtime.observations import default_observation_registry
-                prior_obs = default_observation_registry.list_for_task(task.task_id)
-            except Exception:
-                pass
+            if obs_reg:
+                try:
+                    # 1. Observations from this task itself (e.g. retries)
+                    for o in obs_reg.list_for_task(task.task_id):
+                        if o not in prior_obs:
+                            prior_obs.append(o)
+                    # 2. Observations from dependency tasks
+                    if task.dependencies:
+                        for dep_id in task.dependencies:
+                            for dep_obs in obs_reg.list_for_task(dep_id):
+                                if dep_obs not in prior_obs:
+                                    prior_obs.append(dep_obs)
+                    elif task.job_id:
+                        for job_obs in obs_reg.list_for_job(task.job_id):
+                            if job_obs not in prior_obs:
+                                prior_obs.append(job_obs)
+                except Exception:
+                    pass
+
             if not prior_obs and isinstance(task.metadata, dict) and task.metadata.get("observations"):
                 prior_obs = task.metadata["observations"]
 
@@ -939,6 +963,26 @@ class HermesActorAdapter(ActorAdapter):
             obs_list = [obs]
             if handoff_obs is not None:
                 obs_list.append(handoff_obs)
+
+            extra_obs = runtime_meta.get("observations")
+            if isinstance(extra_obs, list):
+                for eo in extra_obs:
+                    if isinstance(eo, Observation):
+                        obs_list.append(eo)
+                    elif isinstance(eo, dict):
+                        obs_list.append(Observation.from_dict({
+                            "job_id": task.job_id,
+                            "task_id": task.task_id,
+                            "actor_id": actor_id,
+                            **eo,
+                        }))
+
+            if obs_reg:
+                for o in obs_list:
+                    try:
+                        obs_reg.register(o)
+                    except Exception:
+                        pass
 
             status_str = "succeeded" if exit_code == 0 else "failed"
             return TaskExecutionResult(

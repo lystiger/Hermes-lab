@@ -503,3 +503,70 @@ async def test_cancel_retry_and_job_record_snapshot_restore_after_failure():
     assert "task.cancelled" in event_types
 
 
+@pytest.mark.anyio
+async def test_cancellation_retry_after_downstream_task_failure():
+    """
+    Failure-Injection Test 4: When cancellation succeeds on job.cancelled and T1,
+    but fails on downstream T2 cancellation, subsequent retry must:
+    - NOT emit a duplicate job.cancelled event.
+    - NOT emit a duplicate task.cancelled event for T1.
+    - Retry and commit task.cancelled for T2.
+    - Mark _durable_cancel_completed = True only after full completion.
+    """
+    failing_store = FailingEventStore()
+    original_append = failing_store.append
+
+    async def fail_on_t2(event: StoredRuntimeEvent):
+        if event.event_type == "task.cancelled" and event.task_id == "T2" and failing_store.call_count < 10:
+            failing_store.call_count += 1
+            raise StorageUnavailableError("Injected failure on T2 task.cancelled")
+        return await original_append(event)
+
+    failing_store.append = fail_on_t2  # type: ignore
+
+    bridge = RuntimeEventBridge(event_store=failing_store)
+    engine = ReactiveJobEngine(
+        job_id="job_retry_partial_cancel",
+        goal="Test partial cancel retry",
+        event_bridge=bridge,
+    )
+    t1 = TaskNode(task_id="T1", job_id="job_retry_partial_cancel", description="T1")
+    t2 = TaskNode(task_id="T2", job_id="job_retry_partial_cancel", description="T2")
+    await engine.initialize_and_plan(initial_tasks=[t1, t2])
+    assert engine.job.state == JobState.EXECUTING
+
+    # 1. First cancel attempt: job.cancelled succeeds, T1 task.cancelled succeeds, T2 task.cancelled fails
+    with pytest.raises(StorageUnavailableError):
+        await engine.cancel("Cancel attempt 1")
+
+    assert engine._job_cancel_persisted is True
+    assert engine._durable_cancel_completed is False
+    assert engine.job.state == JobState.CANCELLED
+
+    # Check store state before retry: job.cancelled and T1 task.cancelled are present
+    events_before = await failing_store.list_events("job_retry_partial_cancel")
+    job_cancels_before = [e for e in events_before if e.event_type == "job.cancelled"]
+    assert len(job_cancels_before) == 1
+    t1_cancels_before = [e for e in events_before if e.event_type == "task.cancelled" and e.task_id == "T1"]
+    assert len(t1_cancels_before) == 1
+    t2_cancels_before = [e for e in events_before if e.event_type == "task.cancelled" and e.task_id == "T2"]
+    assert len(t2_cancels_before) == 0
+
+    # 2. Retry cancellation: must not duplicate job.cancelled or T1 task.cancelled
+    failing_store.call_count = 20  # disable failure
+    assert await engine.cancel("Cancel attempt 2") is True
+    assert engine._durable_cancel_completed is True
+
+    # Check store state after retry
+    events_after = await failing_store.list_events("job_retry_partial_cancel")
+    job_cancels_after = [e for e in events_after if e.event_type == "job.cancelled"]
+    assert len(job_cancels_after) == 1, "Must contain exactly ONE job.cancelled event in ledger"
+
+    t1_cancels_after = [e for e in events_after if e.event_type == "task.cancelled" and e.task_id == "T1"]
+    assert len(t1_cancels_after) == 1, "Must contain exactly ONE task.cancelled event for T1"
+
+    t2_cancels_after = [e for e in events_after if e.event_type == "task.cancelled" and e.task_id == "T2"]
+    assert len(t2_cancels_after) == 1, "Must contain exactly ONE task.cancelled event for T2"
+
+
+

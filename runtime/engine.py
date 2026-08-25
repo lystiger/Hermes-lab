@@ -119,7 +119,9 @@ class ReactiveJobEngine:
         self._active_async_tasks: Set[asyncio.Task] = set()
         self._discovery_triggered: Set[str] = set()
         self._job_created_emitted = False
+        self._job_cancel_persisted = False
         self._durable_cancel_completed = False
+        self._pre_cancel_state: Optional[JobState] = None
         self._pending_initial_tasks: List[Any] = []
 
     @property
@@ -380,7 +382,13 @@ class ReactiveJobEngine:
         for t in pending:
             t.cancel()
 
-        await asyncio.gather(*pending, return_exceptions=True)
+        results = await asyncio.gather(*pending, return_exceptions=True)
+        for res in results:
+            if isinstance(res, Exception) and not isinstance(res, asyncio.CancelledError):
+                logger.error("Exception occurred during task cancellation worker drain: %s", res)
+                from runtime.storage.event_store import StorageUnavailableError, SequenceConflictError, IdempotencyConflictError
+                if isinstance(res, (StorageUnavailableError, SequenceConflictError, IdempotencyConflictError)):
+                    raise res
         return len(pending)
 
     def request_cancel(self, reason: str = "Job cancelled by operator") -> bool:
@@ -390,6 +398,9 @@ class ReactiveJobEngine:
         """
         if self._durable_cancel_completed:
             return False
+
+        if not self._pre_cancel_state and self.job.state != JobState.CANCELLED:
+            self._pre_cancel_state = self.job.state
 
         self.job.transition_to(JobState.CANCELLED, reason=reason)
         for task in self.graph.list_tasks():
@@ -418,15 +429,20 @@ class ReactiveJobEngine:
         if self._durable_cancel_completed:
             return False
 
-        if self.job.state != JobState.CANCELLED:
-            await self._transition_job(JobState.CANCELLED, reason=reason)
-        else:
-            await self.event_bridge.emit_job_state_changed(
-                job=self.job,
-                previous_state=JobState.EXECUTING,
-                reason=reason,
-            )
+        # Milestone 1: Persist job.cancelled event once
+        if not self._job_cancel_persisted:
+            if self.job.state != JobState.CANCELLED:
+                await self._transition_job(JobState.CANCELLED, reason=reason)
+            else:
+                prev_state = self._pre_cancel_state or JobState.EXECUTING
+                await self.event_bridge.emit_job_state_changed(
+                    job=self.job,
+                    previous_state=prev_state,
+                    reason=reason,
+                )
+            self._job_cancel_persisted = True
 
+        # Milestone 2: Persist task.cancelled events for unfinished tasks
         for task in self.graph.list_tasks():
             if task.status in (TaskStatus.RUNNING, TaskStatus.READY, TaskStatus.PENDING, TaskStatus.CANCELLED):
                 self.graph.mark_cancelled(task.task_id, reason=reason)
@@ -438,6 +454,7 @@ class ReactiveJobEngine:
                     assigned_actor=task.assigned_actor,
                 )
 
+        # Milestone 3: Drain active tasks and ensure no durability failures occurred during worker cancel
         await self._cancel_active_tasks(reason)
         self._durable_cancel_completed = True
         return True

@@ -36,6 +36,7 @@ Your output MUST be a single valid JSON object with this exact structure:
     {
       "task_id": "<unique_task_id>",
       "description": "<detailed action description>",
+      "execution_role": "builder" | "hardener" | "verifier",
       "dependencies": ["<dep_task_id>"],
       "required_capabilities": ["backend.python", "testing.unit", ...],
       "expected_artifacts": ["<artifact 1>", "..."],
@@ -51,9 +52,10 @@ Your output MUST be a single valid JSON object with this exact structure:
 
 Rules:
 1. Do not hardcode specific agent names (e.g. Antigravity, Claude, Codex) in required_capabilities; use open capability descriptors (e.g. 'backend.python', 'api.rest', 'testing.unit', 'verification').
-2. Every implementation task must reference existing repository files in evidence_refs OR declare evidence_status='new_component'.
-3. Dependencies must form a valid directed acyclic graph (DAG) without circular references.
-4. The plan must contain a terminal verification or test strategy.
+2. Specify 'execution_role': 'builder' for creation/scaffolding, 'hardener' for refinement/review/tests, and 'verifier' for independent validation.
+3. Every implementation task must reference existing repository files in evidence_refs OR declare evidence_status='new_component'.
+4. Dependencies must form a valid directed acyclic graph (DAG) without circular references.
+5. The plan must contain a terminal verification or test strategy with execution_role='verifier'.
 """
 
 
@@ -163,6 +165,7 @@ class GroundedPlanner(PlannerAdapter):
         plan = StructuredPlan.from_dict(raw_plan_dict)
         plan.job_id = request.job_id
         plan.goal = request.goal
+        plan.planning_mode = planning_mode
 
         # 4. Deterministic validation
         val_res: PlanValidationResult = self.validator.validate(
@@ -194,6 +197,7 @@ class GroundedPlanner(PlannerAdapter):
                         task_count=len(plan.tasks),
                         summary=plan.summary,
                         plan_dict=plan.to_dict(),
+                        planning_mode=planning_mode,
                     )
                 except Exception as e:
                     logger.debug("Failed emitting planning.generated: %s", e)
@@ -318,6 +322,7 @@ class GroundedPlanner(PlannerAdapter):
             {
                 "task_id": "T1_inspect_conventions",
                 "description": f"Inspect existing architecture and contracts for: {request.goal}",
+                "execution_role": "builder",
                 "dependencies": [],
                 "required_capabilities": ["repo.read", code_cap],
                 "expected_artifacts": ["architecture_notes"],
@@ -331,6 +336,7 @@ class GroundedPlanner(PlannerAdapter):
             {
                 "task_id": "T2_implement_feature",
                 "description": f"Implement core feature logic for: {request.goal}",
+                "execution_role": "builder",
                 "dependencies": ["T1_inspect_conventions"],
                 "required_capabilities": ["implementation", code_cap],
                 "expected_artifacts": ["feature_implementation"],
@@ -344,6 +350,7 @@ class GroundedPlanner(PlannerAdapter):
             {
                 "task_id": "T3_add_tests",
                 "description": f"Add targeted unit tests and edge cases for: {request.goal}",
+                "execution_role": "hardener",
                 "dependencies": ["T2_implement_feature"],
                 "required_capabilities": ["testing.unit", code_cap],
                 "expected_artifacts": ["unit_tests"],
@@ -357,6 +364,7 @@ class GroundedPlanner(PlannerAdapter):
             {
                 "task_id": "T4_verify_integration",
                 "description": f"Verify integration and regression freedom for: {request.goal}",
+                "execution_role": "verifier",
                 "dependencies": ["T3_add_tests"],
                 "required_capabilities": ["verification", "review.correctness"],
                 "expected_artifacts": ["verification_report"],

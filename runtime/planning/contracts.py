@@ -22,11 +22,21 @@ class PlannedTask:
     evidence_status: str = "existing"  # "existing" or "new_component"
     reason: str = ""
     uncertainty: List[str] = field(default_factory=list)
+    execution_role: Optional[str] = None
 
     def __post_init__(self):
         self.risk = str(self.risk).lower()
         if not self.evidence_status:
             self.evidence_status = "existing"
+        if not self.execution_role:
+            if "verification" in self.required_capabilities or "verify" in self.task_id.lower():
+                self.execution_role = "verifier"
+            elif "harden" in self.task_id.lower() or "review" in self.task_id.lower():
+                self.execution_role = "hardener"
+            else:
+                self.execution_role = "builder"
+        else:
+            self.execution_role = str(self.execution_role).lower()
 
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
@@ -46,11 +56,14 @@ class PlannedTask:
             evidence_status=str(data.get("evidence_status") or data.get("evidenceStatus") or "existing"),
             reason=str(data.get("reason", "")),
             uncertainty=list(data.get("uncertainty") or []),
+            execution_role=str(data.get("execution_role") or data.get("role") or "") or None,
         )
 
     def to_task_node(self, job_id: str, max_attempts: int = 2) -> TaskNode:
         """Converts structured planned task into executable TaskNode DAG element."""
         meta = {
+            "role": self.execution_role,
+            "execution_role": self.execution_role,
             "expected_artifacts": self.expected_artifacts,
             "acceptance_criteria": self.acceptance_criteria,
             "verification": self.verification,
@@ -81,6 +94,7 @@ class StructuredPlan:
     uncertainty: List[str] = field(default_factory=list)
     risk_assessment: str = "medium"
     evidence_summary: str = ""
+    planning_mode: str = "model_generated"
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -91,6 +105,7 @@ class StructuredPlan:
             "uncertainty": self.uncertainty,
             "risk_assessment": self.risk_assessment,
             "evidence_summary": self.evidence_summary,
+            "planning_mode": self.planning_mode,
         }
 
     @classmethod
@@ -105,6 +120,7 @@ class StructuredPlan:
             uncertainty=list(data.get("uncertainty") or []),
             risk_assessment=str(data.get("risk_assessment") or data.get("riskAssessment", "medium")),
             evidence_summary=str(data.get("evidence_summary") or data.get("evidenceSummary", "")),
+            planning_mode=str(data.get("planning_mode") or data.get("planningMode", "model_generated")),
         )
 
 

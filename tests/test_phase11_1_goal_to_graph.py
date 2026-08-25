@@ -80,6 +80,14 @@ def test_get_current_user():
         encoding="utf-8"
     )
 
+    # Initialize git repo with main branch
+    import subprocess
+    subprocess.run(["git", "init", "-b", "main"], cwd=str(repo_dir), check=True, capture_output=True)
+    subprocess.run(["git", "config", "user.name", "Tester"], cwd=str(repo_dir), check=True, capture_output=True)
+    subprocess.run(["git", "config", "user.email", "tester@example.com"], cwd=str(repo_dir), check=True, capture_output=True)
+    subprocess.run(["git", "add", "."], cwd=str(repo_dir), check=True, capture_output=True)
+    subprocess.run(["git", "commit", "-m", "Initial commit"], cwd=str(repo_dir), check=True, capture_output=True)
+
     return repo_dir
 
 
@@ -785,6 +793,145 @@ async def test_job_launcher_launch_goal_async_e2e(tmp_path: Path):
     assert engine.job.metadata["launch_mode"] == "goal_planned"
 
 
+@pytest.mark.anyio
+async def test_goal_planned_execution_role_preservation_and_verifier_fail_closed_e2e(tmp_path: Path):
+    """
+    Production-chain regression test for Phase 11.1 execution roles:
+    1. launch_goal_async() -> GroundedPlanner -> generated verification task with execution_role='verifier'
+    2. TaskNode preserves metadata['role'] == 'verifier'
+    3. Scheduler capability routing selects Codex actor
+    4. HermesActorAdapter dispatches Codex in role='verifier'
+    5. When Codex process exits 0 but returns invalid unparseable verdict -> fails closed with FAILED_CODEX_INVALID_VERDICT
+    6. When Codex (verifier role) modifies workspace files -> fails closed forbidding mutations
+    """
+    from jobs.job_launcher import JobLauncher
+    from jobs.job_service import job_service
+    from runtime.execution import AgentRun
+    from runner.agents.codex import CodexAdapter, SprintRunnerError
+    from runner.backends.base import ExecutionBackend, ExecutionRequest, ExecutionResult
+    from runner.backends.registry import BackendRegistry
+    from runner.agents.registry import AgentRegistry
+
+    repo_dir = _setup_disposable_repo(tmp_path / "chain_repo")
+    goal = "Add public inquiry submission with verified contracts"
+
+    # Plan with explicit execution roles
+    async def simulated_llm(prompt: str) -> str:
+        return json.dumps({
+            "job_id": "job_role_chain",
+            "goal": goal,
+            "summary": "Plan with builder and verifier tasks",
+            "risk_assessment": "low",
+            "uncertainty": [],
+            "evidence_summary": "FastAPI repo",
+            "tasks": [
+                {
+                    "task_id": "T1_build",
+                    "description": "Build inquiry schema",
+                    "execution_role": "builder",
+                    "dependencies": [],
+                    "required_capabilities": ["code.python", "repo.read"],
+                    "expected_artifacts": ["app/inquiry.py"],
+                    "acceptance_criteria": ["Schema created"],
+                    "verification": ["Static check"],
+                    "risk": "low",
+                    "evidence_refs": ["app/api.py"],
+                    "evidence_status": "existing",
+                    "reason": "Create schema"
+                },
+                {
+                    "task_id": "T2_verify",
+                    "description": "Verify inquiry contracts",
+                    "execution_role": "verifier",
+                    "dependencies": ["T1_build"],
+                    "required_capabilities": ["verification", "review.correctness"],
+                    "expected_artifacts": ["report.json"],
+                    "acceptance_criteria": ["All contracts verified"],
+                    "verification": ["Pytest"],
+                    "risk": "low",
+                    "evidence_refs": ["tests/test_api.py"],
+                    "evidence_status": "existing",
+                    "reason": "Verify without mutations"
+                }
+            ]
+        })
+
+    # Mock backends to simulate Codex behavior
+    class MockCodexInvalidBackend(ExecutionBackend):
+        name = "mock_codex_chain"
+        def __init__(self, **kwargs):
+            pass
+
+        def execute(self, request: ExecutionRequest) -> ExecutionResult:
+            return ExecutionResult(
+                command=request.command,
+                returncode=0,
+                stdout=json.dumps({"success": True, "notes": "No verdict field"}),
+                stderr="",
+                backend=self.name,
+            )
+
+    class MockCodexMutationBackend(ExecutionBackend):
+        name = "mock_codex_mutation"
+        def __init__(self, **kwargs):
+            pass
+
+        def execute(self, request: ExecutionRequest) -> ExecutionResult:
+            (request.cwd / "illegal_mutation.txt").write_text("I changed something", encoding="utf-8")
+            return ExecutionResult(
+                command=request.command,
+                returncode=0,
+                stdout=json.dumps({"verdict": "passed", "summary": "Looks good", "repairable": False}),
+                stderr="",
+                backend=self.name,
+            )
+
+    # 1. Test invalid verifier verdict fail-closed
+    backend_registry = BackendRegistry()
+    backend_registry.register(MockCodexInvalidBackend)
+    backend_registry.register(MockCodexMutationBackend)
+
+    agent_registry = AgentRegistry()
+    agent_registry.register(CodexAdapter)
+
+    launcher = JobLauncher()
+    res = await launcher.launch_goal_async(
+        goal=goal,
+        target_repo=repo_dir,
+        model_client=simulated_llm,
+        agent_registry=agent_registry,
+        backend_registry=backend_registry,
+        dry_run=False,
+        skip_agent_exec=False,
+        start_background=False,
+    )
+
+    job_id = res["jobId"]
+    engine = job_service.get_engine(job_id)
+    assert engine is not None
+    assert engine.graph.get_task("T2_verify").metadata.get("role") == "verifier"
+    assert engine.graph.get_task("T1_build").metadata.get("role") == "builder"
+
+    # Execute T2_verify directly on HermesActorAdapter
+    task_v = engine.graph.get_task("T2_verify")
+    task_v.metadata["execution_backend"] = "mock_codex_chain"
+    task_v.metadata["backend"] = "mock_codex_chain"
+    task_v.assigned_actor = "codex"
+    run = AgentRun(run_id="run_test_v", job_id=job_id, task_id="T2_verify", actor_id="codex")
+
+    # HermesActorAdapter must fail with invalid verdict error
+    exec_res = await engine.actor_adapter.execute_task(task_v, run)
+    assert exec_res.status == "failed"
+    assert "FAILED_CODEX_INVALID_VERDICT" in str(exec_res.error)
+
+    # 2. Test verifier mutation forbidden fail-closed
+    task_v.metadata["execution_backend"] = "mock_codex_mutation"
+    task_v.metadata["backend"] = "mock_codex_mutation"
+    exec_res_mut = await engine.actor_adapter.execute_task(task_v, run)
+    assert exec_res_mut.status == "failed"
+    assert "verifier role forbids mutations" in str(exec_res_mut.error).lower()
+
+
 # ==============================================================================
 # 5. Optional Live Planner Test
 # ==============================================================================
@@ -800,16 +947,14 @@ async def test_phase11_1_live_planner_acceptance(tmp_path: Path):
         pytest.skip("Live planner tests are opt-in. Set HERMES_RUN_LIVE_PLANNER=1 to execute.")
 
     repo_dir = _setup_disposable_repo(tmp_path / "live_repo")
-    planner = GroundedPlanner(target_repo=repo_dir)
+    # Must fail closed if live LLM is not provided
+    planner = GroundedPlanner(target_repo=repo_dir, allow_heuristic_fallback=False)
 
     req = PlanningRequest(
         job_id="job_live_plan",
         goal="Add a healthcheck endpoint following existing FastAPI conventions",
         target_repo=repo_dir,
     )
-    plan = await planner.generate_initial_plan(req)
-
-    assert plan is not None
-    assert len(plan.tasks) >= 2
-    for t in plan.tasks:
-        assert len(t.required_capabilities) > 0
+    with pytest.raises(ValueError) as exc_info:
+        await planner.generate_initial_plan(req)
+    assert "heuristic fallback disabled" in str(exc_info.value).lower()

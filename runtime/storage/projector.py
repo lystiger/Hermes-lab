@@ -148,6 +148,7 @@ class RuntimeStateProjector:
             elif event_type == "planning.generated":
                 job.metadata.setdefault("planning", {})["generated_plan"] = payload.get("plan") or {}
                 job.metadata.setdefault("planning", {})["summary"] = payload.get("summary", "")
+                job.metadata.setdefault("planning", {})["planning_mode"] = payload.get("planning_mode") or payload.get("plan", {}).get("planning_mode", "model_generated")
 
             elif event_type == "planning.validated":
                 job.metadata.setdefault("planning", {})["validated"] = payload.get("valid", True)

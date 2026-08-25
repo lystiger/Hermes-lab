@@ -588,14 +588,16 @@ class RuntimeEventBridge:
         task_count: int,
         summary: str,
         plan_dict: Optional[Dict[str, Any]] = None,
+        planning_mode: str = "model_generated",
     ) -> StoredRuntimeEvent:
+        mode = (plan_dict.get("planning_mode") if plan_dict else None) or planning_mode or "model_generated"
         return await self.persist_and_publish(
             source_id="lysstack.planner",
             source_kind="runtime",
             kind="planning.generated",
-            detail=f"Generated structured plan with {task_count} tasks: {summary[:80]}",
+            detail=f"Generated structured plan ({mode}) with {task_count} tasks: {summary[:80]}",
             job_id=job_id,
-            metadata={"taskCount": task_count, "summary": summary, "plan": plan_dict or {}},
+            metadata={"taskCount": task_count, "summary": summary, "plan": plan_dict or {}, "planning_mode": mode, "planningMode": mode},
             accent_color="#3B82F6",
         )
 

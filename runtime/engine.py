@@ -119,6 +119,8 @@ class ReactiveJobEngine:
         self._active_async_tasks: Set[asyncio.Task] = set()
         self._discovery_triggered: Set[str] = set()
         self._job_created_emitted = False
+        self._durable_cancel_completed = False
+        self._pending_initial_tasks: List[Any] = []
 
     @property
     def state(self) -> JobState:
@@ -167,8 +169,20 @@ class ReactiveJobEngine:
 
     async def _ensure_job_created_emitted(self) -> None:
         if not self._job_created_emitted:
-            await self.event_bridge.emit_job_created(self.job)
             self._job_created_emitted = True
+            await self.event_bridge.emit_job_created(self.job)
+            if self._pending_initial_tasks:
+                for t in list(self._pending_initial_tasks):
+                    task_id = t.task_id if hasattr(t, "task_id") else (t.get("task_id") if isinstance(t, dict) else None)
+                    node = self.graph.get_task(task_id) if task_id else None
+                    if not node:
+                        try:
+                            node = self.graph.add_task(t)
+                        except ValueError:
+                            node = self.graph.get_task(task_id)
+                    if node:
+                        await self.event_bridge.emit_task_created(node, reason="initial_task")
+                self._pending_initial_tasks = []
 
     async def _transition_job(
         self,
@@ -179,17 +193,26 @@ class ReactiveJobEngine:
         """
         Durable job state transition helper.
         Transitions the JobRecord state machine and immediately awaits durable emission of job.state_changed.
+        Rolls back in-memory state if persistence fails.
         """
         await self._ensure_job_created_emitted()
         prev_state = self.job.state
         new_state = self.job.transition_to(target_state, reason=reason, metadata=metadata)
         if prev_state != new_state:
-            await self.event_bridge.emit_job_state_changed(
-                job=self.job,
-                previous_state=prev_state,
-                reason=reason,
-                metadata=metadata,
-            )
+            try:
+                await self.event_bridge.emit_job_state_changed(
+                    job=self.job,
+                    previous_state=prev_state,
+                    reason=reason,
+                    metadata=metadata,
+                )
+            except Exception as exc:
+                # Rollback in-memory job state if durable persistence fails!
+                self.job.state = prev_state
+                self.job.completed_at = None
+                self.job.blocked_reason = None
+                self.job.failure_reason = None
+                raise
         return new_state
 
     async def initialize_and_plan(
@@ -365,7 +388,7 @@ class ReactiveJobEngine:
         Synchronously cancels the job: transitions to CANCELLED, marks unfinished tasks
         cancelled, and signals every in-flight execution task to stop.
         """
-        if self.is_terminal:
+        if self._durable_cancel_completed:
             return False
 
         self.job.transition_to(JobState.CANCELLED, reason=reason)
@@ -392,13 +415,22 @@ class ReactiveJobEngine:
         """
         Cancels the job and waits for in-flight execution to settle, emitting canonical cancellation events.
         """
-        if self.is_terminal:
+        if self._durable_cancel_completed:
             return False
 
-        await self._transition_job(JobState.CANCELLED, reason=reason)
+        self._durable_cancel_completed = True
+
+        if self.job.state != JobState.CANCELLED:
+            await self._transition_job(JobState.CANCELLED, reason=reason)
+        else:
+            await self.event_bridge.emit_job_state_changed(
+                job=self.job,
+                previous_state=JobState.EXECUTING,
+                reason=reason,
+            )
 
         for task in self.graph.list_tasks():
-            if task.status in (TaskStatus.RUNNING, TaskStatus.READY, TaskStatus.PENDING):
+            if task.status in (TaskStatus.RUNNING, TaskStatus.READY, TaskStatus.PENDING, TaskStatus.CANCELLED):
                 self.graph.mark_cancelled(task.task_id, reason=reason)
                 await self.event_bridge.emit_task_cancelled(
                     task_id=task.task_id,

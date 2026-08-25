@@ -292,11 +292,11 @@ Phase 9.1.1: Production Cancellation & Terminal Atomicity
 
 The system is validated across comprehensive test suites:
 
-- **Total Backend Pytest Tests**: **286 tests** (284 passed, 2 skipped, 0 failed).
+- **Total Backend Pytest Tests**: **289 tests** (287 passed, 2 skipped, 0 failed).
 - **Hardening Suite (`tests/test_phase8_1_runtime_hardening.py`)**: 14 tests verifying production launch, deadlocks, cycles, concurrency, timeouts, and reactivity.
 - **Async & Fail-Closed Suite (`tests/test_phase8_1_3_async_failclosed.py`)**: 20 tests verifying off-loop concurrent agent execution, serialized Git mutation, worktree and sync fail-closure, context resolution, tool policy and requester identity, and bounded discovery expansion.
 - **Follow-Up & Cancellation Suite (`tests/test_phase8_1_4_followup_cancellation.py`)**: 10 tests verifying automatic discovery triggering, opportunistic vs. blocking replan semantics, and cancellation containment across operator, driver-cancellation, and normal-exit paths.
-- **Phase 9.1 Durability Suite (`tests/test_phase9_1_durability.py`)**: 6 tests verifying synchronous persist precedence, fail-closed task and job completion errors, unswallowed exceptions in run loops, valid ledger prefixes, and gap rejection.
+- **Phase 9.1 & Durability Hardening Suite (`tests/test_phase9_1_durability.py`)**: 9 tests verifying synchronous persist precedence, fail-closed task and job completion errors, unswallowed exceptions in run loops, valid ledger prefixes, gap rejection, in-memory state rollback on persistence failure, synchronous/async cancel coordination, and pre-seeded production task persistence.
 - **Phase 9.1 Cancellation & Reconstruction Suite (`tests/test_phase9_1_cancellation_reconstruction.py`)**: 4 tests verifying `task.cancelled` and `agent.cancelled` persistence, state projection with no RUNNING leftovers, and artifact set equivalence.
 - **Phase 9.1.1 Cancellation & Terminal Atomicity Suite (`tests/test_phase9_1_1_cancel_and_reconstruct.py`)**: 2 tests verifying `POST /jobs` durable persistence and `/jobs/{id}/cancel` event projection without duplicate `task.cancelled`.
 - **Event Store Suite (`tests/test_phase9_event_store.py`)**: 7 tests verifying ordered history, per-job sequences, concurrent appends, idempotency, envelope validation, immutability, and unfinished job queries.

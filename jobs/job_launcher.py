@@ -337,7 +337,8 @@ class JobLauncher:
         # Register engine with JobService BEFORE execution begins
         job_service.register_engine(engine)
 
-        # Seed initial tasks into engine graph
+        # Pre-seed initial tasks for durable emission during engine initialization
+        engine._pending_initial_tasks = list(initial_tasks)
         for t in initial_tasks:
             try:
                 engine.graph.add_task(t)

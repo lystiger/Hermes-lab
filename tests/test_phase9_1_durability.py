@@ -274,3 +274,105 @@ async def test_explicit_sequence_gaps_rejected():
         await store.append(e_gap)
 
     assert "Explicit sequence 100 is invalid" in str(exc_info.value)
+
+
+@pytest.mark.anyio
+async def test_in_memory_job_state_rollback_on_persistence_failure():
+    """
+    Regression Test 1: In-memory job state must be rolled back to previous state
+    if durable event store persistence fails during state transition.
+    """
+    failing_store = FailingEventStore()
+    failing_store.trigger_failure_on("job.blocked")
+
+    bridge = RuntimeEventBridge(event_store=failing_store)
+    registry = create_test_registry()
+
+    engine = ReactiveJobEngine(
+        job_id="job_rollback_test",
+        goal="Verify rollback",
+        capability_registry=registry,
+        event_bridge=bridge,
+    )
+
+    t1 = TaskNode(task_id="T1", job_id="job_rollback_test", description="T1", required_capabilities=["code.edit"])
+    await engine.initialize_and_plan(initial_tasks=[t1])
+
+    # Job is currently in EXECUTING state
+    assert engine.job.state == JobState.EXECUTING
+
+    # Attempt to transition to BLOCKED (which is legal from EXECUTING but fails in store)
+    with pytest.raises(StorageUnavailableError):
+        await engine._transition_job(JobState.BLOCKED, reason="Deadlock detected")
+
+    # The in-memory state MUST be rolled back to EXECUTING (not BLOCKED)
+    assert engine.job.state == JobState.EXECUTING
+
+
+@pytest.mark.anyio
+async def test_synchronous_request_cancel_does_not_block_durable_cancel_emission():
+    """
+    Regression Test 2: Synchronous request_cancel() transitions in memory without
+    blocking the subsequent async engine.cancel() from emitting canonical durable events.
+    """
+    store = InMemoryRuntimeEventStore()
+    bridge = RuntimeEventBridge(event_store=store)
+    registry = create_test_registry()
+
+    engine = ReactiveJobEngine(
+        job_id="job_sync_async_cancel",
+        goal="Test cancel race",
+        capability_registry=registry,
+        event_bridge=bridge,
+    )
+
+    t1 = TaskNode(task_id="T1", job_id="job_sync_async_cancel", description="T1", required_capabilities=["code.edit"])
+    await engine.initialize_and_plan(initial_tasks=[t1])
+
+    # 1. Synchronous cancel requested (e.g. from sync thread or control plane)
+    assert engine.request_cancel("Operator sync request") is True
+    assert engine.job.state == JobState.CANCELLED
+
+    # 2. Async engine.cancel() called to flush durable events
+    assert await engine.cancel("Operator sync request") is True
+
+    # 3. Verify event ledger contains canonical job.cancelled and task.cancelled events
+    events = await store.list_events("job_sync_async_cancel")
+    event_types = [e.event_type for e in events]
+    assert "job.cancelled" in event_types
+    assert "task.cancelled" in event_types
+
+
+@pytest.mark.anyio
+async def test_preseeded_production_tasks_durably_persisted_before_background_run():
+    """
+    Regression Test 3: Pre-seeded production tasks from sprint spec must be persisted
+    as task.created events in the durable event ledger BEFORE background execution starts.
+    """
+    from jobs.job_launcher import JobLauncher
+    from runtime.storage.config import get_global_event_store, set_global_event_store
+
+    orig_store = get_global_event_store()
+    store = InMemoryRuntimeEventStore()
+    set_global_event_store(store)
+
+    try:
+        launcher = JobLauncher()
+        res = await launcher.launch_async(
+            sprint_id="lab-s02",
+            dry_run=True,
+            start_background=False,
+        )
+        job_id = res["jobId"]
+
+        # Verify store already has job.created AND all initial task.created events
+        events = await store.list_events(job_id)
+        assert len(events) >= 2
+
+        event_types = [e.event_type for e in events]
+        assert event_types[0] == "job.created"
+        task_created_events = [e for e in events if e.event_type == "task.created"]
+        assert len(task_created_events) >= 1
+    finally:
+        set_global_event_store(orig_store)
+

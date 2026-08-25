@@ -407,18 +407,17 @@ class ReactiveScheduler:
                 event_bridge=self.event_bridge,
             )
 
-            # Record telemetry usage if available in metadata
+            # Record telemetry usage if available in metadata (Scheduler is sole authority)
             if isinstance(result.metadata, dict):
                 usage_snap_dict = result.metadata.get("usage_snapshot")
                 if isinstance(usage_snap_dict, dict):
-                    self.capacity_registry.record_snapshot(
-                        UsageSnapshotNormalizer.normalize(
-                            raw_data=usage_snap_dict,
-                            provider_id=provider_id,
-                            actor_id=actor_id,
-                        ),
-                        job_id=task.job_id,
+                    snap = UsageSnapshotNormalizer.normalize(
+                        raw_data=usage_snap_dict,
+                        provider_id=provider_id,
+                        actor_id=actor_id,
                     )
+                    if snap.tokens_used > 0 or snap.source == "provider_reported":
+                        self.capacity_registry.record_snapshot(snap, job_id=task.job_id)
                 else:
                     input_tok = int(result.metadata.get("input_tokens") or result.metadata.get("prompt_tokens") or 0)
                     output_tok = int(result.metadata.get("output_tokens") or result.metadata.get("completion_tokens") or 0)

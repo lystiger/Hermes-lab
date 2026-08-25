@@ -871,19 +871,18 @@ class HermesActorAdapter(ActorAdapter):
             runtime_meta = getattr(raw_res, "runtime_metadata", {}) or {}
             usage_snapshot = UsageSnapshotNormalizer.normalize(
                 raw_data=runtime_meta,
-                provider_id=default_capacity_registry.get_provider_for_actor(actor_id),
                 actor_id=actor_id,
             )
-            if usage_snapshot.tokens_used > 0 or usage_snapshot.source == "provider_reported":
-                default_capacity_registry.record_snapshot(
-                    usage_snapshot,
-                    job_id=task.job_id,
-                )
 
             # Check context pressure
             handoff_obs = None
-            is_pressured, p_ratio = default_capacity_registry.check_context_pressure(actor_id)
-            if not is_pressured and runtime_meta.get("context_pressure"):
+            is_pressured = False
+            p_ratio = None
+            if usage_snapshot.context_used is not None and usage_snapshot.context_window and usage_snapshot.context_window > 0:
+                p_ratio = usage_snapshot.context_used / usage_snapshot.context_window
+                if p_ratio >= 0.85:
+                    is_pressured = True
+            elif runtime_meta.get("context_pressure"):
                 is_pressured = True
                 p_ratio = runtime_meta.get("context_ratio", 0.9)
 

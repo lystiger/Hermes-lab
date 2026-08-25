@@ -892,7 +892,16 @@ class HermesActorAdapter(ActorAdapter):
                     logger.warning("Embedded tool request failed: %s", te)
 
             # Ingest usage and check context pressure
-            runtime_meta = getattr(raw_res, "runtime_metadata", {}) or {}
+            runtime_meta = dict(getattr(raw_res, "runtime_metadata", {}) or {})
+            if "verdict" not in runtime_meta and (actor_id == "codex" or role == "verifier"):
+                try:
+                    from runner.agents.codex import CodexAdapter
+                    parsed_ver = CodexAdapter.parse_verification_output(stdout_text, stderr_text)
+                    if parsed_ver:
+                        runtime_meta.update(parsed_ver)
+                except Exception:
+                    pass
+
             usage_snapshot = UsageSnapshotNormalizer.normalize(
                 raw_data=runtime_meta,
                 actor_id=actor_id,
@@ -984,20 +993,40 @@ class HermesActorAdapter(ActorAdapter):
                     except Exception:
                         pass
 
-            status_str = "succeeded" if exit_code == 0 else "failed"
+            # If agent reported a semantic failure verdict (e.g. Codex structured verification failure)
+            verdict = runtime_meta.get("verdict")
+            if verdict in ("failed", "fail"):
+                status_str = "failed"
+            elif exit_code == 0:
+                status_str = "succeeded"
+            else:
+                status_str = "failed"
+
+            exec_meta = {
+                "actor": actor_id,
+                "worktree": str(worktree_path),
+                "commit_sha": commit_sha,
+                "fresh_session_recommended": handoff_obs is not None,
+                "usage_snapshot": usage_snapshot.to_dict(),
+            }
+            if runtime_meta.get("trigger_replan"):
+                exec_meta["trigger_replan"] = True
+                exec_meta["replan_reason"] = runtime_meta.get("replan_reason") or runtime_meta.get("summary")
+            if "verdict" in runtime_meta:
+                exec_meta["verdict"] = runtime_meta["verdict"]
+                exec_meta["verification_summary"] = runtime_meta.get("summary")
+                exec_meta["findings"] = runtime_meta.get("findings", [])
+                exec_meta["repairable"] = runtime_meta.get("repairable", False)
+
+            error_msg = stderr_text if exit_code != 0 else (runtime_meta.get("summary") if status_str == "failed" else None)
+
             return TaskExecutionResult(
                 status=status_str,
                 output={"stdout": stdout_text[:5000], "exit_code": exit_code, "commit_sha": commit_sha},
-                error=stderr_text if exit_code != 0 else None,
+                error=error_msg,
                 artifact_refs=artifacts,
                 observations=obs_list,
-                metadata={
-                    "actor": actor_id,
-                    "worktree": str(worktree_path),
-                    "commit_sha": commit_sha,
-                    "fresh_session_recommended": handoff_obs is not None,
-                    "usage_snapshot": usage_snapshot.to_dict(),
-                },
+                metadata=exec_meta,
             )
 
         except WorktreeError as exc:

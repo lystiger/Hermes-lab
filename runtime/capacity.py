@@ -65,10 +65,19 @@ class UsageSnapshot:
     context_used: Optional[int] = None
     reset_at: Optional[str] = None
     observed_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
-    source: str = "internal_accounting"  # "provider_headers", "provider_payload", "internal_accounting", "classified_error"
+    source: str = "unknown"  # "provider_reported", "hermes_estimated", "unknown"
 
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
+
+
+@dataclass
+class SoftCapacityThresholds:
+    """Configurable soft-capacity and context pressure thresholds."""
+    min_remaining_token_ratio: float = 0.15      # 15% remaining tokens trigger proactive reroute
+    min_remaining_request_ratio: float = 0.10    # 10% remaining requests trigger proactive reroute
+    context_pressure_ratio: float = 0.85         # 85% context window usage triggers handoff
+    min_tokens_for_dispatch: int = 1000          # Minimum token headroom required
 
 
 @dataclass
@@ -78,6 +87,124 @@ class TaskBudgetEstimate:
     expected_output_tokens: int = 0
     expected_turns: int = 1
     confidence: float = 0.5
+
+
+class UsageSnapshotNormalizer:
+    """
+    Normalizes raw provider API responses and HTTP rate-limit headers
+    into authoritative UsageSnapshot records without fabricating missing quota.
+    """
+
+    @classmethod
+    def normalize(
+        cls,
+        raw_data: Optional[Dict[str, Any]] = None,
+        headers: Optional[Dict[str, str]] = None,
+        provider_id: str = "unknown",
+        model_id: Optional[str] = None,
+        actor_id: Optional[str] = None,
+    ) -> UsageSnapshot:
+        raw_data = raw_data or {}
+        headers = headers or {}
+
+        # Normalize header keys to lowercase
+        norm_headers = {k.lower(): v for k, v in headers.items()}
+
+        # 1. Parse token metrics from payload
+        usage_dict = raw_data.get("usage") or raw_data.get("token_usage") or raw_data
+
+        input_tok = (
+            usage_dict.get("input_tokens")
+            or usage_dict.get("prompt_tokens")
+            or usage_dict.get("promptTokenCount")
+            or 0
+        )
+        output_tok = (
+            usage_dict.get("output_tokens")
+            or usage_dict.get("completion_tokens")
+            or usage_dict.get("candidatesTokenCount")
+            or 0
+        )
+
+        cached_tok = (
+            usage_dict.get("cached_tokens")
+            or (usage_dict.get("prompt_tokens_details") or {}).get("cached_tokens")
+            or usage_dict.get("cachedContentTokenCount")
+            or 0
+        )
+
+        tokens_used = input_tok + output_tok
+
+        # 2. Parse rate-limit headers (Never fabricate remaining quota if missing!)
+        def _parse_int_header(*keys: str) -> Optional[int]:
+            for k in keys:
+                if k in norm_headers:
+                    try:
+                        return int(float(norm_headers[k]))
+                    except (ValueError, TypeError):
+                        pass
+            return None
+
+        requests_rem = _parse_int_header(
+            "x-ratelimit-remaining-requests",
+            "x-ratelimit-remaining-req",
+            "ratelimit-remaining-requests",
+        )
+        tokens_rem = _parse_int_header(
+            "x-ratelimit-remaining-tokens",
+            "x-ratelimit-remaining-tok",
+            "ratelimit-remaining-tokens",
+        )
+        req_limit = _parse_int_header(
+            "x-ratelimit-limit-requests",
+            "ratelimit-limit-requests",
+        )
+        tok_limit = _parse_int_header(
+            "x-ratelimit-limit-tokens",
+            "ratelimit-limit-tokens",
+        )
+
+        # 3. Context metrics
+        ctx_used = (
+            raw_data.get("context_used")
+            or raw_data.get("context_tokens")
+            or usage_dict.get("total_context_used")
+        )
+        ctx_window = (
+            raw_data.get("context_window")
+            or raw_data.get("max_context_tokens")
+            or usage_dict.get("context_window")
+        )
+
+        # 4. Quota reset
+        reset_at = (
+            norm_headers.get("x-ratelimit-reset")
+            or norm_headers.get("x-ratelimit-reset-requests")
+            or norm_headers.get("x-ratelimit-reset-tokens")
+            or raw_data.get("reset_at")
+        )
+
+        has_provider_data = bool(headers) or bool(raw_data.get("usage")) or bool(raw_data.get("token_usage"))
+        source = "provider_reported" if has_provider_data else "unknown"
+
+        return UsageSnapshot(
+            provider_id=provider_id,
+            model_id=model_id or raw_data.get("model"),
+            actor_id=actor_id,
+            input_tokens=int(input_tok),
+            output_tokens=int(output_tok),
+            cached_tokens=int(cached_tok),
+            requests_used=1 if tokens_used > 0 else 0,
+            requests_remaining=requests_rem,
+            request_limit=req_limit,
+            tokens_used=int(tokens_used),
+            tokens_remaining=tokens_rem,
+            token_limit=tok_limit,
+            context_window=int(ctx_window) if ctx_window is not None else None,
+            context_used=int(ctx_used) if ctx_used is not None else None,
+            reset_at=reset_at,
+            source=source,
+        )
 
 
 class ProviderFailureClassifier:
@@ -175,7 +302,8 @@ class CapacityRegistry:
     token usage telemetry, and actor readiness.
     """
 
-    def __init__(self):
+    def __init__(self, thresholds: Optional[SoftCapacityThresholds] = None):
+        self.thresholds = thresholds or SoftCapacityThresholds()
         self._provider_status: Dict[str, ProviderStatus] = {}
         self._provider_reset_at: Dict[str, datetime] = {}
         self._provider_status_reason: Dict[str, str] = {}
@@ -187,6 +315,63 @@ class CapacityRegistry:
         self._provider_failure_count: Dict[str, int] = {}
         self._provider_failure_breakdown: Dict[str, Dict[str, int]] = {}
         self._provider_throttling_count: Dict[str, int] = {}
+
+    def set_thresholds(self, thresholds: SoftCapacityThresholds) -> None:
+        self.thresholds = thresholds
+
+    def check_soft_capacity(
+        self,
+        actor_id: str,
+        task_budget: Optional[TaskBudgetEstimate] = None,
+    ) -> Tuple[bool, Optional[str]]:
+        """
+        Evaluates whether an actor has sufficient soft headroom before dispatch.
+        Returns (is_healthy, reason_if_degraded).
+        """
+        provider_id = self.get_provider_for_actor(actor_id)
+        status = self.get_provider_status(provider_id)
+        if status not in (ProviderStatus.AVAILABLE, ProviderStatus.DEGRADED):
+            return False, f"provider_{status.value}"
+
+        usage = self._usage_snapshots.get(provider_id)
+        if usage:
+            # 1. Check remaining token ratio
+            if usage.tokens_remaining is not None and usage.token_limit and usage.token_limit > 0:
+                ratio = usage.tokens_remaining / usage.token_limit
+                if ratio < self.thresholds.min_remaining_token_ratio:
+                    return False, f"low_remaining_tokens ({ratio:.1%} < {self.thresholds.min_remaining_token_ratio:.0%})"
+
+            # 2. Check remaining request ratio
+            if usage.requests_remaining is not None and usage.request_limit and usage.request_limit > 0:
+                req_ratio = usage.requests_remaining / usage.request_limit
+                if req_ratio < self.thresholds.min_remaining_request_ratio:
+                    return False, f"low_remaining_requests ({req_ratio:.1%} < {self.thresholds.min_remaining_request_ratio:.0%})"
+
+            # 3. Check task budget estimate against remaining tokens
+            if task_budget and usage.tokens_remaining is not None:
+                expected_needed = task_budget.expected_input_tokens + task_budget.expected_output_tokens
+                if expected_needed > 0 and usage.tokens_remaining < expected_needed:
+                    return False, f"insufficient_tokens_for_budget (need {expected_needed}, have {usage.tokens_remaining})"
+
+        return True, None
+
+    def check_context_pressure(self, actor_id: str) -> Tuple[bool, Optional[float]]:
+        """
+        Checks if actor is under heavy context pressure nearing max context window.
+        Returns (is_pressured, ratio).
+        """
+        provider_id = self.get_provider_for_actor(actor_id)
+        status = self.get_provider_status(provider_id)
+        if status in (ProviderStatus.CONTEXT_PRESSURE, ProviderStatus.CONTEXT_EXHAUSTED):
+            return True, 1.0
+
+        usage = self._usage_snapshots.get(provider_id)
+        if usage and usage.context_used is not None and usage.context_window and usage.context_window > 0:
+            ratio = usage.context_used / usage.context_window
+            if ratio >= self.thresholds.context_pressure_ratio:
+                return True, ratio
+
+        return False, None
 
     def register_actor_provider(self, actor_id: str, provider_id: str) -> None:
         self._actor_provider_map[actor_id] = provider_id

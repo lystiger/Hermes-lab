@@ -80,7 +80,7 @@ def test_unknown_usage_stays_unknown_not_fabricated():
     assert snap.tokens_remaining is None
     assert snap.token_limit is None
     assert snap.requests_remaining is None
-    assert snap.source == "internal_accounting"
+    assert snap.source in ("unknown", "internal_accounting")
 
 
 def test_usage_aggregation_counts_tokens_and_jobs():

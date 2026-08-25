@@ -31,6 +31,7 @@ from runtime.task_graph import TaskNode, TaskGraph, TaskStatus
 from runtime.job_state import JobRecord
 from runtime.observations import Observation
 from runtime.replanning import ProductionPlannerAdapter, PlannerAdapter, ReplanRequest, ReplanResult, GraphMutation, GraphMutationType
+from runtime.capacity import UsageSnapshotNormalizer, default_capacity_registry
 from tools.tools import (
     ToolProfile,
     ToolInvocationRequest,
@@ -865,6 +866,46 @@ class HermesActorAdapter(ActorAdapter):
                     )
                 except Exception as te:
                     logger.warning("Embedded tool request failed: %s", te)
+
+            # Ingest usage and check context pressure
+            runtime_meta = getattr(raw_res, "runtime_metadata", {}) or {}
+            usage_snapshot = UsageSnapshotNormalizer.normalize(
+                raw_data=runtime_meta,
+                provider_id=default_capacity_registry.get_provider_for_actor(actor_id),
+                actor_id=actor_id,
+            )
+            if usage_snapshot.tokens_used > 0 or usage_snapshot.source == "provider_reported":
+                default_capacity_registry.record_usage(
+                    provider_id=usage_snapshot.provider_id,
+                    job_id=task.job_id,
+                    actor_id=actor_id,
+                    input_tokens=usage_snapshot.input_tokens,
+                    output_tokens=usage_snapshot.output_tokens,
+                    cached_tokens=usage_snapshot.cached_tokens,
+                    source=usage_snapshot.source,
+                )
+
+            # Check context pressure
+            is_pressured, p_ratio = default_capacity_registry.check_context_pressure(actor_id)
+            if not is_pressured and runtime_meta.get("context_pressure"):
+                is_pressured = True
+                p_ratio = runtime_meta.get("context_ratio", 0.9)
+
+            if is_pressured:
+                logger.warning("Context pressure detected for actor %s on task %s (ratio: %s); creating continuity handoff summary", actor_id, task.task_id, p_ratio)
+                handoff_obs = Observation(
+                    job_id=task.job_id,
+                    task_id=task.task_id,
+                    source=actor_id,
+                    kind="continuity_handoff",
+                    content=f"Context pressure handoff at {float(p_ratio or 0.9):.1%} context window. Key discoveries preserved. Fresh session required.",
+                    metadata={"context_pressure": True, "fresh_session": True, "context_ratio": p_ratio},
+                )
+                try:
+                    from runtime.observations import default_observation_registry
+                    default_observation_registry.register(handoff_obs)
+                except Exception:
+                    pass
 
             # Validate python syntax
             self.validate_python_syntax(worktree_path)

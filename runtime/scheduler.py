@@ -8,7 +8,14 @@ from runtime.execution import ExecutionManager, TaskExecutionResult
 from runtime.limits import RuntimeLimits
 from runtime.events import RuntimeEventBridge
 from capabilities.capabilities import CapabilityRegistry, default_capability_registry
-from runtime.capacity import CapacityRegistry, default_capacity_registry, ProviderStatus, ProviderFailureClassifier, ProviderFailureClass
+from runtime.capacity import (
+    CapacityRegistry,
+    default_capacity_registry,
+    ProviderStatus,
+    ProviderFailureClassifier,
+    ProviderFailureClass,
+    TaskBudgetEstimate,
+)
 from runtime.circuit_breaker import CircuitBreakerRegistry, default_circuit_registry
 from runtime.routing import ReroutePolicy, default_reroute_policy
 
@@ -48,7 +55,11 @@ class ReactiveScheduler:
         self.capability_registry = capability_registry or default_capability_registry
         self.capacity_registry = capacity_registry or default_capacity_registry
         self.circuit_registry = circuit_registry or default_circuit_registry
-        self.reroute_policy = reroute_policy or default_reroute_policy
+        self.reroute_policy = reroute_policy or ReroutePolicy(
+            capability_registry=self.capability_registry,
+            capacity_registry=self.capacity_registry,
+            circuit_registry=self.circuit_registry,
+        )
         self.limits = limits or RuntimeLimits()
         self.event_bridge = event_bridge
         self.default_actor_concurrency = default_actor_concurrency
@@ -115,15 +126,32 @@ class ReactiveScheduler:
     ) -> DispatchDecision:
         """
         Capability-aware actor selection with explainable decision tracking.
-        Distinguishes NO_CAPABLE_ACTOR from ACTOR_BUSY, CIRCUIT_OPEN, and QUOTA_EXHAUSTED.
+        Distinguishes NO_CAPABLE_ACTOR from ACTOR_BUSY, CIRCUIT_OPEN, QUOTA_EXHAUSTED,
+        and PROACTIVE_SOFT_CAPACITY_FAILOVER.
         """
+        # Parse TaskBudgetEstimate if present in task metadata
+        task_budget = None
+        if isinstance(task.metadata, dict):
+            if "budget_estimate" in task.metadata and isinstance(task.metadata["budget_estimate"], dict):
+                be = task.metadata["budget_estimate"]
+                task_budget = TaskBudgetEstimate(
+                    expected_input_tokens=be.get("expected_input_tokens", 0),
+                    expected_output_tokens=be.get("expected_output_tokens", 0),
+                    expected_turns=be.get("expected_turns", 1),
+                )
+            elif "expected_input_tokens" in task.metadata or "expected_output_tokens" in task.metadata:
+                task_budget = TaskBudgetEstimate(
+                    expected_input_tokens=task.metadata.get("expected_input_tokens", 0),
+                    expected_output_tokens=task.metadata.get("expected_output_tokens", 0),
+                )
+
         # If task already has an explicit valid assigned_actor specified
         if task.assigned_actor:
             if not task.required_capabilities or self.capability_registry.actor_satisfies(task.assigned_actor, task.required_capabilities):
                 if not self.is_actor_available(task.assigned_actor):
                     rejection = self.get_actor_rejection_reason(task.assigned_actor)
                     # Pre-dispatch capability reroute if unavailable due to circuit/quota/rate-limit/outage
-                    if "circuit" in rejection.lower() or "quota" in rejection.lower() or "throttled" in rejection.lower() or "unavailable" in rejection.lower():
+                    if any(k in rejection.lower() for k in ("circuit", "quota", "throttled", "unavailable", "auth", "outage")):
                         alt_actor = self.reroute_policy.find_alternative_actor(task, failed_actor=task.assigned_actor)
                         if alt_actor:
                             orig_actor = task.assigned_actor
@@ -144,6 +172,26 @@ class ReactiveScheduler:
                         reason=rejection,
                         required_capabilities=task.required_capabilities,
                     )
+
+                # Check soft-capacity thresholds BEFORE dispatch
+                is_healthy, soft_reason = self.capacity_registry.check_soft_capacity(task.assigned_actor, task_budget=task_budget)
+                if not is_healthy:
+                    alt_actor = self.reroute_policy.find_alternative_actor(task, failed_actor=task.assigned_actor)
+                    if alt_actor:
+                        is_alt_healthy, _ = self.capacity_registry.check_soft_capacity(alt_actor, task_budget=task_budget)
+                        if is_alt_healthy:
+                            orig_actor = task.assigned_actor
+                            matched = [c for c in task.required_capabilities if c in self.capability_registry.get_actor_capabilities(alt_actor)]
+                            return DispatchDecision(
+                                task_id=task.task_id,
+                                actor_id=alt_actor,
+                                dispatched=True,
+                                reason=f"Proactive capacity reroute from '{orig_actor}' ({soft_reason}) to healthier capable alternative '{alt_actor}'",
+                                required_capabilities=task.required_capabilities,
+                                matched_capabilities=matched,
+                                score=9.0,
+                            )
+
                 matched = [c for c in task.required_capabilities if c in self.capability_registry.get_actor_capabilities(task.assigned_actor)]
                 return DispatchDecision(
                     task_id=task.task_id,
@@ -448,3 +496,6 @@ class ReactiveScheduler:
         finally:
             self._running_tasks.discard(task.task_id)
             self.release_actor(actor_id)
+
+
+Scheduler = ReactiveScheduler

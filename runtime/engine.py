@@ -559,6 +559,23 @@ class ReactiveJobEngine:
             for t in new_async_tasks:
                 self._active_async_tasks.add(t)
 
+            # Record true execution resume timestamp and update RTO on first task dispatch
+            if new_async_tasks or self.graph.is_all_completed():
+                rec_metrics = getattr(self, "_recovery_metrics", None)
+                if rec_metrics and not getattr(self, "_resumed_execution_recorded", False):
+                    self._resumed_execution_recorded = True
+                    now_utc = datetime.now(timezone.utc)
+                    rec_metrics.execution_resumed_at = now_utc.isoformat()
+                    try:
+                        start_str = rec_metrics.failure_detected_at or rec_metrics.recovery_started_at
+                        if start_str:
+                            start_dt = datetime.fromisoformat(start_str)
+                            if start_dt.tzinfo is None:
+                                start_dt = start_dt.replace(tzinfo=timezone.utc)
+                            rec_metrics.rto_seconds = (now_utc - start_dt).total_seconds()
+                    except Exception:
+                        pass
+
             # Check if tasks are deferred due to capacity/throttling and no worker is active
             if not self._active_async_tasks and not new_async_tasks:
                 ready = self.graph.find_ready_tasks()

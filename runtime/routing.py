@@ -69,6 +69,12 @@ class ReroutePolicy:
                              actor_id, provider_id, status.value)
                 continue
 
+            # Check soft capacity headroom
+            is_soft_healthy, soft_reason = self.capacity_registry.check_soft_capacity(actor_id)
+            if not is_soft_healthy:
+                logger.debug("Candidate actor '%s' rejected: low soft capacity (%s)", actor_id, soft_reason)
+                continue
+
             # Suitable alternative found
             logger.info("Found alternative capable actor '%s' (score: %.2f) for task %s",
                         actor_id, score, task.task_id)

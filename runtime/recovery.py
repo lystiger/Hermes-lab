@@ -332,4 +332,5 @@ class RecoveryManager:
             summary=metrics.to_dict(),
         )
 
+        engine._recovery_metrics = metrics
         return engine, metrics

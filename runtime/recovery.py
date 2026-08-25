@@ -66,6 +66,7 @@ class InterruptedTaskReconciler:
         repo_path: Optional[Union[str, Path]] = None,
         target_branch: Optional[str] = None,
         job_created_at: Optional[str] = None,
+        integration_baseline_sha: Optional[str] = None,
     ) -> Tuple[RecoveryDisposition, Dict[str, Any]]:
         task_runs = [r for r in runs if r.task_id == task.task_id]
 
@@ -135,6 +136,18 @@ class InterruptedTaskReconciler:
                                             is_in_scope = False
                                     except Exception:
                                         pass
+                                if is_in_scope and integration_baseline_sha:
+                                    if sha == integration_baseline_sha:
+                                        is_in_scope = False
+                                    else:
+                                        res_anc = subprocess.run(
+                                            ["git", "merge-base", "--is-ancestor", integration_baseline_sha, sha],
+                                            cwd=str(repo_p),
+                                            capture_output=True,
+                                            check=False,
+                                        )
+                                        if res_anc.returncode != 0:
+                                            is_in_scope = False
                                 if is_in_scope:
                                     evidence["commit_sha"] = sha
                                     evidence["integrated"] = True
@@ -227,6 +240,7 @@ class RecoveryManager:
                     repo_path=projected.job.repository,
                     target_branch=projected.job.branch,
                     job_created_at=projected.job.created_at,
+                    integration_baseline_sha=(projected.job.metadata or {}).get("integration_baseline_sha"),
                 )
                 if disposition == RecoveryDisposition.RECONCILE_INTERRUPTED:
                     task.status = TaskStatus.SUCCEEDED

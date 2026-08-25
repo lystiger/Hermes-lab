@@ -345,9 +345,17 @@ class RuntimeStateProjector:
             elif event_type == "task.rerouted":
                 task_id = payload.get("taskId") or payload.get("task_id") or event.task_id or ""
                 to_actor = payload.get("toActor") or payload.get("to_actor")
+                from_actor = payload.get("fromActor") or payload.get("from_actor")
+                reason = payload.get("reason")
                 task = graph.get_task(task_id)
                 if task and to_actor:
                     task.assigned_actor = to_actor
+                    if task.status not in {TaskStatus.SUCCEEDED, TaskStatus.SUPERSEDED, TaskStatus.CANCELLED}:
+                        task.status = TaskStatus.READY
+                    if reason:
+                        task.metadata["last_reroute_reason"] = reason
+                    if from_actor:
+                        task.metadata["previous_actor"] = from_actor
 
             # --- Recovery Events ---
             elif event_type == "recovery.job_rehydrated":

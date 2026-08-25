@@ -468,6 +468,12 @@ class ReactiveJobEngine:
                 )
 
         # Milestone 3: Drain active tasks and ensure no durability failures occurred during worker cancel
+        if hasattr(self, "actor_adapter") and self.actor_adapter and hasattr(self.actor_adapter, "fence"):
+            try:
+                self.actor_adapter.fence(reason)
+            except Exception as e:
+                logger.debug("Error notifying actor adapter of cancel: %s", e)
+
         await self._cancel_active_tasks(reason)
 
         # Milestone 4: Reconcile cancelled agent runs durably
@@ -488,6 +494,12 @@ class ReactiveJobEngine:
         """
         self._fenced = True
         logger.warning("Fencing ReactiveJobEngine for job %s: %s", self.job.job_id, reason)
+        if hasattr(self, "actor_adapter") and self.actor_adapter and hasattr(self.actor_adapter, "fence"):
+            try:
+                self.actor_adapter.fence(reason)
+            except Exception as e:
+                logger.debug("Error notifying actor adapter of fence: %s", e)
+
         await self._cancel_active_tasks(reason)
         if not self.is_terminal:
             try:
@@ -538,7 +550,11 @@ class ReactiveJobEngine:
             new_async_tasks = await self.scheduler.schedule_ready_tasks(
                 graph=self.graph,
                 execution_manager=self.execution_manager,
-                context={"job": self.job.to_dict()},
+                context={
+                    "job": self.job.to_dict(),
+                    "engine": self,
+                    "owner_id": getattr(self, "owner_id", None),
+                },
             )
             for t in new_async_tasks:
                 self._active_async_tasks.add(t)

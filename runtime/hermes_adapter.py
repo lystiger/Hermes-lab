@@ -23,11 +23,11 @@ from pathlib import Path, PureWindowsPath
 import subprocess
 import threading
 import time
-from typing import Any, Dict, List, Optional, Sequence, Union
+from typing import Any, Callable, Dict, List, Optional, Sequence, Union
 
 from runtime.execution import ActorAdapter, AgentRun, TaskExecutionResult, AgentRunStatus
 from runtime.verification import VerifierAdapter, VerificationResult, VerificationStatus, VerificationCheck
-from runtime.task_graph import TaskNode, TaskGraph
+from runtime.task_graph import TaskNode, TaskGraph, TaskStatus
 from runtime.job_state import JobRecord
 from runtime.observations import Observation
 from runtime.replanning import ProductionPlannerAdapter, PlannerAdapter, ReplanRequest, ReplanResult, GraphMutation, GraphMutationType
@@ -181,6 +181,53 @@ class HermesActorAdapter(ActorAdapter):
         self._git_lock = repo_git_lock(self.target_repo)
         self.context_bundle = self._load_context_bundle()
         self._integration_ready = False
+        self.is_fenced = False
+        self.fencing_checker: Optional[Callable[[], bool]] = None
+        self._active_subprocesses: Dict[str, Any] = {}
+
+    def fence(self, reason: str = "Execution fenced") -> None:
+        self.is_fenced = True
+        logger.warning("Fencing HermesActorAdapter for job %s: %s", self.job_id, reason)
+        self.terminate_all_subprocesses()
+
+    def set_fencing_checker(self, checker: Callable[[], bool]) -> None:
+        self.fencing_checker = checker
+
+    def register_subprocess(self, key: str, proc: Any) -> None:
+        self._active_subprocesses[key] = proc
+
+    def unregister_subprocess(self, key: str) -> None:
+        self._active_subprocesses.pop(key, None)
+
+    def terminate_all_subprocesses(self) -> None:
+        for key, proc in list(self._active_subprocesses.items()):
+            if hasattr(proc, "poll") and proc.poll() is None:
+                try:
+                    proc.terminate()
+                    try:
+                        proc.wait(timeout=0.5)
+                    except subprocess.TimeoutExpired:
+                        proc.kill()
+                except Exception:
+                    pass
+        self._active_subprocesses.clear()
+
+    def _verify_execution_fence(self, task: TaskNode, context: Optional[Dict[str, Any]] = None) -> None:
+        if getattr(self, "is_fenced", False):
+            raise RuntimeError(f"Authoritative Git mutation aborted: executor is fenced for job {self.job_id}")
+
+        if self.fencing_checker and not self.fencing_checker():
+            self.is_fenced = True
+            raise RuntimeError(f"Authoritative Git mutation aborted: fencing check failed for job {self.job_id}")
+
+        if context:
+            engine = context.get("engine")
+            if engine and (getattr(engine, "_fenced", False) or getattr(engine, "is_terminal", False)):
+                self.is_fenced = True
+                raise RuntimeError(f"Authoritative Git mutation aborted: engine is fenced/terminal for job {self.job_id}")
+
+        if task.status == TaskStatus.CANCELLED:
+            raise RuntimeError(f"Authoritative Git mutation aborted: task {task.task_id} is cancelled")
 
     def _load_context_bundle(self) -> str:
         """
@@ -416,6 +463,7 @@ class HermesActorAdapter(ActorAdapter):
         worktree_path: Path,
         task: TaskNode,
         role: str,
+        context: Optional[Dict[str, Any]] = None,
     ) -> Optional[str]:
         """
         Stages changes, commits them on the task branch, and merges into the integration worktree.
@@ -429,6 +477,9 @@ class HermesActorAdapter(ActorAdapter):
             return None
 
         with self._git_lock:
+            # 1. Verify execution fence before staging or inspecting files
+            self._verify_execution_fence(task, context)
+
             changed_files = self.inspect_changed_files(worktree_path)
             if not changed_files or role == "verifier":
                 return None
@@ -436,6 +487,9 @@ class HermesActorAdapter(ActorAdapter):
             commit_msg = task.metadata.get("commit_message") or f"feat({task.task_id}): {task.description[:72]}"
             logger.info("Staging and committing %d files in %s: %s", len(changed_files), worktree_path.name, commit_msg)
             self.run_cmd(["git", "add", "."], cwd=worktree_path)
+
+            # 2. Verify execution fence before creating commit
+            self._verify_execution_fence(task, context)
             self.run_cmd(["git", "commit", "-m", commit_msg], cwd=worktree_path)
 
             commit_sha_res = self.run_cmd(["git", "rev-parse", "HEAD"], cwd=worktree_path)
@@ -444,6 +498,8 @@ class HermesActorAdapter(ActorAdapter):
             # Merge into integration worktree
             integration_dir = self.worktree_root / "integration"
             if self._is_worktree_root(integration_dir):
+                # 3. Verify execution fence before mutating authoritative integration branch
+                self._verify_execution_fence(task, context)
                 logger.info("Merging task commit %s into integration worktree", commit_sha[:7])
                 merge_msg = f"merge({self.job_id}): merge {task.task_id} ({commit_sha[:7]})"
                 self.run_cmd(["git", "merge", "--no-ff", "-m", merge_msg, commit_sha], cwd=integration_dir)
@@ -638,7 +694,7 @@ class HermesActorAdapter(ActorAdapter):
 
         # 3. Real Agent CLI / Backend Execution (blocking; dispatched off the event loop)
         try:
-            return await asyncio.to_thread(self._execute_real_agent, task, run, actor_id, role)
+            return await asyncio.to_thread(self._execute_real_agent, task, run, actor_id, role, ctx)
         except Exception as exc:
             logger.exception("Error executing real task %s on actor %s: %s", task.task_id, actor_id, exc)
             return TaskExecutionResult(
@@ -654,6 +710,7 @@ class HermesActorAdapter(ActorAdapter):
         run: AgentRun,
         actor_id: str,
         role: str,
+        context: Optional[Dict[str, Any]] = None,
     ) -> TaskExecutionResult:
         """
         Blocking real-agent execution path: worktree preparation, agent CLI invocation,
@@ -760,8 +817,8 @@ class HermesActorAdapter(ActorAdapter):
             if role == "verifier" and changed_files:
                 raise RuntimeError(f"Verifier task '{task.task_id}' modified {len(changed_files)} files; verifier role forbids mutations.")
 
-            # Commit changes and merge into integration worktree
-            commit_sha = self._commit_and_integrate_changes(worktree_path, task, role)
+            # Commit changes and merge into integration worktree with fence checks
+            commit_sha = self._commit_and_integrate_changes(worktree_path, task, role, context)
 
             artifacts = []
             if commit_sha:

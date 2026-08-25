@@ -29,7 +29,7 @@ class AgentRegistry:
                     pass
         if adapter_type is None:
             raise SprintRunnerError("FAILED_UNKNOWN_AGENT", f"Unknown agent type: {name}")
-        return adapter_type()
+        return adapter_type() if isinstance(adapter_type, type) or (callable(adapter_type) and not hasattr(adapter_type, "execute")) else adapter_type
 
     @property
     def supported_agents(self):

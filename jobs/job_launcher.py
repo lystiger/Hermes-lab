@@ -332,6 +332,21 @@ class JobLauncher:
 
         planner_adapter = HermesPlannerAdapter(limits=runtime_limits)
 
+        job_metadata = {
+            "sprint_id": sprint_id,
+            "sprintId": sprint_id,
+            "spec_name": spec.get("name"),
+            "spec_file": str(spec_file),
+            "target_repo": str(target_repo),
+            "worktree_root": str(worktree_root),
+            "runs_root": str(runs_root),
+            "base_ref": base_ref,
+            "target_branch": target_branch,
+            "phases": spec.get("phases", []),
+            "limits": spec.get("limits", {}),
+            "verification": spec.get("verification_steps") or spec.get("verification", []),
+        }
+
         engine = ReactiveJobEngine(
             job_id=job_id,
             goal=spec.get("name", f"Hermes Sprint {sprint_id}"),
@@ -339,6 +354,7 @@ class JobLauncher:
             repository=str(target_repo),
             branch=target_branch,
             priority="P1",
+            metadata=job_metadata,
             actor_adapter=actor_adapter,
             verifier=verifier_adapter,
             planner=planner_adapter,
@@ -581,12 +597,15 @@ class JobLauncher:
         from runtime.recovery import RecoveryManager
         from runtime.lease import JobLeaseManager
 
+        # Canonical single owner_id for this resume session
+        owner = owner_id or f"hermes-node-{uuid.uuid4().hex[:8]}"
+
         store = get_global_event_store()
         lease_store = get_global_lease_store()
         manager = RecoveryManager(event_store=store, lease_store=lease_store)
         engine, metrics = await manager.recover_and_rehydrate(
             job_id=job_id,
-            owner_id=owner_id,
+            owner_id=owner,
             detected_interruption_at=detected_interruption_at,
         )
 
@@ -647,9 +666,12 @@ class JobLauncher:
                 engine.set_verifier(verifier_adapter)
                 engine.set_planner(planner_adapter)
 
-        # Setup lease manager heartbeat
-        owner = owner_id or f"hermes-node-{uuid.uuid4().hex[:8]}"
-        lease_mgr = JobLeaseManager(lease_store=lease_store, owner_id=owner)
+        # Setup lease manager heartbeat using the exact same owner and register engine fencing
+        lease_mgr = JobLeaseManager(
+            lease_store=lease_store,
+            owner_id=owner,
+            on_lease_lost=lambda jid: engine.fence(f"Execution lease lost for job {jid}"),
+        )
         task_hb = asyncio.create_task(lease_mgr._heartbeat_loop(job_id), name=f"lease-hb-{job_id}")
         self._lease_managers[job_id] = (lease_mgr, task_hb, owner)
 

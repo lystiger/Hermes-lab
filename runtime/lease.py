@@ -3,7 +3,7 @@ import asyncio
 from dataclasses import dataclass, asdict
 from datetime import datetime, timezone, timedelta
 import logging
-from typing import Any, Dict, Optional
+from typing import Any, Callable, Dict, Optional
 import uuid
 
 from sqlalchemy import delete, select, update
@@ -242,11 +242,13 @@ class JobLeaseManager:
         owner_id: Optional[str] = None,
         duration_seconds: float = 60.0,
         heartbeat_interval_seconds: float = 15.0,
+        on_lease_lost: Optional[Callable[[str], Any]] = None,
     ):
         self.lease_store = lease_store
         self.owner_id = owner_id or f"hermes-node-{uuid.uuid4().hex[:8]}"
         self.duration_seconds = duration_seconds
         self.heartbeat_interval = heartbeat_interval_seconds
+        self.on_lease_lost = on_lease_lost
         self._heartbeat_tasks: Dict[str, asyncio.Task] = {}
 
     async def acquire_and_start_heartbeat(self, job_id: str) -> bool:
@@ -272,13 +274,26 @@ class JobLeaseManager:
         try:
             while True:
                 await asyncio.sleep(self.heartbeat_interval)
-                success = await self.lease_store.renew_lease(
-                    job_id=job_id,
-                    owner_id=self.owner_id,
-                    duration_seconds=self.duration_seconds,
-                )
+                success = False
+                try:
+                    success = await self.lease_store.renew_lease(
+                        job_id=job_id,
+                        owner_id=self.owner_id,
+                        duration_seconds=self.duration_seconds,
+                    )
+                except Exception as exc:
+                    logger.error("Exception during lease heartbeat for job %s: %s", job_id, exc)
+                    success = False
+
                 if not success:
-                    logger.error("Failed to renew lease for job %s; lost ownership", job_id)
+                    logger.error("Failed to renew lease for job %s; lost ownership. Triggering fencing.", job_id)
+                    if self.on_lease_lost:
+                        try:
+                            res = self.on_lease_lost(job_id)
+                            if asyncio.iscoroutine(res) or hasattr(res, "__await__"):
+                                await res
+                        except Exception as exc:
+                            logger.error("Error invoking on_lease_lost callback for job %s: %s", job_id, exc)
                     break
         except asyncio.CancelledError:
             pass

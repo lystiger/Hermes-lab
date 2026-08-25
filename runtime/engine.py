@@ -481,12 +481,27 @@ class ReactiveJobEngine:
         self._durable_cancel_completed = True
         return True
 
+    async def fence(self, reason: str = "Execution lease lost") -> bool:
+        """
+        Immediately fences the engine from further progression due to lost execution exclusivity.
+        Cancels active task workers, halts orchestration, and transitions state to BLOCKED.
+        """
+        self._fenced = True
+        logger.warning("Fencing ReactiveJobEngine for job %s: %s", self.job.job_id, reason)
+        await self._cancel_active_tasks(reason)
+        if not self.is_terminal:
+            try:
+                await self._transition_job(JobState.BLOCKED, reason=reason)
+            except Exception as exc:
+                logger.debug("Failed to transition fenced job %s to BLOCKED: %s", self.job.job_id, exc)
+        return True
+
     async def step(self) -> bool:
         """
         Executes a single reactive progression cycle.
         Returns True if the engine should continue cycling, False if job reached terminal state.
         """
-        if self.is_terminal:
+        if self.is_terminal or getattr(self, "_fenced", False):
             return False
 
         # 1. State: CREATED -> trigger initialize_and_plan

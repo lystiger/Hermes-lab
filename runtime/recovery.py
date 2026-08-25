@@ -1,5 +1,5 @@
 from dataclasses import dataclass, field, asdict
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from enum import Enum
 import logging
 from pathlib import Path
@@ -26,11 +26,9 @@ logger = logging.getLogger("hermes.runtime.recovery")
 class RecoveryDisposition(str, Enum):
     """Disposition decision for a recovered task during runtime rehydration."""
     KEEP_SUCCEEDED = "keep_succeeded"
-    PRESERVE_PENDING = "preserve_pending"
-    PRESERVE_READY = "preserve_ready"
-    RETRY_ELIGIBLE = "retry_eligible"
     RECONCILE_INTERRUPTED = "reconcile_interrupted"
-    DO_NOT_RESUME = "do_not_resume"
+    RETRY_ELIGIBLE = "retry_eligible"
+    BLOCK_FATAL = "block_fatal"
 
 
 @dataclass
@@ -67,6 +65,7 @@ class InterruptedTaskReconciler:
         events: List[StoredRuntimeEvent],
         repo_path: Optional[Union[str, Path]] = None,
         target_branch: Optional[str] = None,
+        job_created_at: Optional[str] = None,
     ) -> Tuple[RecoveryDisposition, Dict[str, Any]]:
         task_runs = [r for r in runs if r.task_id == task.task_id]
 
@@ -101,20 +100,46 @@ class InterruptedTaskReconciler:
                     phase_id = task.task_id
                     expected_msg = (task.metadata or {}).get("commit_message") or f"feat({phase_id})"
                     branch = target_branch or (task.metadata or {}).get("base_branch") or "main"
-                    # Check git log on branch
+
+                    # Format with commit hash, commit ISO timestamp, and commit subject
                     res = subprocess.run(
-                        ["git", "log", "-n", "10", f"--grep={expected_msg}", "--format=%H|%s", branch],
+                        ["git", "log", "-n", "10", f"--grep={expected_msg}", "--format=%H|%cI|%s", branch],
                         cwd=str(repo_p),
                         capture_output=True,
                         text=True,
                         check=False,
                     )
                     if res.returncode == 0 and res.stdout.strip():
-                        first_line = res.stdout.strip().split("\n")[0]
-                        sha, msg = first_line.split("|", 1) if "|" in first_line else (first_line, "")
-                        evidence["commit_sha"] = sha
-                        evidence["integrated"] = True
-                        evidence["git_log_matched"] = msg
+                        # Temporal scoping: commit must have occurred during this job/task lifecycle
+                        cutoff_iso = task.started_at or job_created_at
+                        cutoff_dt = None
+                        if cutoff_iso:
+                            try:
+                                cutoff_dt = datetime.fromisoformat(cutoff_iso)
+                                if cutoff_dt.tzinfo is None:
+                                    cutoff_dt = cutoff_dt.replace(tzinfo=timezone.utc)
+                            except Exception:
+                                pass
+
+                        for line in res.stdout.strip().split("\n"):
+                            parts = line.split("|", 2)
+                            if len(parts) >= 3:
+                                sha, c_iso, msg = parts[0], parts[1], parts[2]
+                                is_in_scope = True
+                                if cutoff_dt:
+                                    try:
+                                        c_dt = datetime.fromisoformat(c_iso)
+                                        if c_dt.tzinfo is None:
+                                            c_dt = c_dt.replace(tzinfo=timezone.utc)
+                                        if c_dt < (cutoff_dt - timedelta(seconds=60)):
+                                            is_in_scope = False
+                                    except Exception:
+                                        pass
+                                if is_in_scope:
+                                    evidence["commit_sha"] = sha
+                                    evidence["integrated"] = True
+                                    evidence["git_log_matched"] = msg
+                                    break
             except Exception as e:
                 logger.debug("Git inspection error during task %s reconciliation: %s", task.task_id, e)
 
@@ -201,6 +226,7 @@ class RecoveryManager:
                     events=events,
                     repo_path=projected.job.repository,
                     target_branch=projected.job.branch,
+                    job_created_at=projected.job.created_at,
                 )
                 if disposition == RecoveryDisposition.RECONCILE_INTERRUPTED:
                     task.status = TaskStatus.SUCCEEDED

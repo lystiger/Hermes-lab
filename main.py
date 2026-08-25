@@ -482,6 +482,25 @@ async def get_job_recovery_status(job_id: str):
     }
 
 
+from runtime.capacity import default_capacity_registry
+
+
+@app.get("/capacity/telemetry")
+async def get_capacity_telemetry():
+    """
+    Returns aggregated provider capacity, token usage, throttling events, and health metrics.
+    """
+    return default_capacity_registry.get_telemetry_report()
+
+
+@app.get("/jobs/{job_id}/telemetry")
+async def get_job_telemetry(job_id: str):
+    """
+    Returns token usage and resource telemetry for a specific job.
+    """
+    return default_capacity_registry.get_job_telemetry(job_id)
+
+
 # -------------------------------------------------------------
 # Operational Messaging, Threads, Mailbox & Artifacts (Phase 5)
 # -------------------------------------------------------------

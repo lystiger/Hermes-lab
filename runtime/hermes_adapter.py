@@ -526,6 +526,40 @@ class HermesActorAdapter(ActorAdapter):
         sections.append("--- END OPERATIONAL MESSAGES ---")
         return "\n\n".join(sections)
 
+    def build_continuity_section(
+        self,
+        task: TaskNode,
+        observations: Optional[List[Any]] = None,
+        failure_history: Optional[List[Dict[str, Any]]] = None,
+    ) -> str:
+        """
+        Renders execution continuity context across retries, reroutes, and recoveries.
+        Ensures model progress, discoveries, and failure lessons are preserved.
+        """
+        lines = []
+        is_retry = task.attempt > 0
+        has_reroute = bool(task.metadata and (task.metadata.get("previous_actor") or task.metadata.get("last_reroute_reason")))
+        if is_retry or has_reroute or observations or failure_history:
+            lines.append("--- LYSSTACK CONTINUITY CONTEXT ---")
+            if has_reroute:
+                prev = task.metadata.get("previous_actor", "previous agent")
+                reason = task.metadata.get("last_reroute_reason", "capacity reroute")
+                lines.append(f"[Reroute Notice] Execution rerouted from '{prev}'. Reason: {reason}")
+            if is_retry and task.error:
+                lines.append(f"[Previous Failure (Attempt {task.attempt})]\n{task.error}")
+            if observations:
+                lines.append("[Previous Attempt Discoveries & Observations]")
+                for obs in observations:
+                    content = obs.content if hasattr(obs, "content") else str(obs.get("content", obs) if isinstance(obs, dict) else obs)
+                    kind = getattr(obs, "kind", obs.get("kind", "discovery") if isinstance(obs, dict) else "discovery")
+                    lines.append(f"- [{kind}] {content}")
+            if failure_history:
+                lines.append("[Prior Run Telemetry]")
+                for f in failure_history:
+                    lines.append(f"- Run {f.get('run_id')}: status={f.get('status')}, exit_reason={f.get('exit_reason')}")
+            lines.append("--- END CONTINUITY CONTEXT ---")
+        return "\n\n".join(lines) if lines else ""
+
     def build_effective_prompt(
         self,
         base_prompt: str,
@@ -533,8 +567,11 @@ class HermesActorAdapter(ActorAdapter):
         mailbox_messages: Optional[List[Dict[str, Any]]] = None,
         role: Optional[str] = None,
         active_a2a_turn: Optional[Dict[str, Any]] = None,
+        task: Optional[TaskNode] = None,
+        observations: Optional[List[Any]] = None,
+        failure_history: Optional[List[Dict[str, Any]]] = None,
     ) -> str:
-        """Constructs the full effective prompt with persona, context, and operational instructions."""
+        """Constructs the full effective prompt with persona, continuity, context, and operational instructions."""
         parts = []
         if current_agent and self.persona_enabled:
             try:
@@ -544,6 +581,11 @@ class HermesActorAdapter(ActorAdapter):
                     parts.append(profile.persona.render_prompt_section(agent_id=profile.id, role=role or "operative"))
             except Exception as e:
                 logger.debug("Could not resolve persona for %s: %s", current_agent, e)
+
+        if task:
+            cont_sec = self.build_continuity_section(task, observations=observations, failure_history=failure_history)
+            if cont_sec:
+                parts.append(cont_sec)
 
         parts.append(base_prompt)
         if self.context_bundle:
@@ -757,10 +799,25 @@ class HermesActorAdapter(ActorAdapter):
                 if p_path.exists():
                     base_prompt = p_path.read_text(encoding="utf-8")
 
+            # Gather task observations and prior failure telemetry for continuity
+            prior_obs = []
+            try:
+                from runtime.observations import default_observation_registry
+                prior_obs = default_observation_registry.list_for_task(task.task_id)
+            except Exception:
+                pass
+            if not prior_obs and isinstance(task.metadata, dict) and task.metadata.get("observations"):
+                prior_obs = task.metadata["observations"]
+
+            prior_runs = (task.metadata or {}).get("prior_runs", [])
+
             effective_prompt = self.build_effective_prompt(
                 base_prompt=base_prompt,
                 current_agent=actor_id,
                 role=role,
+                task=task,
+                observations=prior_obs,
+                failure_history=prior_runs,
             )
 
             # Logs

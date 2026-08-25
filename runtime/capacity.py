@@ -183,6 +183,10 @@ class CapacityRegistry:
         self._actor_provider_map: Dict[str, str] = {}
         self._usage_snapshots: Dict[str, UsageSnapshot] = {}
         self._job_token_usage: Dict[str, Dict[str, int]] = {}
+        self._provider_success_count: Dict[str, int] = {}
+        self._provider_failure_count: Dict[str, int] = {}
+        self._provider_failure_breakdown: Dict[str, Dict[str, int]] = {}
+        self._provider_throttling_count: Dict[str, int] = {}
 
     def register_actor_provider(self, actor_id: str, provider_id: str) -> None:
         self._actor_provider_map[actor_id] = provider_id
@@ -218,6 +222,7 @@ class CapacityRegistry:
             self._provider_status_reason.pop(provider_id, None)
 
     def record_provider_success(self, provider_id: str, usage: Optional[UsageSnapshot] = None) -> None:
+        self._provider_success_count[provider_id] = self._provider_success_count.get(provider_id, 0) + 1
         current = self.get_provider_status(provider_id)
         if current in (ProviderStatus.THROTTLED, ProviderStatus.DEGRADED, ProviderStatus.UNKNOWN):
             self.set_provider_status(provider_id, ProviderStatus.AVAILABLE)
@@ -231,7 +236,12 @@ class CapacityRegistry:
         retry_after_seconds: Optional[float] = None,
         reason: Optional[str] = None,
     ) -> None:
+        self._provider_failure_count[provider_id] = self._provider_failure_count.get(provider_id, 0) + 1
+        breakdown = self._provider_failure_breakdown.setdefault(provider_id, {})
+        breakdown[failure_class.value] = breakdown.get(failure_class.value, 0) + 1
+
         if failure_class == ProviderFailureClass.RATE_LIMITED:
+            self._provider_throttling_count[provider_id] = self._provider_throttling_count.get(provider_id, 0) + 1
             self.set_provider_status(
                 provider_id,
                 ProviderStatus.THROTTLED,
@@ -331,6 +341,74 @@ class CapacityRegistry:
     def is_actor_available(self, actor_id: str) -> bool:
         provider_id = self.get_provider_for_actor(actor_id)
         return self.is_provider_available(provider_id)
+
+    def get_provider_telemetry(self, provider_id: str) -> Dict[str, Any]:
+        snapshot = self._usage_snapshots.get(provider_id)
+        status = self.get_provider_status(provider_id)
+        successes = self._provider_success_count.get(provider_id, 0)
+        failures = self._provider_failure_count.get(provider_id, 0)
+        total_requests = successes + failures
+        success_rate = (successes / total_requests) if total_requests > 0 else 1.0
+
+        return {
+            "provider_id": provider_id,
+            "status": status.value,
+            "status_reason": self._provider_status_reason.get(provider_id),
+            "total_requests": total_requests,
+            "success_count": successes,
+            "failure_count": failures,
+            "success_rate": round(success_rate, 4),
+            "throttling_count": self._provider_throttling_count.get(provider_id, 0),
+            "failure_breakdown": dict(self._provider_failure_breakdown.get(provider_id, {})),
+            "usage": snapshot.to_dict() if snapshot else None,
+        }
+
+    def get_telemetry_report(self) -> Dict[str, Any]:
+        all_providers = set(self._provider_status.keys()) | set(self._usage_snapshots.keys()) | set(self._provider_success_count.keys())
+        providers_report = {pid: self.get_provider_telemetry(pid) for pid in all_providers}
+
+        total_input = sum(s.input_tokens for s in self._usage_snapshots.values())
+        total_output = sum(s.output_tokens for s in self._usage_snapshots.values())
+        total_cached = sum(s.cached_tokens for s in self._usage_snapshots.values())
+        total_tokens = sum(s.tokens_used for s in self._usage_snapshots.values())
+        total_requests = sum(p["total_requests"] for p in providers_report.values())
+        total_failures = sum(p["failure_count"] for p in providers_report.values())
+        total_throttles = sum(p["throttling_count"] for p in providers_report.values())
+
+        return {
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "summary": {
+                "total_providers": len(all_providers),
+                "total_requests": total_requests,
+                "total_failures": total_failures,
+                "total_throttling_events": total_throttles,
+                "total_tokens": total_tokens,
+                "input_tokens": total_input,
+                "output_tokens": total_output,
+                "cached_tokens": total_cached,
+            },
+            "providers": providers_report,
+            "jobs_tracked": len(self._job_token_usage),
+        }
+
+    def get_job_telemetry(self, job_id: str) -> Dict[str, Any]:
+        usage = self.get_job_token_usage(job_id)
+        return {
+            "job_id": job_id,
+            "tokens": usage,
+        }
+
+    def reset_telemetry(self) -> None:
+        self._provider_status.clear()
+        self._provider_reset_at.clear()
+        self._provider_status_reason.clear()
+        self._actor_status.clear()
+        self._usage_snapshots.clear()
+        self._job_token_usage.clear()
+        self._provider_success_count.clear()
+        self._provider_failure_count.clear()
+        self._provider_failure_breakdown.clear()
+        self._provider_throttling_count.clear()
 
 
 default_capacity_registry = CapacityRegistry()

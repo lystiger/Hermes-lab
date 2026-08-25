@@ -67,6 +67,12 @@ class UsageSnapshot:
     observed_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
     source: str = "unknown"  # "provider_reported", "hermes_estimated", "unknown"
 
+    def __post_init__(self):
+        if self.tokens_used == 0 and (self.input_tokens > 0 or self.output_tokens > 0):
+            self.tokens_used = self.input_tokens + self.output_tokens
+        if self.requests_used == 0 and self.tokens_used > 0:
+            self.requests_used = 1
+
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
 
@@ -460,6 +466,47 @@ class CapacityRegistry:
                 reset_in_seconds=retry_after_seconds or 120.0,
             )
 
+    def record_snapshot(self, snapshot: UsageSnapshot, job_id: Optional[str] = None) -> UsageSnapshot:
+        """
+        Authoritatively records a UsageSnapshot into the registry, preserving all capacity signals
+        and updating job-level token tracking.
+        """
+        existing = self._usage_snapshots.get(snapshot.provider_id)
+        if existing:
+            merged = UsageSnapshot(
+                provider_id=snapshot.provider_id,
+                model_id=snapshot.model_id or existing.model_id,
+                actor_id=snapshot.actor_id or existing.actor_id,
+                input_tokens=existing.input_tokens + snapshot.input_tokens,
+                output_tokens=existing.output_tokens + snapshot.output_tokens,
+                cached_tokens=existing.cached_tokens + snapshot.cached_tokens,
+                requests_used=existing.requests_used + max(1, snapshot.requests_used),
+                requests_remaining=snapshot.requests_remaining if snapshot.requests_remaining is not None else existing.requests_remaining,
+                request_limit=snapshot.request_limit if snapshot.request_limit is not None else existing.request_limit,
+                tokens_used=existing.tokens_used + snapshot.tokens_used,
+                tokens_remaining=snapshot.tokens_remaining if snapshot.tokens_remaining is not None else existing.tokens_remaining,
+                token_limit=snapshot.token_limit if snapshot.token_limit is not None else existing.token_limit,
+                context_window=snapshot.context_window if snapshot.context_window is not None else existing.context_window,
+                context_used=snapshot.context_used if snapshot.context_used is not None else existing.context_used,
+                reset_at=snapshot.reset_at if snapshot.reset_at is not None else existing.reset_at,
+                source=existing.source if existing.source == "provider_reported" and snapshot.source in ("unknown", "internal_accounting") else (snapshot.source if snapshot.source != "unknown" else existing.source),
+                observed_at=snapshot.observed_at,
+            )
+            self._usage_snapshots[snapshot.provider_id] = merged
+            final_snapshot = merged
+        else:
+            self._usage_snapshots[snapshot.provider_id] = snapshot
+            final_snapshot = snapshot
+
+        if job_id and (snapshot.input_tokens > 0 or snapshot.output_tokens > 0 or snapshot.cached_tokens > 0):
+            job_totals = self._job_token_usage.setdefault(job_id, {"input_tokens": 0, "output_tokens": 0, "cached_tokens": 0, "total_tokens": 0})
+            job_totals["input_tokens"] += snapshot.input_tokens
+            job_totals["output_tokens"] += snapshot.output_tokens
+            job_totals["cached_tokens"] += snapshot.cached_tokens
+            job_totals["total_tokens"] += snapshot.tokens_used
+
+        return final_snapshot
+
     def record_usage(
         self,
         provider_id: str,
@@ -469,6 +516,13 @@ class CapacityRegistry:
         input_tokens: int = 0,
         output_tokens: int = 0,
         cached_tokens: int = 0,
+        requests_remaining: Optional[int] = None,
+        tokens_remaining: Optional[int] = None,
+        request_limit: Optional[int] = None,
+        token_limit: Optional[int] = None,
+        context_window: Optional[int] = None,
+        context_used: Optional[int] = None,
+        reset_at: Optional[str] = None,
         source: str = "internal_accounting",
     ) -> UsageSnapshot:
         total_tokens = input_tokens + output_tokens
@@ -488,7 +542,14 @@ class CapacityRegistry:
                 cached_tokens=new_cached,
                 requests_used=new_requests,
                 tokens_used=new_total,
-                source=source,
+                requests_remaining=requests_remaining if requests_remaining is not None else existing.requests_remaining,
+                tokens_remaining=tokens_remaining if tokens_remaining is not None else existing.tokens_remaining,
+                request_limit=request_limit if request_limit is not None else existing.request_limit,
+                token_limit=token_limit if token_limit is not None else existing.token_limit,
+                context_window=context_window if context_window is not None else existing.context_window,
+                context_used=context_used if context_used is not None else existing.context_used,
+                reset_at=reset_at if reset_at is not None else existing.reset_at,
+                source=existing.source if existing.source == "provider_reported" and source in ("unknown", "internal_accounting") else (source if source != "unknown" else existing.source),
             )
         else:
             snapshot = UsageSnapshot(
@@ -500,6 +561,13 @@ class CapacityRegistry:
                 cached_tokens=cached_tokens,
                 requests_used=1,
                 tokens_used=total_tokens,
+                requests_remaining=requests_remaining,
+                tokens_remaining=tokens_remaining,
+                request_limit=request_limit,
+                token_limit=token_limit,
+                context_window=context_window,
+                context_used=context_used,
+                reset_at=reset_at,
                 source=source,
             )
         self._usage_snapshots[provider_id] = snapshot

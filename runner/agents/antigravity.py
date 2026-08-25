@@ -37,7 +37,14 @@ class AntigravityAdapter(AgentAdapter):
             return super().execute(context)
 
     def validate_result(self, result, context):
-        self.parse_stream_json(result.stdout or "", result.stderr or "")
+        meta = self.parse_stream_json(result.stdout or "", result.stderr or "")
+        if isinstance(meta, dict) and hasattr(result, "runtime_metadata"):
+            if result.runtime_metadata is None:
+                result.runtime_metadata = {}
+            if meta.get("usage"):
+                result.runtime_metadata["usage"] = meta["usage"]
+            if meta.get("model"):
+                result.runtime_metadata["model"] = meta["model"]
 
     @staticmethod
     def parse_stream_json(stdout_text, stderr_text=""):
@@ -131,6 +138,17 @@ class AntigravityAdapter(AgentAdapter):
                             "FAILED_ANTIGRAVITY_TOOL_ERROR",
                             f"Antigravity result error: {error or status}",
                         )
+
+        usage_data = None
+        model_name = None
+        for _, event, _ in events:
+            if "usageMetadata" in event:
+                usage_data = event["usageMetadata"]
+            elif "usage" in event:
+                usage_data = event["usage"]
+            if "model" in event:
+                model_name = event["model"]
+        return {"events": events, "usage": usage_data, "model": model_name}
 
     @staticmethod
     def _is_permission_denial(text):

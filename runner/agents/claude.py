@@ -136,3 +136,14 @@ class ClaudeAdapter(AgentAdapter):
             raise SprintRunnerError(
                 "FAILED_PERMISSION_DENIED", f"Claude encountered permission denials: {denials}"
             )
+        return data
+
+    def validate_result(self, result, context):
+        data = self.parse_json(result.stdout or "", result.stderr or "")
+        if isinstance(data, dict):
+            if not hasattr(result, "runtime_metadata") or result.runtime_metadata is None:
+                result.runtime_metadata = {}
+            if "usage" in data:
+                result.runtime_metadata["usage"] = data["usage"]
+            if "model" in data:
+                result.runtime_metadata["model"] = data["model"]

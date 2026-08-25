@@ -229,7 +229,7 @@ class ReactiveScheduler:
                 rejected_candidates=rejected,
             )
 
-        # Filter for available candidates
+        # Filter for available candidates (hard availability)
         available_candidates = [
             c for c in ranked_candidates
             if self.is_actor_available(self._resolve_actor_id(c[0]))
@@ -252,7 +252,22 @@ class ReactiveScheduler:
                 rejected_candidates=rejection_reasons,
             )
 
-        best_profile, best_score, match_info = available_candidates[0]
+        # Apply soft-capacity filtering across candidates: healthy actors prioritized over degraded ones
+        healthy_candidates = []
+        soft_degraded_reasons = {}
+        for c in available_candidates:
+            aid = self._resolve_actor_id(c[0])
+            is_healthy, soft_reason = self.capacity_registry.check_soft_capacity(aid, task_budget=task_budget)
+            if is_healthy:
+                healthy_candidates.append(c)
+            else:
+                soft_degraded_reasons[aid] = soft_reason or "low_soft_capacity"
+
+        if healthy_candidates:
+            best_profile, best_score, match_info = healthy_candidates[0]
+        else:
+            best_profile, best_score, match_info = available_candidates[0]
+
         selected_actor_id = self._resolve_actor_id(best_profile)
 
         # Rejected candidates for explainability
@@ -263,14 +278,20 @@ class ReactiveScheduler:
                 continue
             if not self.is_actor_available(aid):
                 rejected[aid] = self.get_actor_rejection_reason(aid)
+            elif aid in soft_degraded_reasons and healthy_candidates:
+                rejected[aid] = f"Soft capacity degraded: {soft_degraded_reasons[aid]}"
             else:
                 rejected[aid] = f"Lower match score ({score:.2f} < {best_score:.2f})"
+
+        selection_reason = f"Selected actor '{selected_actor_id}' satisfying {len(task.required_capabilities)} capabilities (score: {best_score:.2f})"
+        if soft_degraded_reasons and healthy_candidates:
+            selection_reason = f"Selected healthy actor '{selected_actor_id}' over degraded candidates (score: {best_score:.2f})"
 
         return DispatchDecision(
             task_id=task.task_id,
             actor_id=selected_actor_id,
             dispatched=True,
-            reason=f"Selected actor '{selected_actor_id}' satisfying {len(task.required_capabilities)} capabilities (score: {best_score:.2f})",
+            reason=selection_reason,
             required_capabilities=task.required_capabilities,
             matched_capabilities=match_info.get("matchedCapabilities", []),
             rejected_candidates=rejected,

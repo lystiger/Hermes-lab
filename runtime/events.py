@@ -604,6 +604,17 @@ class RuntimeEventBridge:
             accent_color="#22C55E",
         )
 
+    async def emit_recovery_execution_resumed(self, job_id: str, rto_seconds: float, summary: Dict[str, Any]) -> StoredRuntimeEvent:
+        return await self.persist_and_publish(
+            source_id="lysstack.recovery",
+            source_kind="runtime",
+            kind="recovery.execution_resumed",
+            detail=f"Execution resumed for job {job_id} in {rto_seconds:.2f}s (True RTO)",
+            job_id=job_id,
+            metadata={"rtoSeconds": rto_seconds, "summary": summary},
+            accent_color="#22C55E",
+        )
+
     async def emit_recovery_failed(self, job_id: str, error: str) -> StoredRuntimeEvent:
         return await self.persist_and_publish(
             source_id="lysstack.recovery",

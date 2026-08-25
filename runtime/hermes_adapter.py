@@ -886,6 +886,7 @@ class HermesActorAdapter(ActorAdapter):
                 )
 
             # Check context pressure
+            handoff_obs = None
             is_pressured, p_ratio = default_capacity_registry.check_context_pressure(actor_id)
             if not is_pressured and runtime_meta.get("context_pressure"):
                 is_pressured = True
@@ -941,14 +942,18 @@ class HermesActorAdapter(ActorAdapter):
                 metadata={"changed_files_count": len(changed_files), "commit_sha": commit_sha, "exit_code": exit_code},
             )
 
+            obs_list = [obs]
+            if handoff_obs is not None:
+                obs_list.append(handoff_obs)
+
             status_str = "succeeded" if exit_code == 0 else "failed"
             return TaskExecutionResult(
                 status=status_str,
                 output={"stdout": stdout_text[:5000], "exit_code": exit_code, "commit_sha": commit_sha},
                 error=stderr_text if exit_code != 0 else None,
                 artifact_refs=artifacts,
-                observations=[obs],
-                metadata={"actor": actor_id, "worktree": str(worktree_path), "commit_sha": commit_sha},
+                observations=obs_list,
+                metadata={"actor": actor_id, "worktree": str(worktree_path), "commit_sha": commit_sha, "fresh_session_recommended": handoff_obs is not None},
             )
 
         except WorktreeError as exc:

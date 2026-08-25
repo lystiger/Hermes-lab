@@ -368,6 +368,15 @@ class RuntimeStateProjector:
                     task.status = TaskStatus.SUCCEEDED
                     task.completed_at = event.occurred_at
 
+            elif event_type in ("recovery.execution_resumed", "recovery.completed"):
+                rto = payload.get("rtoSeconds") or payload.get("rto_seconds")
+                if rto is not None:
+                    job.metadata["recovery_rto_seconds"] = float(rto)
+                job.metadata["recovery_resumed_at"] = event.occurred_at
+                summary = payload.get("summary")
+                if isinstance(summary, dict):
+                    job.metadata["recovery_summary"] = summary
+
             elif event_type == "recovery.task_requeued":
                 task_id = payload.get("taskId") or payload.get("task_id") or event.task_id or ""
                 task = graph.get_task(task_id)

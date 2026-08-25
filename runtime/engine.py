@@ -575,6 +575,15 @@ class ReactiveJobEngine:
                             rec_metrics.rto_seconds = (now_utc - start_dt).total_seconds()
                     except Exception:
                         pass
+                    if self.event_bridge:
+                        try:
+                            await self.event_bridge.emit_recovery_execution_resumed(
+                                job_id=self.job.job_id,
+                                rto_seconds=rec_metrics.rto_seconds,
+                                summary=rec_metrics.to_dict(),
+                            )
+                        except Exception as emit_err:
+                            logger.warning("Could not emit recovery.execution_resumed: %s", emit_err)
 
             # Check if tasks are deferred due to capacity/throttling and no worker is active
             if not self._active_async_tasks and not new_async_tasks:

@@ -40,6 +40,7 @@ class ProviderFailureClass(str, Enum):
     BILLING = "billing"
     PROVIDER_OUTAGE = "provider_outage"
     MODEL_UNAVAILABLE = "model_unavailable"
+    CONTENT_FILTER = "content_filter"
     NETWORK = "network"
     TRANSIENT = "transient"
     UNKNOWN = "unknown"
@@ -119,24 +120,30 @@ class ProviderFailureClassifier:
             return ProviderFailureClass.PROVIDER_OUTAGE, retry_after
 
         # 2. Match error message signatures
-        if "context_length_exceeded" in err_str or "maximum context length" in err_str or "too many tokens" in err_str or "context window" in err_str:
+        if "context_length_exceeded" in err_str or "maximum context length" in err_str or "too many tokens" in err_str or "context window" in err_str or "prompt too long" in err_str:
             return ProviderFailureClass.CONTEXT_TOO_LARGE, None
+
+        if "model_not_found" in err_str or "unknown model" in err_str or ("model" in err_str and any(k in err_str for k in ("does not exist", "not found", "unavailable", "deprecated", "unsupported"))):
+            return ProviderFailureClass.MODEL_UNAVAILABLE, None
+
+        if "content_filter" in err_str or "safety" in err_str or "blocked by safety policy" in err_str or "responsible ai" in err_str:
+            return ProviderFailureClass.CONTENT_FILTER, None
 
         if "rate limit" in err_str or "too many requests" in err_str or "resource has been exhausted (e.g. check quota)" in err_str:
             if "quota" in err_str or "credit balance" in err_str or "insufficient_quota" in err_str:
                 return ProviderFailureClass.TOKEN_QUOTA_EXHAUSTED, retry_after
             return ProviderFailureClass.RATE_LIMITED, retry_after
 
-        if "quota exceeded" in err_str or "exceeded your quota" in err_str or "insufficient quota" in err_str or "billing" in err_str:
+        if "quota exceeded" in err_str or "exceeded your quota" in err_str or "insufficient quota" in err_str or "billing" in err_str or "payment required" in err_str:
             return ProviderFailureClass.TOKEN_QUOTA_EXHAUSTED, retry_after
 
-        if "invalid api key" in err_str or "unauthorized" in err_str or "authentication" in err_str or "auth error" in err_str:
+        if "invalid api key" in err_str or "unauthorized" in err_str or "authentication" in err_str or "auth error" in err_str or "forbidden" in err_str:
             return ProviderFailureClass.AUTHENTICATION, None
 
-        if "overloaded" in err_str or "capacity" in err_str or "service unavailable" in err_str:
+        if "overloaded" in err_str or "capacity" in err_str or "service unavailable" in err_str or "bad gateway" in err_str or "gateway timeout" in err_str:
             return ProviderFailureClass.PROVIDER_OUTAGE, retry_after
 
-        if "connection error" in err_str or "connection reset" in err_str or "timeout" in err_str:
+        if "connection error" in err_str or "connection reset" in err_str or "connection refused" in err_str or "timeout" in err_str or "ssl error" in err_str or "remote disconnected" in err_str:
             return ProviderFailureClass.NETWORK, retry_after
 
         return ProviderFailureClass.UNKNOWN, None

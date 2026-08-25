@@ -9,7 +9,8 @@ import subprocess
 import sys
 import threading
 import time
-from typing import Any, Dict, List, Optional, Set
+from typing import Any, Dict, List, Optional, Set, Tuple
+import uuid
 
 from events.event_bus import event_bus
 from jobs.job_service import job_service
@@ -53,6 +54,7 @@ class JobLauncher:
         self._process_logs: Dict[str, Any] = {}
         self._active_async_tasks: Dict[str, asyncio.Task] = {}
         self._active_threads: Dict[str, threading.Thread] = {}
+        self._lease_managers: Dict[str, Tuple[Any, asyncio.Task, str]] = {}
 
     @property
     def control_url(self) -> str:
@@ -95,6 +97,16 @@ class JobLauncher:
                 await engine.run_until_complete()
             except Exception as exc:
                 logger.exception("Reactive engine %s encountered runtime exception: %s", job_id, exc)
+            finally:
+                lm_info = self._lease_managers.pop(job_id, None)
+                if lm_info:
+                    lm, task_hb, owner = lm_info
+                    if not task_hb.done():
+                        task_hb.cancel()
+                    try:
+                        await lm.lease_store.release_lease(job_id, owner)
+                    except Exception:
+                        pass
 
         try:
             loop = asyncio.get_running_loop()
@@ -470,6 +482,16 @@ class JobLauncher:
             if task and not task.done():
                 task.cancel()
 
+            lm_info = self._lease_managers.pop(job_id, None)
+            if lm_info:
+                lm, task_hb, owner = lm_info
+                if not task_hb.done():
+                    task_hb.cancel()
+                try:
+                    await lm.lease_store.release_lease(job_id, owner)
+                except Exception:
+                    pass
+
             job_state_reducer.apply(
                 kind="job.cancelled",
                 detail=f"Job {job_id} cancelled by operator",
@@ -512,6 +534,20 @@ class JobLauncher:
             if task and not task.done():
                 task.cancel()
 
+            lm_info = self._lease_managers.pop(job_id, None)
+            if lm_info:
+                lm, task_hb, owner = lm_info
+                if not task_hb.done():
+                    task_hb.cancel()
+                try:
+                    loop = asyncio.get_running_loop()
+                    loop.create_task(lm.lease_store.release_lease(job_id, owner))
+                except RuntimeError:
+                    try:
+                        asyncio.run(lm.lease_store.release_lease(job_id, owner))
+                    except Exception:
+                        pass
+
             job_state_reducer.apply(
                 kind="job.cancelled",
                 detail=f"Job {job_id} cancelled by operator",
@@ -538,18 +574,84 @@ class JobLauncher:
     ) -> Dict[str, Any]:
         """
         Durable recovery and resumption of an unfinished job.
-        Acquires exclusive execution lease, reconciles tasks, and continues reactive execution.
+        Acquires exclusive execution lease, reconciles tasks, rebuilds Hermes adapters,
+        and continues reactive execution.
         """
-        from runtime.storage.config import get_global_event_store
+        from runtime.storage.config import get_global_event_store, get_global_lease_store
         from runtime.recovery import RecoveryManager
+        from runtime.lease import JobLeaseManager
 
         store = get_global_event_store()
-        manager = RecoveryManager(event_store=store)
+        lease_store = get_global_lease_store()
+        manager = RecoveryManager(event_store=store, lease_store=lease_store)
         engine, metrics = await manager.recover_and_rehydrate(
             job_id=job_id,
             owner_id=owner_id,
             detected_interruption_at=detected_interruption_at,
         )
+
+        # Rebuild real Hermes execution bindings from sprint spec if available
+        sprint_id = None
+        if isinstance(engine.job.metadata, dict) and engine.job.metadata.get("sprint_id"):
+            sprint_id = engine.job.metadata["sprint_id"]
+        elif engine.job.job_id.startswith("run_"):
+            parts = engine.job.job_id.split("_", 2)
+            if len(parts) >= 3:
+                sprint_id = parts[2]
+
+        if sprint_id:
+            spec_file = (self.sprints_dir / f"{sprint_id}.json").resolve()
+            if spec_file.exists():
+                with open(spec_file, "r", encoding="utf-8") as f:
+                    spec = json.load(f)
+
+                spec_dir = spec_file.parent
+                def _resolve_spec_path(val: Optional[str], default: Path) -> Path:
+                    if not val:
+                        return default.resolve()
+                    p = Path(val)
+                    if not p.is_absolute():
+                        p = spec_dir / p
+                    return p.resolve()
+
+                target_repo = _resolve_spec_path(spec.get("target_repo") or spec.get("canonical_repo"), default=self.root_dir)
+                worktree_root = _resolve_spec_path(spec.get("worktree_root"), default=Path.home() / "hermes-worktrees" / sprint_id)
+                runs_root = _resolve_spec_path(spec.get("runs_root"), default=Path.home() / "hermes-runs")
+                run_dir = runs_root / engine.job.job_id
+                base_ref = spec.get("base_ref") or spec.get("base_branch", "main")
+                target_branch = spec.get("target_branch", f"sprint/{sprint_id}/integration")
+
+                if "context" in spec:
+                    try:
+                        spec["context"] = resolve_context_spec(spec["context"], spec_dir)
+                    except Exception:
+                        pass
+
+                actor_adapter = HermesActorAdapter(
+                    target_repo=target_repo,
+                    worktree_root=worktree_root,
+                    run_dir=run_dir,
+                    spec=spec,
+                    job_id=job_id,
+                    base_ref=base_ref,
+                    target_branch=target_branch,
+                )
+                verifier_adapter = HermesVerifierAdapter(
+                    verification_steps=spec.get("verification_steps") or spec.get("verification", []),
+                    working_dir=target_repo,
+                    worktree_root=worktree_root,
+                )
+                planner_adapter = HermesPlannerAdapter(limits=engine.limits)
+
+                engine.set_default_execution_adapter(actor_adapter)
+                engine.set_verifier(verifier_adapter)
+                engine.set_planner(planner_adapter)
+
+        # Setup lease manager heartbeat
+        owner = owner_id or f"hermes-node-{uuid.uuid4().hex[:8]}"
+        lease_mgr = JobLeaseManager(lease_store=lease_store, owner_id=owner)
+        task_hb = asyncio.create_task(lease_mgr._heartbeat_loop(job_id), name=f"lease-hb-{job_id}")
+        self._lease_managers[job_id] = (lease_mgr, task_hb, owner)
 
         # Register engine with job_service
         job_service.register_engine(engine)

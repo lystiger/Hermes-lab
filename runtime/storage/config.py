@@ -1,6 +1,6 @@
 import os
 import logging
-from typing import Optional
+from typing import Any, Optional
 from runtime.storage.event_store import RuntimeEventStore, StorageUnavailableError
 from runtime.storage.in_memory_store import InMemoryRuntimeEventStore
 from runtime.storage.postgres_store import PostgresRuntimeEventStore
@@ -8,6 +8,7 @@ from runtime.storage.postgres_store import PostgresRuntimeEventStore
 logger = logging.getLogger("hermes.runtime.storage.config")
 
 _GLOBAL_EVENT_STORE: Optional[RuntimeEventStore] = None
+_GLOBAL_LEASE_STORE: Optional[Any] = None
 
 
 def get_database_url() -> Optional[str]:
@@ -55,6 +56,42 @@ def get_global_event_store() -> RuntimeEventStore:
 def set_global_event_store(store: RuntimeEventStore) -> None:
     global _GLOBAL_EVENT_STORE
     _GLOBAL_EVENT_STORE = store
+
+
+def create_lease_store(
+    database_url: Optional[str] = None,
+    backend: Optional[str] = None,
+) -> Any:
+    """
+    Factory creating a JobLeaseStore instance.
+    """
+    selected_backend = backend or get_storage_backend()
+    db_url = database_url or get_database_url()
+
+    if selected_backend == "postgres":
+        if not db_url:
+            raise ValueError(
+                "PostgreSQL storage backend configured but no DATABASE_URL provided."
+            )
+        from runtime.lease import PostgresJobLeaseStore
+        logger.info("Initializing PostgresJobLeaseStore with configured database URL")
+        return PostgresJobLeaseStore(db_url)
+
+    from runtime.lease import InMemoryJobLeaseStore
+    logger.info("Initializing InMemoryJobLeaseStore (in-memory test/dev mode)")
+    return InMemoryJobLeaseStore()
+
+
+def get_global_lease_store() -> Any:
+    global _GLOBAL_LEASE_STORE
+    if _GLOBAL_LEASE_STORE is None:
+        _GLOBAL_LEASE_STORE = create_lease_store()
+    return _GLOBAL_LEASE_STORE
+
+
+def set_global_lease_store(store: Any) -> None:
+    global _GLOBAL_LEASE_STORE
+    _GLOBAL_LEASE_STORE = store
 
 
 async def init_storage_lifespan() -> RuntimeEventStore:

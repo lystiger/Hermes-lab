@@ -131,15 +131,33 @@ class InMemoryJobLeaseStore(JobLeaseStore):
 class PostgresJobLeaseStore(JobLeaseStore):
     """PostgreSQL-backed atomic job lease store."""
 
-    def __init__(self, engine_or_sessionmaker: Any):
-        if isinstance(engine_or_sessionmaker, AsyncEngine):
+    def __init__(self, engine_or_sessionmaker_or_url: Any):
+        if isinstance(engine_or_sessionmaker_or_url, str):
+            from sqlalchemy.ext.asyncio import create_async_engine
+            db_url = engine_or_sessionmaker_or_url
+            if db_url.startswith("postgresql://"):
+                db_url = db_url.replace("postgresql://", "postgresql+asyncpg://", 1)
+            engine = create_async_engine(db_url, pool_pre_ping=True)
+            self._engine = engine
             self.sessionmaker = async_sessionmaker(
-                engine_or_sessionmaker,
+                engine,
+                class_=AsyncSession,
+                expire_on_commit=False,
+            )
+        elif isinstance(engine_or_sessionmaker_or_url, AsyncEngine):
+            self._engine = engine_or_sessionmaker_or_url
+            self.sessionmaker = async_sessionmaker(
+                engine_or_sessionmaker_or_url,
                 class_=AsyncSession,
                 expire_on_commit=False,
             )
         else:
-            self.sessionmaker = engine_or_sessionmaker
+            self._engine = None
+            self.sessionmaker = engine_or_sessionmaker_or_url
+
+    async def close(self) -> None:
+        if self._engine is not None:
+            await self._engine.dispose()
 
     async def acquire_lease(self, job_id: str, owner_id: str, duration_seconds: float = 60.0) -> bool:
         async with self.sessionmaker() as session:
@@ -153,7 +171,10 @@ class PostgresJobLeaseStore(JobLeaseStore):
 
                 if existing is not None:
                     # Check expiration or same owner
-                    if existing.lease_until > now and existing.owner_id != owner_id:
+                    existing_until = existing.lease_until
+                    if existing_until.tzinfo is None:
+                        existing_until = existing_until.replace(tzinfo=timezone.utc)
+                    if existing_until > now and existing.owner_id != owner_id:
                         logger.warning("Postgres lease for job %s held by %s until %s",
                                        job_id, existing.owner_id, existing.lease_until)
                         return False
@@ -206,9 +227,9 @@ class PostgresJobLeaseStore(JobLeaseStore):
             return JobLease(
                 job_id=model.job_id,
                 owner_id=model.owner_id,
-                acquired_at=model.acquired_at.isoformat(),
-                lease_until=model.lease_until.isoformat(),
-                heartbeat_at=model.heartbeat_at.isoformat(),
+                acquired_at=model.acquired_at.isoformat() if hasattr(model.acquired_at, "isoformat") else str(model.acquired_at),
+                lease_until=model.lease_until.isoformat() if hasattr(model.lease_until, "isoformat") else str(model.lease_until),
+                heartbeat_at=model.heartbeat_at.isoformat() if hasattr(model.heartbeat_at, "isoformat") else str(model.heartbeat_at),
             )
 
 

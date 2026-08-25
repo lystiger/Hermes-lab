@@ -2,7 +2,8 @@ from dataclasses import dataclass, field, asdict
 from datetime import datetime, timezone
 from enum import Enum
 import logging
-from typing import Any, Dict, List, Optional, Set, Tuple
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Set, Tuple, Union
 import uuid
 
 from runtime.job_state import JobRecord, JobState, TERMINAL_JOB_STATES
@@ -64,14 +65,16 @@ class InterruptedTaskReconciler:
         runs: List[AgentRun],
         artifacts: List[Dict[str, Any]],
         events: List[StoredRuntimeEvent],
+        repo_path: Optional[Union[str, Path]] = None,
+        target_branch: Optional[str] = None,
     ) -> Tuple[RecoveryDisposition, Dict[str, Any]]:
         task_runs = [r for r in runs if r.task_id == task.task_id]
-        
+
         # Check if any run or metadata indicates a completed commit or integration merge
         evidence = {}
         for r in task_runs:
             if r.artifact_refs:
-                evidence["artifact_refs"] = r.artifact_refs
+                evidence["artifact_refs"] = list(r.artifact_refs)
             if isinstance(r.metadata, dict):
                 if r.metadata.get("commit_sha"):
                     evidence["commit_sha"] = r.metadata["commit_sha"]
@@ -84,9 +87,39 @@ class InterruptedTaskReconciler:
                 evidence["commit_sha"] = task.metadata["commit_sha"]
             if task.metadata.get("integrated"):
                 evidence["integrated"] = True
+            if task.metadata.get("commit_hash"):
+                evidence["commit_sha"] = task.metadata["commit_hash"]
+            if task.metadata.get("merged"):
+                evidence["integrated"] = True
+
+        # Real Git inspection if repository path is available
+        if repo_path and not evidence.get("integrated"):
+            try:
+                repo_p = Path(repo_path)
+                if repo_p.exists() and (repo_p / ".git").exists():
+                    import subprocess
+                    phase_id = task.task_id
+                    expected_msg = (task.metadata or {}).get("commit_message") or f"feat({phase_id})"
+                    branch = target_branch or (task.metadata or {}).get("base_branch") or "main"
+                    # Check git log on branch
+                    res = subprocess.run(
+                        ["git", "log", "-n", "10", f"--grep={expected_msg}", "--format=%H|%s", branch],
+                        cwd=str(repo_p),
+                        capture_output=True,
+                        text=True,
+                        check=False,
+                    )
+                    if res.returncode == 0 and res.stdout.strip():
+                        first_line = res.stdout.strip().split("\n")[0]
+                        sha, msg = first_line.split("|", 1) if "|" in first_line else (first_line, "")
+                        evidence["commit_sha"] = sha
+                        evidence["integrated"] = True
+                        evidence["git_log_matched"] = msg
+            except Exception as e:
+                logger.debug("Git inspection error during task %s reconciliation: %s", task.task_id, e)
 
         # If substantial side effects exist (e.g. integrated commit or verified artifacts)
-        if evidence.get("integrated") or (evidence.get("commit_sha") and evidence.get("artifact_refs")):
+        if evidence.get("integrated") or (evidence.get("commit_sha") and (evidence.get("artifact_refs") or evidence.get("git_log_matched"))):
             return RecoveryDisposition.RECONCILE_INTERRUPTED, evidence
 
         # Otherwise no irreversible side-effect acknowledged -> safely requeue
@@ -166,10 +199,16 @@ class RecoveryManager:
                     runs=projected.runs,
                     artifacts=projected.artifacts,
                     events=events,
+                    repo_path=projected.job.repository,
+                    target_branch=projected.job.branch,
                 )
                 if disposition == RecoveryDisposition.RECONCILE_INTERRUPTED:
                     task.status = TaskStatus.SUCCEEDED
                     task.completed_at = recovery_start.isoformat()
+                    if evidence.get("artifact_refs"):
+                        for art in evidence["artifact_refs"]:
+                            if art not in task.artifact_refs:
+                                task.artifact_refs.append(art)
                     reconciled_tasks.append(task.task_id)
                     await bridge.emit_recovery_task_reconciled(task_id=task.task_id, job_id=job_id, evidence=evidence)
                 else:

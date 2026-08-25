@@ -122,6 +122,21 @@ class ReactiveScheduler:
             if not task.required_capabilities or self.capability_registry.actor_satisfies(task.assigned_actor, task.required_capabilities):
                 if not self.is_actor_available(task.assigned_actor):
                     rejection = self.get_actor_rejection_reason(task.assigned_actor)
+                    # Pre-dispatch capability reroute if unavailable due to circuit/quota/rate-limit/outage
+                    if "circuit" in rejection.lower() or "quota" in rejection.lower() or "throttled" in rejection.lower() or "unavailable" in rejection.lower():
+                        alt_actor = self.reroute_policy.find_alternative_actor(task, failed_actor=task.assigned_actor)
+                        if alt_actor:
+                            orig_actor = task.assigned_actor
+                            matched = [c for c in task.required_capabilities if c in self.capability_registry.get_actor_capabilities(alt_actor)]
+                            return DispatchDecision(
+                                task_id=task.task_id,
+                                actor_id=alt_actor,
+                                dispatched=True,
+                                reason=f"Pre-dispatch rerouted from unavailable '{orig_actor}' ({rejection}) to capable alternative '{alt_actor}'",
+                                required_capabilities=task.required_capabilities,
+                                matched_capabilities=matched,
+                                score=9.0,
+                            )
                     return DispatchDecision(
                         task_id=task.task_id,
                         actor_id=None,
@@ -249,6 +264,19 @@ class ReactiveScheduler:
 
             actor_id = decision.actor_id
 
+            if decision.reason.startswith("Pre-dispatch rerouted") and task.assigned_actor != actor_id:
+                orig_actor = task.assigned_actor
+                task.assigned_actor = actor_id
+                if self.event_bridge:
+                    await self.event_bridge.emit_task_rerouted(
+                        task_id=task.task_id,
+                        job_id=task.job_id,
+                        from_actor=orig_actor,
+                        to_actor=actor_id,
+                        reason=decision.reason,
+                    )
+                    await self.event_bridge.emit_task_ready(task)
+
             # Mark task running and acquire actor
             graph.mark_running(task.task_id, actor_id=actor_id)
             self._running_tasks.add(task.task_id)
@@ -309,6 +337,21 @@ class ReactiveScheduler:
                 event_bridge=self.event_bridge,
             )
 
+            # Record telemetry usage if available in metadata
+            if isinstance(result.metadata, dict):
+                input_tok = int(result.metadata.get("input_tokens") or result.metadata.get("prompt_tokens") or 0)
+                output_tok = int(result.metadata.get("output_tokens") or result.metadata.get("completion_tokens") or 0)
+                cached_tok = int(result.metadata.get("cached_tokens") or 0)
+                if input_tok or output_tok or cached_tok:
+                    self.capacity_registry.record_usage(
+                        provider_id=provider_id,
+                        job_id=task.job_id,
+                        actor_id=actor_id,
+                        input_tokens=input_tok,
+                        output_tokens=output_tok,
+                        cached_tokens=cached_tok,
+                    )
+
             if result.status == "succeeded":
                 self.circuit_registry.record_success(actor_id)
                 self.capacity_registry.record_provider_success(provider_id)
@@ -330,6 +373,10 @@ class ReactiveScheduler:
                     ProviderFailureClass.TOKEN_QUOTA_EXHAUSTED,
                     ProviderFailureClass.PROVIDER_OUTAGE,
                     ProviderFailureClass.BILLING,
+                    ProviderFailureClass.AUTHENTICATION,
+                    ProviderFailureClass.NETWORK,
+                    ProviderFailureClass.MODEL_UNAVAILABLE,
+                    ProviderFailureClass.CONTEXT_TOO_LARGE,
                 ):
                     # Provider/capacity failure -> update registries
                     self.circuit_registry.record_failure(actor_id)
@@ -349,6 +396,8 @@ class ReactiveScheduler:
                     # Attempt capability-based rerouting
                     alt_actor = self.reroute_policy.find_alternative_actor(task, failed_actor=actor_id)
                     if alt_actor:
+                        task.assigned_actor = alt_actor
+                        task.status = TaskStatus.READY
                         if self.event_bridge:
                             await self.event_bridge.emit_task_rerouted(
                                 task_id=task.task_id,
@@ -357,20 +406,24 @@ class ReactiveScheduler:
                                 to_actor=alt_actor,
                                 reason=f"Provider {failure_class.value}: rerouted to capable alternative",
                             )
-                        task.assigned_actor = alt_actor
-                        task.status = TaskStatus.READY
+                            await self.event_bridge.emit_task_ready(task)
                         return task, result
                     else:
-                        if self.event_bridge:
-                            await self.event_bridge.emit_task_reroute_failed(
-                                task_id=task.task_id,
-                                job_id=task.job_id,
-                                reason=f"Provider {failure_class.value} and no healthy capable alternative available",
-                            )
-                        task.status = TaskStatus.READY
-                        return task, result
+                        if failure_class in (
+                            ProviderFailureClass.RATE_LIMITED,
+                            ProviderFailureClass.PROVIDER_OUTAGE,
+                            ProviderFailureClass.NETWORK,
+                        ):
+                            if self.event_bridge:
+                                await self.event_bridge.emit_task_reroute_failed(
+                                    task_id=task.task_id,
+                                    job_id=task.job_id,
+                                    reason=f"Provider {failure_class.value} and no healthy capable alternative available",
+                                )
+                            task.status = TaskStatus.READY
+                            return task, result
 
-                # Standard task logic failure
+                # Standard task logic failure or un-reroutable fatal provider failure
                 if self.event_bridge:
                     await self.event_bridge.emit_task_failed(task=task, actor_id=actor_id, error=result.error)
                 graph.mark_failure(task.task_id, error=result.error, allow_retry=True)

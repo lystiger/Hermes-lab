@@ -142,6 +142,10 @@ class ReactiveJobEngine:
         return self.execution_manager.default_adapter if self.execution_manager else None
 
     @property
+    def default_execution_adapter(self) -> Optional[ActorAdapter]:
+        return self.actor_adapter
+
+    @property
     def is_terminal(self) -> bool:
         return self.job.is_terminal
 
@@ -757,8 +761,10 @@ class ReactiveJobEngine:
         step_count = 0
         try:
             while not self.is_terminal and step_count < max_steps:
-                step_count += 1
+                was_waiting_capacity = (self.job.state == JobState.WAITING_FOR_CAPACITY)
                 should_continue = await self.step()
+                if not was_waiting_capacity:
+                    step_count += 1
                 if not should_continue:
                     break
 

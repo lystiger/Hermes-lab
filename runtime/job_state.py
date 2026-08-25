@@ -157,6 +157,34 @@ class JobRecord:
 
         return self.state
 
+    def snapshot(self) -> Dict[str, Any]:
+        """Returns a deep snapshot of all mutable job state attributes for atomic rollback."""
+        return {
+            "state": self.state,
+            "started_at": self.started_at,
+            "completed_at": self.completed_at,
+            "current_phase": self.current_phase,
+            "blocked_reason": self.blocked_reason,
+            "failure_reason": self.failure_reason,
+            "replan_count": self.replan_count,
+            "repair_count": self.repair_count,
+            "assigned_agents": list(self.assigned_agents),
+            "metadata": dict(self.metadata),
+        }
+
+    def restore(self, snapshot: Dict[str, Any]) -> None:
+        """Restores job state from a previous snapshot."""
+        self.state = snapshot["state"]
+        self.started_at = snapshot["started_at"]
+        self.completed_at = snapshot["completed_at"]
+        self.current_phase = snapshot["current_phase"]
+        self.blocked_reason = snapshot["blocked_reason"]
+        self.failure_reason = snapshot["failure_reason"]
+        self.replan_count = snapshot["replan_count"]
+        self.repair_count = snapshot["repair_count"]
+        self.assigned_agents = list(snapshot["assigned_agents"])
+        self.metadata = dict(snapshot["metadata"])
+
     def to_dict(self) -> Dict[str, Any]:
         data = asdict(self)
         data["state"] = self.state.value

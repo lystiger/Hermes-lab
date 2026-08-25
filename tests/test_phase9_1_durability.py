@@ -376,3 +376,130 @@ async def test_preseeded_production_tasks_durably_persisted_before_background_ru
     finally:
         set_global_event_store(orig_store)
 
+
+@pytest.mark.anyio
+async def test_job_created_retry_after_failure():
+    """
+    Failure-Injection Test 1: _job_created_emitted flag remains False upon persistence failure,
+    allowing successful atomic retry.
+    """
+    failing_store = FailingEventStore()
+    failing_store.trigger_failure_on("job.created")
+    bridge = RuntimeEventBridge(event_store=failing_store)
+
+    engine = ReactiveJobEngine(
+        job_id="job_retry_created",
+        goal="Test job created retry",
+        event_bridge=bridge,
+    )
+    t1 = TaskNode(task_id="T1", job_id="job_retry_created", description="T1")
+    engine._pending_initial_tasks = [t1]
+
+    # 1. First attempt fails on job.created
+    with pytest.raises(StorageUnavailableError):
+        await engine._ensure_job_created_emitted()
+
+    assert engine._job_created_emitted is False
+    assert len(engine._pending_initial_tasks) == 1
+
+    # 2. Clear failure and retry
+    failing_store.fail_on_event_types.clear()
+    await engine._ensure_job_created_emitted()
+
+    assert engine._job_created_emitted is True
+    assert len(engine._pending_initial_tasks) == 0
+
+    events = await failing_store.list_events("job_retry_created")
+    event_types = [e.event_type for e in events]
+    assert event_types == ["job.created", "task.created"]
+
+
+@pytest.mark.anyio
+async def test_seed_tasks_retry_after_partial_failure():
+    """
+    Failure-Injection Test 2: Seed tasks are popped one-by-one only upon success.
+    If task 2 fails, task 1 is committed and tasks 2..3 are cleanly committed on retry without duplicates.
+    """
+    failing_store = FailingEventStore()
+    # Fail specifically when call_count reaches 3 (which corresponds to task T2)
+    original_append = failing_store.append
+
+    async def selective_append(event: StoredRuntimeEvent):
+        if event.event_type == "task.created" and event.task_id == "T2" and failing_store.call_count < 5:
+            failing_store.call_count += 1
+            raise StorageUnavailableError("Injected failure on T2")
+        return await original_append(event)
+
+    failing_store.append = selective_append  # type: ignore
+
+    bridge = RuntimeEventBridge(event_store=failing_store)
+    engine = ReactiveJobEngine(
+        job_id="job_retry_partial_seed",
+        goal="Test seed task retry",
+        event_bridge=bridge,
+    )
+    t1 = TaskNode(task_id="T1", job_id="job_retry_partial_seed", description="T1")
+    t2 = TaskNode(task_id="T2", job_id="job_retry_partial_seed", description="T2")
+    t3 = TaskNode(task_id="T3", job_id="job_retry_partial_seed", description="T3")
+    engine._pending_initial_tasks = [t1, t2, t3]
+
+    # 1. First attempt persists job.created and T1, then fails on T2
+    with pytest.raises(StorageUnavailableError):
+        await engine._ensure_job_created_emitted()
+
+    assert engine._job_created_emitted is True
+    # T1 was popped; T2 and T3 remain in queue
+    assert len(engine._pending_initial_tasks) == 2
+    assert engine._pending_initial_tasks[0].task_id == "T2"
+
+    # 2. Retry succeeds for T2 and T3
+    failing_store.call_count = 10  # disable failure
+    await engine._ensure_job_created_emitted()
+
+    assert len(engine._pending_initial_tasks) == 0
+
+    events = await failing_store.list_events("job_retry_partial_seed")
+    task_ids = [e.task_id for e in events if e.event_type == "task.created"]
+    assert task_ids == ["T1", "T2", "T3"]
+
+
+@pytest.mark.anyio
+async def test_cancel_retry_and_job_record_snapshot_restore_after_failure():
+    """
+    Failure-Injection Test 3: If cancellation persistence fails, full JobRecord snapshot
+    is restored to EXECUTING, _durable_cancel_completed remains False, and retry succeeds.
+    """
+    failing_store = FailingEventStore()
+    failing_store.trigger_failure_on("job.cancelled")
+    bridge = RuntimeEventBridge(event_store=failing_store)
+
+    engine = ReactiveJobEngine(
+        job_id="job_retry_cancel",
+        goal="Test cancel retry",
+        event_bridge=bridge,
+    )
+    t1 = TaskNode(task_id="T1", job_id="job_retry_cancel", description="T1")
+    await engine.initialize_and_plan(initial_tasks=[t1])
+    assert engine.job.state == JobState.EXECUTING
+
+    # 1. Attempt cancel (fails on job.cancelled)
+    with pytest.raises(StorageUnavailableError):
+        await engine.cancel("Operator cancel attempt 1")
+
+    # In-memory JobRecord restored to EXECUTING
+    assert engine.job.state == JobState.EXECUTING
+    assert engine._durable_cancel_completed is False
+
+    # 2. Clear failure and retry
+    failing_store.fail_on_event_types.clear()
+    assert await engine.cancel("Operator cancel attempt 2") is True
+
+    assert engine.job.state == JobState.CANCELLED
+    assert engine._durable_cancel_completed is True
+
+    events = await failing_store.list_events("job_retry_cancel")
+    event_types = [e.event_type for e in events]
+    assert "job.cancelled" in event_types
+    assert "task.cancelled" in event_types
+
+

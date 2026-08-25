@@ -169,20 +169,22 @@ class ReactiveJobEngine:
 
     async def _ensure_job_created_emitted(self) -> None:
         if not self._job_created_emitted:
-            self._job_created_emitted = True
             await self.event_bridge.emit_job_created(self.job)
-            if self._pending_initial_tasks:
-                for t in list(self._pending_initial_tasks):
-                    task_id = t.task_id if hasattr(t, "task_id") else (t.get("task_id") if isinstance(t, dict) else None)
-                    node = self.graph.get_task(task_id) if task_id else None
-                    if not node:
-                        try:
-                            node = self.graph.add_task(t)
-                        except ValueError:
-                            node = self.graph.get_task(task_id)
-                    if node:
-                        await self.event_bridge.emit_task_created(node, reason="initial_task")
-                self._pending_initial_tasks = []
+            self._job_created_emitted = True
+
+        while self._pending_initial_tasks:
+            t = self._pending_initial_tasks[0]
+            task_id = t.task_id if hasattr(t, "task_id") else (t.get("task_id") if isinstance(t, dict) else None)
+            node = self.graph.get_task(task_id) if task_id else None
+            if not node:
+                try:
+                    node = self.graph.add_task(t)
+                except ValueError:
+                    node = self.graph.get_task(task_id)
+            if node:
+                await self.event_bridge.emit_task_created(node, reason="initial_task")
+            # Pop task only after successful persistence
+            self._pending_initial_tasks.pop(0)
 
     async def _transition_job(
         self,
@@ -193,10 +195,11 @@ class ReactiveJobEngine:
         """
         Durable job state transition helper.
         Transitions the JobRecord state machine and immediately awaits durable emission of job.state_changed.
-        Rolls back in-memory state if persistence fails.
+        Rolls back in-memory state from full snapshot if persistence fails.
         """
         await self._ensure_job_created_emitted()
         prev_state = self.job.state
+        snapshot = self.job.snapshot()
         new_state = self.job.transition_to(target_state, reason=reason, metadata=metadata)
         if prev_state != new_state:
             try:
@@ -206,12 +209,9 @@ class ReactiveJobEngine:
                     reason=reason,
                     metadata=metadata,
                 )
-            except Exception as exc:
-                # Rollback in-memory job state if durable persistence fails!
-                self.job.state = prev_state
-                self.job.completed_at = None
-                self.job.blocked_reason = None
-                self.job.failure_reason = None
+            except Exception:
+                # Restore full JobRecord snapshot on persistence failure
+                self.job.restore(snapshot)
                 raise
         return new_state
 
@@ -418,8 +418,6 @@ class ReactiveJobEngine:
         if self._durable_cancel_completed:
             return False
 
-        self._durable_cancel_completed = True
-
         if self.job.state != JobState.CANCELLED:
             await self._transition_job(JobState.CANCELLED, reason=reason)
         else:
@@ -441,6 +439,7 @@ class ReactiveJobEngine:
                 )
 
         await self._cancel_active_tasks(reason)
+        self._durable_cancel_completed = True
         return True
 
     async def step(self) -> bool:

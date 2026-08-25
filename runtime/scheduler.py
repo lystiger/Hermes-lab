@@ -15,6 +15,7 @@ from runtime.capacity import (
     ProviderFailureClassifier,
     ProviderFailureClass,
     TaskBudgetEstimate,
+    UsageSnapshotNormalizer,
 )
 from runtime.circuit_breaker import CircuitBreakerRegistry, default_circuit_registry
 from runtime.routing import ReroutePolicy, default_reroute_policy
@@ -408,18 +409,29 @@ class ReactiveScheduler:
 
             # Record telemetry usage if available in metadata
             if isinstance(result.metadata, dict):
-                input_tok = int(result.metadata.get("input_tokens") or result.metadata.get("prompt_tokens") or 0)
-                output_tok = int(result.metadata.get("output_tokens") or result.metadata.get("completion_tokens") or 0)
-                cached_tok = int(result.metadata.get("cached_tokens") or 0)
-                if input_tok or output_tok or cached_tok:
-                    self.capacity_registry.record_usage(
-                        provider_id=provider_id,
+                usage_snap_dict = result.metadata.get("usage_snapshot")
+                if isinstance(usage_snap_dict, dict):
+                    self.capacity_registry.record_snapshot(
+                        UsageSnapshotNormalizer.normalize(
+                            raw_data=usage_snap_dict,
+                            provider_id=provider_id,
+                            actor_id=actor_id,
+                        ),
                         job_id=task.job_id,
-                        actor_id=actor_id,
-                        input_tokens=input_tok,
-                        output_tokens=output_tok,
-                        cached_tokens=cached_tok,
                     )
+                else:
+                    input_tok = int(result.metadata.get("input_tokens") or result.metadata.get("prompt_tokens") or 0)
+                    output_tok = int(result.metadata.get("output_tokens") or result.metadata.get("completion_tokens") or 0)
+                    cached_tok = int(result.metadata.get("cached_tokens") or 0)
+                    if input_tok or output_tok or cached_tok:
+                        self.capacity_registry.record_usage(
+                            provider_id=provider_id,
+                            job_id=task.job_id,
+                            actor_id=actor_id,
+                            input_tokens=input_tok,
+                            output_tokens=output_tok,
+                            cached_tokens=cached_tok,
+                        )
 
             if result.status == "succeeded":
                 self.circuit_registry.record_success(actor_id)

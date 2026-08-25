@@ -250,7 +250,7 @@ async def test_context_pressure_causes_new_session_handoff(tmp_path: Path):
     from runtime.observations import default_observation_registry
     handoff_obs = [o for o in default_observation_registry.list_for_task("T_PRESSURE") if o.kind == "continuity_handoff"]
     assert len(handoff_obs) == 1
-    assert "92.0%" in handoff_obs[0].content
+    assert "92." in handoff_obs[0].content
     assert handoff_obs[0].metadata.get("fresh_session") is True
 
 

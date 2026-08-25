@@ -875,14 +875,9 @@ class HermesActorAdapter(ActorAdapter):
                 actor_id=actor_id,
             )
             if usage_snapshot.tokens_used > 0 or usage_snapshot.source == "provider_reported":
-                default_capacity_registry.record_usage(
-                    provider_id=usage_snapshot.provider_id,
+                default_capacity_registry.record_snapshot(
+                    usage_snapshot,
                     job_id=task.job_id,
-                    actor_id=actor_id,
-                    input_tokens=usage_snapshot.input_tokens,
-                    output_tokens=usage_snapshot.output_tokens,
-                    cached_tokens=usage_snapshot.cached_tokens,
-                    source=usage_snapshot.source,
                 )
 
             # Check context pressure
@@ -953,7 +948,13 @@ class HermesActorAdapter(ActorAdapter):
                 error=stderr_text if exit_code != 0 else None,
                 artifact_refs=artifacts,
                 observations=obs_list,
-                metadata={"actor": actor_id, "worktree": str(worktree_path), "commit_sha": commit_sha, "fresh_session_recommended": handoff_obs is not None},
+                metadata={
+                    "actor": actor_id,
+                    "worktree": str(worktree_path),
+                    "commit_sha": commit_sha,
+                    "fresh_session_recommended": handoff_obs is not None,
+                    "usage_snapshot": usage_snapshot.to_dict(),
+                },
             )
 
         except WorktreeError as exc:

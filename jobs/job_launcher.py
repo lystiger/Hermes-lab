@@ -9,7 +9,7 @@ import subprocess
 import sys
 import threading
 import time
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import Any, Dict, List, Optional, Set, Tuple, Union
 import uuid
 
 from events.event_bus import event_bus
@@ -25,6 +25,7 @@ from runtime.hermes_adapter import (
     ContextSpecError,
     resolve_context_spec,
 )
+from runtime.planning import GroundedPlanner
 from runtime.events import RuntimeEventBridge
 from runtime.limits import RuntimeLimits
 
@@ -429,6 +430,162 @@ class JobLauncher:
                 # 1. Durably persist job.created and initial tasks BEFORE starting background runner
                 await engine._ensure_job_created_emitted()
                 # 2. Start execution in background only after successful persistence
+                if start_background:
+                    self._start_engine_background(engine)
+        return res
+
+    def launch_goal(
+        self,
+        goal: str,
+        target_repo: Optional[Union[Path, str]] = None,
+        constraints: Optional[List[str]] = None,
+        dry_run: bool = False,
+        skip_agent_exec: bool = False,
+        model_client: Optional[Any] = None,
+        agent_registry: Any = None,
+        limits: Optional[RuntimeLimits] = None,
+        start_background: bool = True,
+        mode: str = "goal_planned",
+        allow_heuristic_fallback: bool = True,
+    ) -> Dict[str, Any]:
+        """
+        Launches an initial-planned engineering job from a natural language goal and target repository.
+        GroundedPlanner analyzes repository evidence and dynamically generates the initial TaskGraph DAG.
+        """
+        self.reap_finished()
+
+        if not goal or not goal.strip():
+            raise ValueError("Goal cannot be empty")
+
+        resolved_target_repo = Path(target_repo or self.root_dir).resolve()
+        timestamp = time.strftime("%Y%m%d_%H%M%S")
+        job_id = f"run_{timestamp}_{uuid.uuid4().hex[:8]}"
+
+        worktree_root = (Path.home() / "hermes-worktrees" / job_id).resolve()
+        runs_root = (Path.home() / "hermes-runs").resolve()
+        run_dir = runs_root / job_id
+
+        from runtime.storage.config import get_global_event_store
+        event_store = get_global_event_store()
+        event_bridge = RuntimeEventBridge(event_bus, event_store=event_store)
+
+        runtime_limits = limits or RuntimeLimits()
+
+        # Instantiate GroundedPlanner for dynamic repository-grounded goal decomposition
+        planner_adapter = GroundedPlanner(
+            model_client=model_client,
+            target_repo=resolved_target_repo,
+            limits=runtime_limits,
+            event_bridge=event_bridge,
+            allow_heuristic_fallback=allow_heuristic_fallback,
+        )
+
+        actor_adapter = HermesActorAdapter(
+            target_repo=resolved_target_repo,
+            worktree_root=worktree_root,
+            run_dir=run_dir,
+            dry_run=dry_run,
+            skip_agent_exec=skip_agent_exec,
+            agent_registry=agent_registry,
+            job_id=job_id,
+            base_ref="main",
+            target_branch=f"job/{job_id}/integration",
+        )
+
+        verifier_adapter = HermesVerifierAdapter(
+            verification_steps=[],
+            working_dir=resolved_target_repo,
+            worktree_root=worktree_root,
+        )
+
+        job_metadata = {
+            "goal": goal,
+            "target_repo": str(resolved_target_repo),
+            "constraints": constraints or [],
+            "worktree_root": str(worktree_root),
+            "runs_root": str(runs_root),
+            "planning_mode": "grounded_planner",
+            "launch_mode": mode,
+        }
+
+        engine = ReactiveJobEngine(
+            job_id=job_id,
+            goal=goal,
+            title=goal[:80],
+            repository=str(resolved_target_repo),
+            branch=f"job/{job_id}/integration",
+            priority="P1",
+            metadata=job_metadata,
+            actor_adapter=actor_adapter,
+            verifier=verifier_adapter,
+            planner=planner_adapter,
+            limits=runtime_limits,
+            event_bridge=event_bridge,
+        )
+
+        # Register engine with JobService BEFORE execution begins
+        job_service.register_engine(engine)
+
+        job_state_reducer.apply(
+            kind="job.created",
+            detail=f"Goal-planned job initialized: {goal[:80]}",
+            job_id=job_id,
+            metadata={
+                "goal": goal,
+                "title": goal[:80],
+                "repository": str(resolved_target_repo),
+                "priority": "P1",
+                "mode": mode,
+            },
+        )
+
+        if start_background:
+            self._start_engine_background(engine)
+        logger.info("Launched goal-planned job %s (goal: %s, background: %s)", job_id, goal[:60], start_background)
+
+        return {
+            "jobId": job_id,
+            "goal": goal,
+            "status": engine.job.state.value.upper(),
+            "mode": mode,
+        }
+
+    async def launch_goal_async(
+        self,
+        goal: str,
+        target_repo: Optional[Union[Path, str]] = None,
+        constraints: Optional[List[str]] = None,
+        dry_run: bool = False,
+        skip_agent_exec: bool = False,
+        model_client: Optional[Any] = None,
+        agent_registry: Any = None,
+        limits: Optional[RuntimeLimits] = None,
+        start_background: bool = True,
+        mode: str = "goal_planned",
+        allow_heuristic_fallback: bool = True,
+    ) -> Dict[str, Any]:
+        """
+        Async version of launch_goal that initializes the engine and decomposes the initial
+        plan into the TaskGraph BEFORE starting background execution.
+        """
+        res = self.launch_goal(
+            goal=goal,
+            target_repo=target_repo,
+            constraints=constraints,
+            dry_run=dry_run,
+            skip_agent_exec=skip_agent_exec,
+            model_client=model_client,
+            agent_registry=agent_registry,
+            limits=limits,
+            start_background=False,
+            mode=mode,
+            allow_heuristic_fallback=allow_heuristic_fallback,
+        )
+        job_id = res.get("jobId")
+        if job_id:
+            engine = job_service.get_engine(job_id)
+            if engine:
+                await engine.initialize_and_plan(initial_tasks=None)
                 if start_background:
                     self._start_engine_background(engine)
         return res

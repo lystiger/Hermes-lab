@@ -155,12 +155,10 @@ class CapabilityRegistry:
         return res
 
     def list_available_capabilities(self) -> List[str]:
-        """Returns all distinct capabilities known or registered across all actors."""
+        """Returns all distinct capabilities possessed by currently registered/dispatchable actors."""
         caps = set(self._capabilities.keys())
         for actor_id in self._actors:
             caps.update(self.get_actor_capabilities(actor_id))
-        for actor_id, d_caps in DEFAULT_CAPABILITY_PROFILES.items():
-            caps.update(d_caps)
         return sorted(list(caps))
 
     def actor_satisfies(self, actor_id: str, required_capabilities: Sequence[str]) -> bool:

@@ -333,6 +333,81 @@ def test_plan_validator_rejects_unsupported_capability(tmp_path: Path):
     assert any("unsupported/unknown capability" in err.lower() for err in res.errors)
 
 
+def test_plan_validator_rejects_malformed_risk(tmp_path: Path):
+    repo_dir = _setup_disposable_repo(tmp_path / "val_repo")
+    
+    task1 = PlannedTask(
+        task_id="T1",
+        description="Dangerous operation",
+        dependencies=[],
+        required_capabilities=["code.python"],
+        acceptance_criteria=["Done"],
+        verification=["Pytest"],
+        risk="SUPER DANGEROUS",  # Malformed risk string
+        evidence_refs=["app/api.py"],
+    )
+    task2 = PlannedTask(
+        task_id="T2_verify",
+        description="Verify",
+        dependencies=["T1"],
+        required_capabilities=["verification"],
+        acceptance_criteria=["Done"],
+        verification=["Pytest"],
+        risk="low",
+        evidence_refs=["tests/test_api.py"],
+    )
+
+    plan = StructuredPlan(job_id="job_bad_risk", goal="Goal", summary="Summary", tasks=[task1, task2])
+    res = PlanValidator.validate(plan, repo_dir=repo_dir)
+
+    assert res.is_valid is False
+    assert any("invalid risk 'super dangerous'" in err.lower() for err in res.errors)
+
+
+def test_plan_validator_rejects_empty_available_capabilities(tmp_path: Path):
+    repo_dir = _setup_disposable_repo(tmp_path / "val_repo")
+    
+    task1 = PlannedTask(
+        task_id="T1",
+        description="Task 1",
+        dependencies=[],
+        required_capabilities=["code.python"],
+        acceptance_criteria=["Done"],
+        verification=["Pytest"],
+        evidence_refs=["app/api.py"],
+    )
+
+    plan = StructuredPlan(job_id="job_empty_caps", goal="Goal", summary="Summary", tasks=[task1])
+    # Empty available capabilities -> cannot schedule any task!
+    res = PlanValidator.validate(plan, repo_dir=repo_dir, available_capabilities=[])
+
+    assert res.is_valid is False
+    assert any("no dispatchable capabilities" in err.lower() for err in res.errors)
+
+
+def test_capability_registry_empty_actors_returns_empty_available_capabilities():
+    registry = CapabilityRegistry()
+    # Initially no actors registered
+    assert registry.list_available_capabilities() == []
+
+    # Register an actor
+    registry.register_actor({"id": "claude", "capabilities": ["code.python", "review.correctness"]})
+    assert registry.list_available_capabilities() == ["code.python", "review.correctness"]
+
+
+def test_string_target_repo_boundary_robustness(tmp_path: Path):
+    repo_dir = _setup_disposable_repo(tmp_path / "str_repo")
+    str_path = str(repo_dir)
+
+    # Pass string path to PlanningRequest and RepositoryReconnaissance
+    req = PlanningRequest(job_id="job_str", goal="Add endpoint", target_repo=str_path)
+    assert isinstance(req.target_repo, Path)
+
+    evidence = RepositoryReconnaissance.collect(str_path, "Add endpoint")
+    assert evidence is not None
+    assert len(evidence.files) >= 1
+
+
 # ==============================================================================
 # 3. Grounded Planner JSON Parsing & Schema Repair Tests
 # ==============================================================================
@@ -610,6 +685,104 @@ async def test_phase11_1_goal_to_graph_happy_path_e2e(tmp_path: Path):
     assert reconstructed.graph.get_task("T4_verify_contract_and_regression").status == TaskStatus.SUCCEEDED
     assert "planning" in reconstructed.job.metadata
     assert reconstructed.job.metadata["planning"]["validated"] is True
+
+
+@pytest.mark.anyio
+async def test_grounded_planner_fails_closed_when_model_client_none_and_fallback_disabled(tmp_path: Path):
+    repo_dir = _setup_disposable_repo(tmp_path / "fail_closed_repo")
+    planner = GroundedPlanner(target_repo=repo_dir, allow_heuristic_fallback=False)
+
+    req = PlanningRequest(job_id="job_no_client", goal="Add endpoint", target_repo=repo_dir)
+    with pytest.raises(ValueError) as exc_info:
+        await planner.generate_initial_plan(req)
+    assert "heuristic fallback disabled" in str(exc_info.value).lower()
+
+
+@pytest.mark.anyio
+async def test_grounded_planner_heuristic_fallback_detects_typescript_capabilities(tmp_path: Path):
+    ts_repo = tmp_path / "ts_repo"
+    ts_repo.mkdir(parents=True, exist_ok=True)
+    src_dir = ts_repo / "src"
+    src_dir.mkdir(parents=True, exist_ok=True)
+    (src_dir / "index.ts").write_text("export const app = express();", encoding="utf-8")
+    (src_dir / "app.test.ts").write_text("test('app', () => {});", encoding="utf-8")
+
+    planner = GroundedPlanner(target_repo=ts_repo, allow_heuristic_fallback=True)
+    req = PlanningRequest(job_id="job_ts", goal="Add express endpoint", target_repo=ts_repo)
+    plan = await planner.generate_initial_plan(req)
+
+    assert plan is not None
+    # Verify task capabilities dynamically detected typescript from evidence
+    impl_task = [t for t in plan.tasks if "implement" in t.task_id.lower()][0]
+    assert "code.typescript" in impl_task.required_capabilities
+
+
+@pytest.mark.anyio
+async def test_job_launcher_launch_goal_async_e2e(tmp_path: Path):
+    from jobs.job_launcher import JobLauncher
+    from jobs.job_service import job_service
+
+    repo_dir = _setup_disposable_repo(tmp_path / "launcher_repo")
+    goal = "Add public inquiry submission with admin review"
+
+    async def simulated_llm(prompt: str) -> str:
+        return json.dumps({
+            "job_id": "job_launcher_test",
+            "goal": goal,
+            "summary": "Plan for public inquiry submission",
+            "risk_assessment": "medium",
+            "uncertainty": [],
+            "evidence_summary": "FastAPI repo",
+            "tasks": [
+                {
+                    "task_id": "T1_inspect",
+                    "description": "Inspect API conventions",
+                    "dependencies": [],
+                    "required_capabilities": ["repo.read", "code.python"],
+                    "expected_artifacts": ["notes.txt"],
+                    "acceptance_criteria": ["Conventions documented"],
+                    "verification": ["Static check"],
+                    "risk": "low",
+                    "evidence_refs": ["app/api.py"],
+                    "evidence_status": "existing",
+                    "reason": "Inspect routes"
+                },
+                {
+                    "task_id": "T2_verify",
+                    "description": "Verify test suite",
+                    "dependencies": ["T1_inspect"],
+                    "required_capabilities": ["verification"],
+                    "expected_artifacts": ["report.json"],
+                    "acceptance_criteria": ["Tests pass"],
+                    "verification": ["Pytest"],
+                    "risk": "low",
+                    "evidence_refs": ["tests/test_api.py"],
+                    "evidence_status": "existing",
+                    "reason": "Ensure green"
+                }
+            ]
+        })
+
+    launcher = JobLauncher()
+    res = await launcher.launch_goal_async(
+        goal=goal,
+        target_repo=repo_dir,
+        model_client=simulated_llm,
+        dry_run=True,
+        skip_agent_exec=True,
+        start_background=False,
+    )
+
+    assert res["status"] in ("EXECUTING", "PLANNING", "CREATED")
+    assert res["mode"] == "goal_planned"
+
+    job_id = res["jobId"]
+    engine = job_service.get_engine(job_id)
+    assert engine is not None
+    assert engine.graph.count() == 2
+    assert engine.graph.get_task("T1_inspect") is not None
+    assert engine.graph.get_task("T2_verify") is not None
+    assert engine.job.metadata["launch_mode"] == "goal_planned"
 
 
 # ==============================================================================

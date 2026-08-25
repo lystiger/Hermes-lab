@@ -78,7 +78,7 @@ class ReplanRequest:
     detail: Optional[str] = None
     target_repo: Optional[Any] = None
     constraints: List[str] = field(default_factory=list)
-    available_capabilities: List[str] = field(default_factory=list)
+    available_capabilities: Optional[List[str]] = None
     evidence: Optional[Any] = None
 
 

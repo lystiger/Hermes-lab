@@ -25,8 +25,6 @@ class PlannedTask:
 
     def __post_init__(self):
         self.risk = str(self.risk).lower()
-        if self.risk not in ("low", "medium", "high"):
-            self.risk = "medium"
         if not self.evidence_status:
             self.evidence_status = "existing"
 
@@ -118,18 +116,22 @@ class PlanningRequest:
     target_repo: Path
     constraints: List[str] = field(default_factory=list)
     supplied_context: Dict[str, Any] = field(default_factory=dict)
-    available_capabilities: List[str] = field(default_factory=list)
+    available_capabilities: Optional[List[str]] = None
     limits: RuntimeLimits = field(default_factory=RuntimeLimits)
     evidence: Optional[RepositoryEvidence] = None
+
+    def __post_init__(self):
+        if self.target_repo is not None:
+            self.target_repo = Path(self.target_repo).resolve()
 
     def to_dict(self) -> Dict[str, Any]:
         return {
             "job_id": self.job_id,
             "goal": self.goal,
-            "target_repo": str(self.target_repo),
+            "target_repo": str(self.target_repo) if self.target_repo else "",
             "constraints": self.constraints,
             "supplied_context": self.supplied_context,
-            "available_capabilities": self.available_capabilities,
+            "available_capabilities": self.available_capabilities if self.available_capabilities is not None else [],
             "limits": self.limits.to_dict(),
             "evidence": self.evidence.to_dict() if self.evidence else None,
         }

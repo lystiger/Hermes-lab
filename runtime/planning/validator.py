@@ -39,6 +39,8 @@ class PlanValidator:
         errors: List[str] = []
         warnings: List[str] = []
         limits = limits or RuntimeLimits()
+        if repo_dir is not None:
+            repo_dir = Path(repo_dir).resolve()
 
         # 1. Non-empty plan
         if not plan.tasks:
@@ -74,12 +76,15 @@ class PlanValidator:
             # Mandatory capabilities
             if not t.required_capabilities:
                 errors.append(f"Task '{tid}' does not declare any required_capabilities.")
-            elif available_capabilities:
-                avail_set = set(available_capabilities)
-                for cap in t.required_capabilities:
-                    # Match exact or prefix (e.g. 'code.python' matches 'code.python')
-                    if cap not in avail_set and not any(cap.startswith(a) or a.startswith(cap) for a in avail_set):
-                        errors.append(f"Task '{tid}' requires unsupported/unknown capability '{cap}'.")
+            elif available_capabilities is not None:
+                if len(available_capabilities) == 0:
+                    errors.append(f"Task '{tid}' cannot be satisfied: no dispatchable capabilities are currently available.")
+                else:
+                    avail_set = set(available_capabilities)
+                    for cap in t.required_capabilities:
+                        # Match exact or prefix (e.g. 'code.python' matches 'code.python')
+                        if cap not in avail_set and not any(cap.startswith(a) or a.startswith(cap) for a in avail_set):
+                            errors.append(f"Task '{tid}' requires unsupported/unknown capability '{cap}'.")
 
             # Non-trivial task completion evidence (acceptance criteria or verification)
             has_verification = bool(t.verification or t.acceptance_criteria)

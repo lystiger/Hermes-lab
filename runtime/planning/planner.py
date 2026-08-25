@@ -70,22 +70,24 @@ class GroundedPlanner(PlannerAdapter):
         reconnaissance: Optional[RepositoryReconnaissance] = None,
         validator: Optional[PlanValidator] = None,
         limits: Optional[RuntimeLimits] = None,
-        target_repo: Optional[Path] = None,
+        target_repo: Optional[Union[Path, str]] = None,
         event_bridge: Any = None,
+        allow_heuristic_fallback: bool = True,
     ):
         self.model_client = model_client
         self.reconnaissance = reconnaissance or RepositoryReconnaissance()
         self.validator = validator or PlanValidator()
         self.limits = limits or RuntimeLimits()
-        self.target_repo = target_repo
+        self.target_repo = Path(target_repo).resolve() if target_repo is not None else None
         self.event_bridge = event_bridge
+        self.allow_heuristic_fallback = allow_heuristic_fallback
         self._replanner_delegate = ProductionPlannerAdapter(limits=self.limits)
 
     async def generate_initial_plan(self, request: PlanningRequest) -> StructuredPlan:
         """
         Generates and validates a structured plan from a goal and repository evidence.
         """
-        repo_dir = request.target_repo or self.target_repo or Path.cwd()
+        repo_dir = Path(request.target_repo or self.target_repo or Path.cwd()).resolve()
 
         # 1. Emit planning.started event
         if self.event_bridge and hasattr(self.event_bridge, "emit_planning_started"):
@@ -124,6 +126,7 @@ class GroundedPlanner(PlannerAdapter):
 
         # 3. Generate plan
         raw_plan_dict = None
+        planning_mode = "model_generated"
         if self.model_client:
             prompt = self._build_planning_prompt(request, evidence)
             import inspect
@@ -134,7 +137,18 @@ class GroundedPlanner(PlannerAdapter):
 
             raw_plan_dict = self._parse_json_response(raw_response)
         else:
-            # Deterministic heuristic plan generation grounded in evidence
+            if not self.allow_heuristic_fallback:
+                err_msg = "No planner model_client configured for goal-to-graph planning (heuristic fallback disabled)"
+                if self.event_bridge and hasattr(self.event_bridge, "emit_planning_failed"):
+                    try:
+                        await self.event_bridge.emit_planning_failed(job_id=request.job_id, error=err_msg, reasons=[err_msg])
+                    except Exception:
+                        pass
+                raise ValueError(err_msg)
+
+            # Explicit degraded heuristic plan generation grounded in evidence
+            planning_mode = "heuristic_degraded"
+            logger.warning("GroundedPlanner operating in explicit degraded mode (%s) for job %s", planning_mode, request.job_id)
             raw_plan_dict = self._generate_heuristic_grounded_plan(request, evidence)
 
         if not raw_plan_dict or not isinstance(raw_plan_dict, dict):
@@ -205,7 +219,7 @@ class GroundedPlanner(PlannerAdapter):
         if reason_str == "initial_plan":
             repo_dir = getattr(request, "target_repo", None) or self.target_repo or Path.cwd()
             constraints = getattr(request, "constraints", [])
-            avail_caps = getattr(request, "available_capabilities", [])
+            avail_caps = getattr(request, "available_capabilities", None)
 
             plan_req = PlanningRequest(
                 job_id=request.job_id,
@@ -289,12 +303,23 @@ class GroundedPlanner(PlannerAdapter):
         test_ref = test_files[0] if test_files else "tests/test_app.py"
         status = "existing" if evidence.files else "new_component"
 
+        # Determine language capability grounded in detected repository evidence
+        code_cap = "code.python"
+        if "typescript" in evidence.languages:
+            code_cap = "code.typescript"
+        elif "javascript" in evidence.languages:
+            code_cap = "code.javascript"
+        elif "go" in evidence.languages:
+            code_cap = "code.go"
+        elif "rust" in evidence.languages:
+            code_cap = "code.rust"
+
         tasks = [
             {
                 "task_id": "T1_inspect_conventions",
                 "description": f"Inspect existing architecture and contracts for: {request.goal}",
                 "dependencies": [],
-                "required_capabilities": ["repo.read", "code.python"],
+                "required_capabilities": ["repo.read", code_cap],
                 "expected_artifacts": ["architecture_notes"],
                 "acceptance_criteria": ["Identified relevant module contracts and schemas"],
                 "verification": ["Static inspection of module exports"],
@@ -307,7 +332,7 @@ class GroundedPlanner(PlannerAdapter):
                 "task_id": "T2_implement_feature",
                 "description": f"Implement core feature logic for: {request.goal}",
                 "dependencies": ["T1_inspect_conventions"],
-                "required_capabilities": ["implementation", "code.python"],
+                "required_capabilities": ["implementation", code_cap],
                 "expected_artifacts": ["feature_implementation"],
                 "acceptance_criteria": [f"Feature {request.goal} implemented conforming to repository conventions"],
                 "verification": ["Syntax check and unit test execution"],
@@ -320,10 +345,10 @@ class GroundedPlanner(PlannerAdapter):
                 "task_id": "T3_add_tests",
                 "description": f"Add targeted unit tests and edge cases for: {request.goal}",
                 "dependencies": ["T2_implement_feature"],
-                "required_capabilities": ["testing.unit", "code.python"],
+                "required_capabilities": ["testing.unit", code_cap],
                 "expected_artifacts": ["unit_tests"],
                 "acceptance_criteria": ["New tests assert expected behavior and error handling"],
-                "verification": ["Run pytest suite"],
+                "verification": ["Run test suite"],
                 "risk": "low",
                 "evidence_refs": [test_ref],
                 "evidence_status": "existing" if test_files else "new_component",
@@ -336,7 +361,7 @@ class GroundedPlanner(PlannerAdapter):
                 "required_capabilities": ["verification", "review.correctness"],
                 "expected_artifacts": ["verification_report"],
                 "acceptance_criteria": ["All unit tests pass and no regression introduced"],
-                "verification": ["Pytest test execution and contract check"],
+                "verification": ["Test execution and contract check"],
                 "risk": "low",
                 "evidence_refs": [primary_ref, test_ref],
                 "evidence_status": status,
@@ -347,9 +372,10 @@ class GroundedPlanner(PlannerAdapter):
         return {
             "job_id": request.job_id,
             "goal": request.goal,
-            "summary": f"Repository-grounded plan for '{request.goal}' with inspection, implementation, testing, and verification.",
+            "summary": f"Repository-grounded plan (degraded mode) for '{request.goal}' with inspection, implementation, testing, and verification.",
             "risk_assessment": "medium",
             "uncertainty": evidence.uncertainty,
             "evidence_summary": evidence.summary,
+            "planning_mode": "heuristic_degraded",
             "tasks": tasks,
         }

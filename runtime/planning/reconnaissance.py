@@ -178,6 +178,7 @@ class RepositoryReconnaissance:
         limits = limits or RuntimeLimits()
         max_files = limits.max_evidence_files
         max_bytes = limits.max_evidence_bytes
+        repo_dir = Path(repo_dir).resolve()
 
         if not repo_dir.exists() or not repo_dir.is_dir():
             return RepositoryEvidence(

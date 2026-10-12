@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { lysStackApi } from '../../api/client';
+import { hermesApi } from '../../api/client';
 import { useAgents } from '../../api/hooks';
 import { CyberButton } from '../../components/CyberButton';
 
@@ -18,7 +18,7 @@ export const MessageDispatcher: React.FC = () => {
     setLastResponse(null);
 
     try {
-      const res = await lysStackApi.sendOperatorCommand(selectedTarget, prompt);
+      const res = await hermesApi.sendOperatorCommand(selectedTarget, prompt);
       setLastResponse(res.response);
       setPrompt('');
     } catch (err) {

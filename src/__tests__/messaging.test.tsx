@@ -3,7 +3,7 @@ import React from 'react';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { OperationalThreadView } from '../features/messaging/OperationalThreadView';
 import { JobDetailView } from '../features/jobs/JobDetailView';
-import { lysStackApi } from '../api/client';
+import { hermesApi } from '../api/client';
 import { Thread, Message } from '../api/types';
 
 describe('Phase 5.1 Operational Messaging & Truthful Artifact Trust UI', () => {
@@ -101,9 +101,9 @@ describe('Phase 5.1 Operational Messaging & Truthful Artifact Trust UI', () => {
 
   beforeEach(() => {
     vi.restoreAllMocks();
-    vi.spyOn(lysStackApi, 'getThreads').mockResolvedValue([mockThread]);
-    vi.spyOn(lysStackApi, 'getMessages').mockResolvedValue(mockMessages);
-    vi.spyOn(lysStackApi, 'getAgents').mockResolvedValue([
+    vi.spyOn(hermesApi, 'getThreads').mockResolvedValue([mockThread]);
+    vi.spyOn(hermesApi, 'getMessages').mockResolvedValue(mockMessages);
+    vi.spyOn(hermesApi, 'getAgents').mockResolvedValue([
       { id: 'gemini', displayName: 'Gemini', provider: 'Google', model: '2.5-pro', role: 'Builder', capabilities: [], status: 'IDLE' },
       { id: 'claude', displayName: 'Claude', provider: 'Anthropic', model: 'sonnet', role: 'Hardener', capabilities: [], status: 'RUNNING' }
     ]);
@@ -192,7 +192,7 @@ describe('Phase 5.1 Operational Messaging & Truthful Artifact Trust UI', () => {
   });
 
   it('submits operator dispatch message to thread', async () => {
-    const sendSpy = vi.spyOn(lysStackApi, 'sendMessage').mockResolvedValue({
+    const sendSpy = vi.spyOn(hermesApi, 'sendMessage').mockResolvedValue({
       id: 'msg_op_new',
       threadId: 'thread_job_run_20260822_s04',
       from: { id: 'operator', kind: 'operator', displayName: 'Operator' },
@@ -231,7 +231,7 @@ describe('Phase 5.1 Operational Messaging & Truthful Artifact Trust UI', () => {
   });
 
   it('renders JobDetailView with integrated OperationalThreadView', async () => {
-    vi.spyOn(lysStackApi, 'getJob').mockResolvedValue({
+    vi.spyOn(hermesApi, 'getJob').mockResolvedValue({
       id: 'run_20260822_s04',
       sprintId: 'lab-s04',
       title: 'Hermes Sprint lab-s04',

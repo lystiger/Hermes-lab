@@ -1,12 +1,12 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { HttpLysStackApi } from '../api/adapters/httpAdapter';
+import { HttpHermesApi } from '../api/adapters/httpAdapter';
 
-describe('HttpLysStackApi Contract Implementation', () => {
+describe('HttpHermesApi Contract Implementation', () => {
   const baseUrl = 'http://localhost:8000';
-  let api: HttpLysStackApi;
+  let api: HttpHermesApi;
 
   beforeEach(() => {
-    api = new HttpLysStackApi(baseUrl);
+    api = new HttpHermesApi(baseUrl);
     vi.restoreAllMocks();
   });
 

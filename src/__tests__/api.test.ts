@@ -1,9 +1,9 @@
 import { describe, it, expect, vi } from 'vitest';
-import { MockLysStackApi } from '../api/adapters/mockAdapter';
+import { MockHermesApi } from '../api/adapters/mockAdapter';
 import { resolveActorPresentation } from '../api/actors';
 
-describe('MockLysStackApi Contract Implementation', () => {
-  const api = new MockLysStackApi();
+describe('MockHermesApi Contract Implementation', () => {
+  const api = new MockHermesApi();
 
   it('should return a list of registered agents with character card metadata', async () => {
     const agents = await api.getAgents();

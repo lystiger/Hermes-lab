@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import React from 'react';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { OperationalThreadView } from '../features/messaging/OperationalThreadView';
-import { lysStackApi } from '../api/client';
+import { hermesApi } from '../api/client';
 import { Thread, Message, AgentSummary } from '../api/types';
 
 describe('Phase 6 Generic Agent Identity, Personas & A2A Conversations UI', () => {
@@ -120,9 +120,9 @@ describe('Phase 6 Generic Agent Identity, Personas & A2A Conversations UI', () =
 
   beforeEach(() => {
     vi.restoreAllMocks();
-    vi.spyOn(lysStackApi, 'getThreads').mockResolvedValue([mockThread]);
-    vi.spyOn(lysStackApi, 'getMessages').mockResolvedValue(mockMessages);
-    vi.spyOn(lysStackApi, 'getAgents').mockResolvedValue(mockAgents);
+    vi.spyOn(hermesApi, 'getThreads').mockResolvedValue([mockThread]);
+    vi.spyOn(hermesApi, 'getMessages').mockResolvedValue(mockMessages);
+    vi.spyOn(hermesApi, 'getAgents').mockResolvedValue(mockAgents);
   });
 
   it('renders persona subtitles and generic open-string agent identities without breaking', async () => {

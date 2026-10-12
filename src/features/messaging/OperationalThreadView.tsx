@@ -1,7 +1,7 @@
 import React, { useState, useMemo } from 'react';
 import { useThreads, useMessages, useAgents } from '../../api/hooks';
 import { resolveActorPresentation } from '../../api/actors';
-import { lysStackApi } from '../../api/client';
+import { hermesApi } from '../../api/client';
 import { ArtifactRef, Message } from '../../api/types';
 import { CyberButton } from '../../components/CyberButton';
 
@@ -50,7 +50,7 @@ export const OperationalThreadView: React.FC<OperationalThreadViewProps> = ({
 
     setIsSending(true);
     try {
-      await lysStackApi.sendMessage(
+      await hermesApi.sendMessage(
         targetThreadId,
         operatorText.trim(),
         [targetRecipient],

@@ -1,4 +1,4 @@
-import { LysStackApi, EventSubscription } from '../contracts';
+import { HermesApi, EventSubscription } from '../contracts';
 import {
   AgentId,
   AgentSummary,
@@ -59,7 +59,7 @@ interface BackendTraceEventDTO {
   metadata?: Record<string, any>;
 }
 
-export class HttpLysStackApi implements LysStackApi {
+export class HttpHermesApi implements HermesApi {
   private baseUrl: string;
   private lastEventId: string | null = null;
   private activeEventSource: EventSource | null = null;

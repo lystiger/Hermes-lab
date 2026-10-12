@@ -20,7 +20,7 @@
 **LysControl** is the operator-facing UI for visualizing and monitoring engineering jobs owned by the **Hermes Runtime**. Operators can submit control requests through Hermes REST APIs; Hermes owns scheduling and agent execution.
 
 > [!NOTE]
-> **Architectural Boundary**: LysControl is a frontend for visualization, telemetry, and operator controls. It does not execute agents or own canonical job/task state. It communicates with Hermes through REST/SSE. Existing `LysStackApi` code symbols and `VITE_LYSSTACK_API_URL` remain as compatibility names.
+> **Architectural Boundary**: LysControl is a frontend for visualization, telemetry, and operator controls. It does not execute agents or own canonical job/task state. It communicates with Hermes through REST/SSE. `VITE_LYSSTACK_API_URL` remains as an intentional compatibility environment variable.
 
 ```text
                      USER
@@ -53,7 +53,7 @@
 - **Dynamic Agent Registry (`GET /agents`)**: Reads the live Hermes agent registry (`Antigravity/Gemini`, `Claude`, `Codex`, and dynamic agents).
 - **Runtime Event History (`GET /events`)**: Historical event log retrieval supporting limits and `after=<event-id>` cursor pagination.
 - **Live Event Stream (`GET /events/stream` via SSE)**: Real-time Server-Sent Events delivery for `runtime.started`, `agent.started`, `agent.finished`, `agent.failed`, and tool execution traces with stable event IDs and clean disconnect handling.
-- **REST/SSE API Adapter**: `VITE_LYSSTACK_API_URL` remains the existing configuration key and points to Hermes. If unavailable, LysControl shows a `disconnected` state rather than hiding failures behind mocks.
+- **REST/SSE API Adapter**: `VITE_LYSSTACK_API_URL` is retained as an intentional compatibility configuration key and points to Hermes. If unavailable, LysControl shows a `disconnected` state rather than hiding failures behind mocks.
 - **Connection Indicator**: Header connection indicator reflects live network state (`connected`, `connecting`, `disconnected`, `mock mode`).
 
 ### 🟡 SIMULATED TEMPORARILY (Transitioning in Phase 4)
@@ -117,7 +117,7 @@ pytest             # 109 passed, 2 skipped
 LysControl/
 ├── src/
 │   ├── api/
-│   │   ├── contracts.ts           # REST/SSE contract & EventSubscription (legacy LysStackApi name)
+│   │   ├── contracts.ts           # Hermes API contract & EventSubscription
 │   │   ├── types.ts               # Domain models (AgentSummary, TraceEvent, HealthStatus)
 │   │   ├── actors.ts              # Domain actor presentation resolver (registry -> system -> fallback)
 │   │   ├── client.ts              # Pluggable API client factory (HTTP vs Mock adapter)

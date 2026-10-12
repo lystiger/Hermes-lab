@@ -1,4 +1,4 @@
-import { LysStackApi, EventSubscription } from '../contracts';
+import { HermesApi, EventSubscription } from '../contracts';
 import {
   AgentId,
   AgentSummary,
@@ -36,7 +36,7 @@ function fmtTs(sec: number): string {
   return `${pad(h, 2)}:${pad(m, 2)}:${pad(s, 2)}.${pad(ms, 3)}`;
 }
 
-export class MockLysStackApi implements LysStackApi {
+export class MockHermesApi implements HermesApi {
   private agents: Record<AgentId, AgentDetail> = { ...MOCK_AGENTS };
   private jobs: Job[] = [...MOCK_JOBS];
   private pipeline: PipelineStep[] = [...MOCK_PIPELINE];

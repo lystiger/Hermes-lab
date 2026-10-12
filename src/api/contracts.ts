@@ -20,7 +20,7 @@ export interface EventSubscription {
   unsubscribe(): void;
 }
 
-export interface LysStackApi {
+export interface HermesApi {
   getHealth(): Promise<HealthStatus>;
   getAgents(): Promise<AgentSummary[]>;
   getAgent(id: AgentId): Promise<AgentDetail | null>;

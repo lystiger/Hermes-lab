@@ -7,7 +7,7 @@ import { DossierModal } from './DossierModal';
 import { useEventStream } from '../api/hooks';
 
 export const Layout: React.FC = () => {
-  // Mount Hermes event stream subscription (legacy LysStackApi client name)
+  // Mount the Hermes event stream subscription.
   useEventStream();
 
   return (

@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
-import { lysStackApi, isRealApiMode } from './client';
+import { hermesApi, isRealApiMode } from './client';
 import { EventSubscription } from './contracts';
 import {
   AgentSummary,
@@ -31,7 +31,7 @@ export function useHealth() {
   const checkHealth = useCallback(async () => {
     try {
       setLoading(true);
-      const data = await lysStackApi.getHealth();
+      const data = await hermesApi.getHealth();
       setHealth(data);
       setBackendHealth(data);
       setConnectionStatus('CONNECTED');
@@ -63,7 +63,7 @@ export function useAgents() {
   const fetchAgents = useCallback(async () => {
     try {
       setLoading(true);
-      const data = await lysStackApi.getAgents();
+      const data = await hermesApi.getAgents();
       setBaseAgents(data);
       if (isRealApiMode) {
         setConnectionStatus('CONNECTED');
@@ -108,7 +108,7 @@ export function useAgent(id?: AgentId) {
   const fetchAgent = useCallback(async (targetId: AgentId) => {
     try {
       setLoading(true);
-      const data = await lysStackApi.getAgent(targetId);
+      const data = await hermesApi.getAgent(targetId);
       setBaseAgent(data);
       setError(null);
     } catch (err) {
@@ -148,7 +148,7 @@ export function useJobs() {
   const fetchJobs = useCallback(async () => {
     try {
       setLoading(true);
-      const data = await lysStackApi.getJobs();
+      const data = await hermesApi.getJobs();
       setJobs(data);
       setError(null);
     } catch (err) {
@@ -174,7 +174,7 @@ export function useJob(id: string | null) {
   const fetchJob = useCallback(async (jobId: string) => {
     try {
       setLoading(true);
-      const data = await lysStackApi.getJob(jobId);
+      const data = await hermesApi.getJob(jobId);
       setJob(data);
       setError(null);
     } catch (err) {
@@ -204,7 +204,7 @@ export function usePipeline() {
   const fetchPipeline = useCallback(async () => {
     try {
       setLoading(true);
-      const data = await lysStackApi.getPipeline();
+      const data = await hermesApi.getPipeline();
       setPipeline(data);
       setError(null);
     } catch (err) {
@@ -231,9 +231,9 @@ export function useTelemetry() {
     async function load() {
       try {
         const [tel, q, proj] = await Promise.all([
-          lysStackApi.getTelemetry(),
-          lysStackApi.getProviderQuotas(),
-          lysStackApi.getProjections()
+          hermesApi.getTelemetry(),
+          hermesApi.getProviderQuotas(),
+          hermesApi.getProjections()
         ]);
         setTelemetry(tel);
         setQuotas(q);
@@ -256,7 +256,7 @@ export function useSettings() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    lysStackApi.getSettings().then(setSettings).finally(() => setLoading(false));
+    hermesApi.getSettings().then(setSettings).finally(() => setLoading(false));
   }, []);
 
   return { settings, loading };
@@ -272,7 +272,7 @@ export function useEventStream() {
     async function initStream() {
       // 1. Initial Health Check
       try {
-        const health = await lysStackApi.getHealth();
+        const health = await hermesApi.getHealth();
         if (isSubscribed) {
           setBackendHealth(health);
           setConnectionStatus('CONNECTED');
@@ -286,7 +286,7 @@ export function useEventStream() {
       // 2. Load historical events from API first (Task 9 & Item 2: Establish cursor = newest event ID)
       let initialCursor: string | undefined;
       try {
-        const history = await lysStackApi.getTraceEvents(100);
+        const history = await hermesApi.getTraceEvents(100);
         if (isSubscribed) {
           setInitialEvents(history);
           if (history.length > 0) {
@@ -303,7 +303,7 @@ export function useEventStream() {
 
       // 3. Open SSE stream starting strictly after newest historical event
       if (isSubscribed) {
-        eventSub = lysStackApi.subscribeEvents(
+        eventSub = hermesApi.subscribeEvents(
           (evt: TraceEvent) => {
             if (isSubscribed) {
               addTraceEvent(evt);
@@ -345,7 +345,7 @@ export function useThreads(jobId?: string, participant?: string) {
   const fetchThreads = useCallback(async () => {
     try {
       setLoading(true);
-      const data = await lysStackApi.getThreads(jobId, participant);
+      const data = await hermesApi.getThreads(jobId, participant);
       setThreads(data);
       setError(null);
     } catch (err) {
@@ -371,7 +371,7 @@ export function useThread(threadId: string | null) {
   const fetchThread = useCallback(async (id: string) => {
     try {
       setLoading(true);
-      const data = await lysStackApi.getThread(id);
+      const data = await hermesApi.getThread(id);
       setThread(data);
       setError(null);
     } catch (err) {
@@ -401,7 +401,7 @@ export function useMessages(threadId: string | null) {
   const fetchMessages = useCallback(async (id: string) => {
     try {
       setLoading(true);
-      const data = await lysStackApi.getMessages(id);
+      const data = await hermesApi.getMessages(id);
       setMessages(data);
       setError(null);
     } catch (err) {
@@ -431,7 +431,7 @@ export function useAgentInbox(agentId?: string, state?: string) {
   const fetchInbox = useCallback(async (targetAgent: string) => {
     try {
       setLoading(true);
-      const data = await lysStackApi.getAgentInbox(targetAgent, state);
+      const data = await hermesApi.getAgentInbox(targetAgent, state);
       setInbox(data);
       setError(null);
     } catch (err) {

@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { useConsoleStore } from '../stores/useConsoleStore';
-import { HttpLysStackApi } from '../api/adapters/httpAdapter';
+import { HttpHermesApi } from '../api/adapters/httpAdapter';
 import { TraceEvent } from '../api/types';
 
 describe('End-to-End Real Event Pipeline Flow', () => {
@@ -20,7 +20,7 @@ describe('End-to-End Real Event Pipeline Flow', () => {
 
     (global as any).EventSource = MockEventSource;
 
-    const api = new HttpLysStackApi('http://localhost:8000');
+    const api = new HttpHermesApi('http://localhost:8000');
 
     // Subscribe store to API adapter
     const sub = api.subscribeEvents((evt: TraceEvent) => {

@@ -29,7 +29,7 @@ describe('End-to-End Real Event Pipeline Flow', () => {
 
     expect(sseCallback).toBeDefined();
 
-    // Simulate real event arriving from LysStack backend
+    // Simulate real event arriving from Hermes Runtime API
     const incomingRealEvent = {
       id: 'evt_real_001',
       ts: '10:48:12.456',

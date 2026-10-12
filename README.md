@@ -2,7 +2,7 @@
 
 <div align="center">
 
-**Tactical AI Agent Orchestration & Telemetry Command Station**
+**Operator Console for the Hermes Runtime**
 
 [![React](https://img.shields.io/badge/React-19.2-61DAFB?style=flat-square&logo=react&logoColor=black)](https://react.dev/)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.8-3178C6?style=flat-square&logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
@@ -17,10 +17,10 @@
 
 ## ⚡ Overview
 
-**LysControl** is the operator-facing command station designed to visualize, monitor, and dispatch autonomous AI agent pipelines orchestrated by the **LysStack** control plane.
+**LysControl** is the operator-facing UI for visualizing and monitoring engineering jobs owned by the **Hermes Runtime**. Operators can submit control requests through Hermes REST APIs; Hermes owns scheduling and agent execution.
 
 > [!NOTE]
-> **Architectural Boundary**: LysControl is strictly a frontend visualization client. It does not own server scheduling, container execution, or provider API connections. All communication flows through the `LysStackApi` contract layer.
+> **Architectural Boundary**: LysControl is a frontend for visualization, telemetry, and operator controls. It does not execute agents or own canonical job/task state. It communicates with Hermes through REST/SSE. Existing `LysStackApi` code symbols and `VITE_LYSSTACK_API_URL` remain as compatibility names.
 
 ```text
                      USER
@@ -31,10 +31,10 @@
                        │
                        │ HTTP + SSE
                        ▼
-                HttpLysStackApi
+             Existing API adapter
                        │
                        ▼
-              LysStack Control API (FastAPI)
+              Hermes Runtime REST API (FastAPI)
                        │
           ┌────────────┼────────────┐
           │            │            │
@@ -49,11 +49,11 @@
 ## 🚦 Integration Status (Phase 3)
 
 ### 🟢 REAL INTEGRATION
-- **Control Plane Health (`GET /health`)**: Live health status, process uptime counter, and version metadata from LysStack.
-- **Dynamic Agent Registry (`GET /agents`)**: Consumes the live runtime `AgentRegistry` (`Antigravity/Gemini`, `Claude`, `Codex`, and dynamic operatives). No hardcoded agent conditionals.
+- **Runtime Health (`GET /health`)**: Live Hermes status, process uptime, and version metadata.
+- **Dynamic Agent Registry (`GET /agents`)**: Reads the live Hermes agent registry (`Antigravity/Gemini`, `Claude`, `Codex`, and dynamic agents).
 - **Runtime Event History (`GET /events`)**: Historical event log retrieval supporting limits and `after=<event-id>` cursor pagination.
 - **Live Event Stream (`GET /events/stream` via SSE)**: Real-time Server-Sent Events delivery for `runtime.started`, `agent.started`, `agent.finished`, `agent.failed`, and tool execution traces with stable event IDs and clean disconnect handling.
-- **HttpLysStackApi & Adapter Selection**: Environment-driven adapter switching (`VITE_LYSSTACK_API_URL`). When configured, connects to real backend; if unreachable, displays a genuine `disconnected` state without silently hiding failures behind mocks.
+- **REST/SSE API Adapter**: `VITE_LYSSTACK_API_URL` remains the existing configuration key and points to Hermes. If unavailable, LysControl shows a `disconnected` state rather than hiding failures behind mocks.
 - **Connection Indicator**: Header connection indicator reflects live network state (`connected`, `connecting`, `disconnected`, `mock mode`).
 
 ### 🟡 SIMULATED TEMPORARILY (Transitioning in Phase 4)
@@ -65,15 +65,15 @@
 
 ## 🛠️ Local Development & Quick Start
 
-### 1. Start the LysStack Control Plane Backend (`hermes-lab`)
+### 1. Start the Hermes Runtime API (`Hermes-lab`)
 
 ```bash
-cd /home/lystiger/projects/hermes-lab
+cd /home/lystiger/Projects/Hermes-lab
 source .venv/bin/activate
 uvicorn main:app --port 8000 --reload
 ```
 
-The control API will be available at `http://localhost:8000`:
+The Hermes Runtime API will be available at `http://localhost:8000`:
 - Health check: `http://localhost:8000/health`
 - Agent registry: `http://localhost:8000/agents`
 - Event history: `http://localhost:8000/events`
@@ -82,9 +82,9 @@ The control API will be available at `http://localhost:8000`:
 ### 2. Start the LysControl Frontend
 
 ```bash
-cd /home/lystiger/projects/LysControl
+cd /home/lystiger/Projects/LysControl
 
-# Connect to real LysStack backend
+# Connect LysControl to the Hermes Runtime API
 VITE_LYSSTACK_API_URL=http://localhost:8000 npm run dev
 
 # Or run in standalone mock mode (no backend required)
@@ -105,7 +105,7 @@ npm run test       # Vitest unit & architectural isolation suite (6 suites, 19 t
 npm run build      # Vite production bundle build
 
 # Backend checks (hermes-lab)
-cd /home/lystiger/projects/hermes-lab
+cd /home/lystiger/Projects/Hermes-lab
 pytest             # 109 passed, 2 skipped
 ```
 
@@ -117,13 +117,13 @@ pytest             # 109 passed, 2 skipped
 LysControl/
 ├── src/
 │   ├── api/
-│   │   ├── contracts.ts           # LysStackApi domain interface & EventSubscription
+│   │   ├── contracts.ts           # REST/SSE contract & EventSubscription (legacy LysStackApi name)
 │   │   ├── types.ts               # Domain models (AgentSummary, TraceEvent, HealthStatus)
 │   │   ├── actors.ts              # Domain actor presentation resolver (registry -> system -> fallback)
 │   │   ├── client.ts              # Pluggable API client factory (HTTP vs Mock adapter)
 │   │   ├── hooks.ts               # React hooks (useHealth, useAgents, useEventStream, useJobs)
 │   │   ├── adapters/
-│   │   │   ├── httpAdapter.ts     # Real LysStack HTTP + SSE client adapter
+│   │   │   ├── httpAdapter.ts     # Hermes REST + SSE adapter (legacy class name)
 │   │   │   └── mockAdapter.ts     # Standalone offline mock adapter
 │   │   └── mock/                  # Pure mock fixtures (isolated behind mockAdapter)
 │   ├── components/                # Layout, Sidebar, Header, JobModal, DossierModal

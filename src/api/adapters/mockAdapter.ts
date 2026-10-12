@@ -45,7 +45,7 @@ export class MockLysStackApi implements LysStackApi {
   async getHealth() {
     return {
       status: 'ok',
-      service: 'lysstack-mock',
+      service: 'hermes-mock',
       version: '0.1.0-mock',
       uptimeSeconds: 4200,
       timestamp: new Date().toISOString()
@@ -186,12 +186,12 @@ export class MockLysStackApi implements LysStackApi {
   async sendOperatorCommand(targetActorId: string, command: string): Promise<{ success: boolean; response: string }> {
     return {
       success: true,
-      response: `[LysStack / ${targetActorId}] Dispatched: "${command}". Processed by mock adapter.`
+      response: `[Hermes / ${targetActorId}] Dispatched: "${command}". Processed by mock adapter.`
     };
   }
 
   async triggerJobAction(jobId: string, action: 'retry' | 'pause' | 'cancel' | 'promote'): Promise<boolean> {
-    console.log(`[MockLysStackApi] Action '${action}' on job ${jobId}`);
+    console.log(`[MockHermesApi] Action '${action}' on job ${jobId}`);
     return true;
   }
   // --------------------------------------------------------------------------
@@ -207,7 +207,7 @@ export class MockLysStackApi implements LysStackApi {
         { id: "gemini", kind: "agent", displayName: "Gemini", accentColor: "#5B8CFF" },
         { id: "claude", kind: "agent", displayName: "Claude", accentColor: "#D9A05B" },
         { id: "codex", kind: "agent", displayName: "Codex", accentColor: "#3FB950" },
-        { id: "lysstack", kind: "runtime", displayName: "LysStack", accentColor: "#CBA35C" }
+        { id: "hermes", kind: "runtime", displayName: "Hermes", accentColor: "#CBA35C" }
       ],
       createdAt: "2026-08-22T10:40:00Z",
       updatedAt: "2026-08-22T10:42:17Z"
@@ -284,7 +284,7 @@ export class MockLysStackApi implements LysStackApi {
       id: "msg_mock_005",
       threadId: "thread_job_#142",
       from: { id: "codex", kind: "agent", displayName: "Codex", accentColor: "#3FB950", subtitle: "Precision Verifier" },
-      to: [{ id: "lysstack", kind: "runtime", displayName: "LysStack", accentColor: "#CBA35C" }],
+      to: [{ id: "hermes", kind: "runtime", displayName: "Hermes", accentColor: "#CBA35C" }],
       kind: "verification_result",
       intent: "verification_result",
       conversationId: "conv_sprint_142_review",
@@ -357,7 +357,7 @@ export class MockLysStackApi implements LysStackApi {
       id: `msg_mock_${Date.now()}`,
       threadId,
       from: { id: "operator", kind: "operator", displayName: "Operator", accentColor: "#E6E9ED", subtitle: "Human Operator" },
-      to: (to || ["lysstack"]).map((id) => resolveActorPresentation(id)),
+      to: (to || ["hermes"]).map((id) => resolveActorPresentation(id)),
       kind: kind || "operator",
       intent,
       conversationId,

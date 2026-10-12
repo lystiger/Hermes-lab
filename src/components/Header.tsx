@@ -15,13 +15,13 @@ export const Header: React.FC = () => {
   const pathname = location.pathname;
 
   let title = 'Overview';
-  let subtitle = isRealApiMode ? 'lysstack · control plane' : 'hermes · local runtime';
+  let subtitle = isRealApiMode ? 'hermes · runtime API' : 'hermes · local runtime';
   let crumb = '';
   let backPath = '';
 
   if (pathname === '/') {
     title = 'Overview';
-    subtitle = isRealApiMode ? 'lysstack · control plane' : 'hermes · local runtime';
+    subtitle = isRealApiMode ? 'hermes · runtime API' : 'hermes · local runtime';
   } else if (pathname === '/queue') {
     title = 'Queue';
     subtitle = '8 jobs · serial per repository';
@@ -41,7 +41,7 @@ export const Header: React.FC = () => {
     subtitle = isRealApiMode ? 'live SSE stream' : 'trace stream';
   } else if (pathname === '/settings') {
     title = 'Settings';
-    subtitle = isRealApiMode ? 'control plane api' : 'local';
+    subtitle = isRealApiMode ? 'Hermes REST/SSE API' : 'local';
   }
 
   const getConnectionColor = () => {

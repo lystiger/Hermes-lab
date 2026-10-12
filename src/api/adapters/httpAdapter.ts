@@ -72,7 +72,7 @@ export class HttpLysStackApi implements LysStackApi {
   async getHealth(): Promise<HealthStatus> {
     const res = await fetch(`${this.baseUrl}/health`);
     if (!res.ok) {
-      throw new Error(`LysStack /health returned HTTP ${res.status}: ${res.statusText}`);
+      throw new Error(`Hermes /health returned HTTP ${res.status}: ${res.statusText}`);
     }
     return res.json();
   }
@@ -80,7 +80,7 @@ export class HttpLysStackApi implements LysStackApi {
   async getAgents(): Promise<AgentSummary[]> {
     const res = await fetch(`${this.baseUrl}/agents`);
     if (!res.ok) {
-      throw new Error(`LysStack /agents returned HTTP ${res.status}: ${res.statusText}`);
+      throw new Error(`Hermes /agents returned HTTP ${res.status}: ${res.statusText}`);
     }
     const data: BackendAgentDTO[] = await res.json();
 
@@ -90,7 +90,7 @@ export class HttpLysStackApi implements LysStackApi {
       return {
         id: dto.id,
         displayName: dto.displayName || actor.displayName,
-        provider: dto.provider || 'LysStack Agent',
+        provider: dto.provider || 'Hermes Agent',
         model: dto.model || 'unknown',
         role: dto.role || 'Specialized Operative',
         capabilities: dto.capabilities || ['execution'],
@@ -153,7 +153,7 @@ export class HttpLysStackApi implements LysStackApi {
 
     const res = await fetch(`${this.baseUrl}/jobs?${params.toString()}`);
     if (!res.ok) {
-      throw new Error(`LysStack /jobs returned HTTP ${res.status}: ${res.statusText}`);
+      throw new Error(`Hermes /jobs returned HTTP ${res.status}: ${res.statusText}`);
     }
     const data: any[] = await res.json();
 
@@ -182,7 +182,7 @@ export class HttpLysStackApi implements LysStackApi {
     const res = await fetch(`${this.baseUrl}/jobs/${encodeURIComponent(id)}`);
     if (!res.ok) {
       if (res.status === 404) return null;
-      throw new Error(`LysStack /jobs/${id} returned HTTP ${res.status}: ${res.statusText}`);
+      throw new Error(`Hermes /jobs/${id} returned HTTP ${res.status}: ${res.statusText}`);
     }
     const data = await res.json();
 
@@ -295,7 +295,7 @@ export class HttpLysStackApi implements LysStackApi {
 
     const res = await fetch(`${this.baseUrl}/events?${params.toString()}`);
     if (!res.ok) {
-      throw new Error(`LysStack /events returned HTTP ${res.status}: ${res.statusText}`);
+      throw new Error(`Hermes /events returned HTTP ${res.status}: ${res.statusText}`);
     }
     const data: BackendTraceEventDTO[] = await res.json();
 
@@ -363,7 +363,7 @@ export class HttpLysStackApi implements LysStackApi {
 
         handler(event);
       } catch (err) {
-        console.error('[HttpLysStackApi] Failed to parse SSE event:', err, rawEvent.data);
+        console.error('[HttpHermesApi] Failed to parse SSE event:', err, rawEvent.data);
       }
     };
 
@@ -371,8 +371,8 @@ export class HttpLysStackApi implements LysStackApi {
     eventSource.onmessage = parseAndEmit;
 
     eventSource.onerror = (evt) => {
-      console.warn('[HttpLysStackApi] SSE connection warning / disconnect:', evt);
-      onError?.(new Error('SSE connection disconnected from LysStack control plane'));
+      console.warn('[HttpHermesApi] SSE connection warning / disconnect:', evt);
+      onError?.(new Error('SSE connection disconnected from Hermes Runtime API'));
     };
 
     return {
@@ -417,7 +417,7 @@ export class HttpLysStackApi implements LysStackApi {
   async getSettings(): Promise<{ runtime: SettingItem[]; policy: SettingItem[] }> {
     return {
       runtime: [
-        { label: 'LysStack Control API', value: this.baseUrl, color: '#3FB950' },
+        { label: 'Hermes Runtime API', value: this.baseUrl, color: '#3FB950' },
         { label: 'Event Bus Transport', value: 'SSE / Server-Sent Events', color: '#CBA35C' }
       ],
       policy: [
@@ -430,7 +430,7 @@ export class HttpLysStackApi implements LysStackApi {
   async sendOperatorCommand(targetActorId: string, _command: string): Promise<{ success: boolean; response: string }> {
     return {
       success: false,
-      response: `[LysStack / ${targetActorId}] Command execution is not available in real control-plane mode yet.`
+      response: `[Hermes / ${targetActorId}] Command execution is not available in real Hermes API mode yet.`
     };
   }
 
@@ -442,12 +442,12 @@ export class HttpLysStackApi implements LysStackApi {
         });
         return res.ok;
       } catch (err) {
-        console.error('[HttpLysStackApi] Failed to cancel job:', err);
+        console.error('[HttpHermesApi] Failed to cancel job:', err);
         return false;
       }
     }
 
-    console.warn(`[HttpLysStackApi] Action '${action}' on job ${jobId} is not available in real control-plane mode yet.`);
+    console.warn(`[HttpHermesApi] Action '${action}' on job ${jobId} is not available in real Hermes API mode yet.`);
     return false;
   }
   // --------------------------------------------------------------------------
@@ -462,7 +462,7 @@ export class HttpLysStackApi implements LysStackApi {
 
     const res = await fetch(`${this.baseUrl}/threads?${params.toString()}`);
     if (!res.ok) {
-      throw new Error(`LysStack /threads returned HTTP ${res.status}: ${res.statusText}`);
+      throw new Error(`Hermes /threads returned HTTP ${res.status}: ${res.statusText}`);
     }
     const data: any[] = await res.json();
     return data.map((t) => ({
@@ -484,7 +484,7 @@ export class HttpLysStackApi implements LysStackApi {
     const res = await fetch(`${this.baseUrl}/threads/${encodeURIComponent(threadId)}`);
     if (!res.ok) {
       if (res.status === 404) return null;
-      throw new Error(`LysStack /threads/${threadId} returned HTTP ${res.status}: ${res.statusText}`);
+      throw new Error(`Hermes /threads/${threadId} returned HTTP ${res.status}: ${res.statusText}`);
     }
     const t = await res.json();
     return {
@@ -511,7 +511,7 @@ export class HttpLysStackApi implements LysStackApi {
     const res = await fetch(`${this.baseUrl}/threads/${encodeURIComponent(threadId)}/messages?${params.toString()}`);
     if (!res.ok) {
       if (res.status === 404) return [];
-      throw new Error(`LysStack /threads/${threadId}/messages returned HTTP ${res.status}: ${res.statusText}`);
+      throw new Error(`Hermes /threads/${threadId}/messages returned HTTP ${res.status}: ${res.statusText}`);
     }
     const data: any[] = await res.json();
     return data.map((m) => {
@@ -561,7 +561,7 @@ export class HttpLysStackApi implements LysStackApi {
 
     const res = await fetch(`${this.baseUrl}/agents/${encodeURIComponent(agentId)}/inbox?${params.toString()}`);
     if (!res.ok) {
-      throw new Error(`LysStack /agents/${agentId}/inbox returned HTTP ${res.status}: ${res.statusText}`);
+      throw new Error(`Hermes /agents/${agentId}/inbox returned HTTP ${res.status}: ${res.statusText}`);
     }
     const data: any[] = await res.json();
     return data.map((e) => ({
@@ -599,7 +599,7 @@ export class HttpLysStackApi implements LysStackApi {
       })
     });
     if (!res.ok) {
-      throw new Error(`LysStack POST /messages returned HTTP ${res.status}: ${res.statusText}`);
+      throw new Error(`Hermes POST /messages returned HTTP ${res.status}: ${res.statusText}`);
     }
     const m = await res.json();
     const fromActor = resolveActorPresentation(m.from?.id || "operator");

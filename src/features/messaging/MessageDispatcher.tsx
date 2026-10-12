@@ -43,8 +43,7 @@ export const MessageDispatcher: React.FC = () => {
             onChange={(e) => setSelectedTarget(e.target.value)}
             className="bg-[#12151A] border border-[#2A3038] font-mono-code text-[11px] text-[#E6E9ED] px-2 py-1 outline-none cursor-pointer"
           >
-            <option value="hermes">Hermes (Runtime Orchestrator)</option>
-            <option value="lysstack">LysStack Control Plane</option>
+            <option value="hermes">Hermes Runtime</option>
             {agents.map((ag) => (
               <option key={ag.id} value={ag.id}>
                 {ag.displayName} ({ag.role.split('·')[0].trim()})

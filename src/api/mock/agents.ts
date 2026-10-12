@@ -283,7 +283,7 @@ export function createDynamicMockAgent(
     capabilities,
     status: 'IDLE',
     phase: 'REVIEW',
-    currentTask: 'Awaiting task dispatch from LysStack scheduler.',
+    currentTask: 'Awaiting task dispatch from Hermes scheduler.',
     activeTool: 'tool: —',
     contextPct: '5%',
     contextUsed: '10.0k',

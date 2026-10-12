@@ -27,7 +27,7 @@ export const OperationalThreadView: React.FC<OperationalThreadViewProps> = ({
   const [selectedArtifact, setSelectedArtifact] = useState<ArtifactRef | null>(null);
   const [operatorText, setOperatorText] = useState('');
   const [isSending, setIsSending] = useState(false);
-  const [targetRecipient, setTargetRecipient] = useState<string>(assignedAgentIds[0] || 'lysstack');
+  const [targetRecipient, setTargetRecipient] = useState<string>(assignedAgentIds[0] || 'hermes');
   const [replyToMessageId, setReplyToMessageId] = useState<string | null>(null);
 
   // Extract distinct conversation IDs present in the messages
@@ -330,7 +330,7 @@ export const OperationalThreadView: React.FC<OperationalThreadViewProps> = ({
                 onChange={(e) => setTargetRecipient(e.target.value)}
                 className="bg-[#12151A] border border-[#242A36] font-mono-code text-[10.5px] text-[#E6E9ED] px-2 py-0.5 outline-none cursor-pointer"
               >
-                <option value="lysstack">LysStack Control Plane</option>
+                <option value="hermes">Hermes Runtime</option>
                 <option value="hermes_runner">Hermes Runner</option>
                 {assignedAgentIds.map((aid) => (
                   <option key={aid} value={aid}>

@@ -19,10 +19,11 @@ export const SYSTEM_ACTORS: Record<string, ActorRef> = {
     displayName: 'Herdr',
     accentColor: '#8C949F'
   },
+  // Legacy actor ID retained for events/messages created before the runtime was renamed.
   lysstack: {
-    id: 'lysstack',
-    kind: 'system',
-    displayName: 'LysStack Control Plane',
+    id: 'hermes',
+    kind: 'runtime',
+    displayName: 'Hermes',
     accentColor: '#CBA35C'
   },
   lyscontrol: {
@@ -89,6 +90,13 @@ export function resolveActorPresentation(
   // 2. Look up in known system actors
   if (SYSTEM_ACTORS[normalized]) {
     return SYSTEM_ACTORS[normalized];
+  }
+
+  // Runtime event sources include component suffixes such as hermes.scheduler.
+  // Historical LysStack-prefixed runtime events use the same presentation.
+  const runtimePrefix = normalized.split('.', 1)[0];
+  if (runtimePrefix === 'hermes' || runtimePrefix === 'lysstack') {
+    return { ...SYSTEM_ACTORS.hermes, id: normalized };
   }
 
   // 3. Generic unknown actor fallback (support any open string ID)

@@ -17,7 +17,7 @@ describe('HttpLysStackApi Contract Implementation', () => {
   it('fetches and maps /health status successfully', async () => {
     const mockHealth = {
       status: 'ok',
-      service: 'lysstack',
+      service: 'hermes',
       version: '0.1.0',
       uptimeSeconds: 1842,
       timestamp: '2026-08-22T08:00:00Z'
@@ -31,7 +31,7 @@ describe('HttpLysStackApi Contract Implementation', () => {
     const health = await api.getHealth();
     expect(global.fetch).toHaveBeenCalledWith('http://localhost:8000/health');
     expect(health.status).toBe('ok');
-    expect(health.service).toBe('lysstack');
+    expect(health.service).toBe('hermes');
     expect(health.uptimeSeconds).toBe(1842);
   });
 

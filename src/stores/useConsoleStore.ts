@@ -20,7 +20,7 @@ interface AgentRuntimeState {
 }
 
 interface ConsoleUIState {
-  // Connection State to LysStack Backend
+  // Connection state to Hermes Runtime API
   connectionStatus: ConnectionStatus;
   backendHealth: HealthStatus | null;
 

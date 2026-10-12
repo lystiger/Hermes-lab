@@ -35,7 +35,7 @@ describe('Job Queue & Arbitrary Agent Reference', () => {
       id: 'run_custom_sprint_99',
       sprintId: 'custom-sprint-99',
       title: 'Custom Multi-Step Sprint',
-      repository: 'LysStack/Core',
+      repository: 'Unigreen/Core',
       branch: 'hermes/custom-sprint/integration',
       priority: 'P1',
       status: 'RUNNING',

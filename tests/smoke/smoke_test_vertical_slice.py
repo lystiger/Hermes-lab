@@ -25,7 +25,7 @@ def get_free_port():
 def run_smoke_test():
     port = get_free_port()
     base_url = f"http://127.0.0.1:{port}"
-    print(f"[*] Starting LysStack control-plane process on {base_url}...")
+    print(f"[*] Starting Hermes Runtime process on {base_url}...")
 
     config = uvicorn.Config(app=app, host="127.0.0.1", port=port, log_level="error")
     server = uvicorn.Server(config=config)
@@ -61,10 +61,10 @@ def run_smoke_test():
             metadata={"phase": "HARDEN", "task": "Store Invariant Verification"},
         )
         assert published is True
-        print("    -> Telemetry event accepted by LysStack control plane.")
+        print("    -> Telemetry event accepted by Hermes Runtime.")
 
         # Step 4: Verify /events contains the runner event
-        print("[*] 4. Querying GET /events in control plane...")
+        print("[*] 4. Querying GET /events from Hermes Runtime API...")
         with urllib.request.urlopen(f"{base_url}/events?limit=5", timeout=1.0) as resp:
             events = json.loads(resp.read().decode("utf-8"))
             recent_event = next(e for e in events if e["kind"] == "agent.started" and e["source"]["id"] == "claude")

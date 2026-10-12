@@ -37,7 +37,7 @@ class RuntimeEvent:
 
 class RuntimeEventBus:
     """
-    Lightweight, thread-safe, in-process event bus for LysStack.
+    Lightweight, thread-safe, in-process event bus for the Hermes runtime.
     Maintains recent event history and dispatches live events to async SSE subscribers.
     """
 
@@ -126,5 +126,5 @@ class RuntimeEventBus:
             self._subscribers.discard(queue)
 
 
-# Singleton event bus instance for LysStack runtime
+# Singleton event bus instance for Hermes runtime
 event_bus = RuntimeEventBus()

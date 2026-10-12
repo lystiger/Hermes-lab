@@ -165,7 +165,7 @@ def test_subprocess_cross_process_job_lifecycle():
 def test_post_jobs_spawns_real_runner_and_updates_jobs_lifecycle():
     """
     Tests that POST /jobs spawns a real runner subprocess, passes LYSSTACK_CONTROL_URL,
-    and the runner publishes real lifecycle events back into the control plane.
+    and the runner publishes real lifecycle events back into the Hermes Runtime API.
     """
     port = get_free_port()
     host = "127.0.0.1"
@@ -216,7 +216,7 @@ def test_post_jobs_spawns_real_runner_and_updates_jobs_lifecycle():
         with open(spec_path, "w", encoding="utf-8") as f:
             json.dump(test_spec, f, indent=2)
 
-        # Start FastAPI control plane subprocess
+        # Start the Hermes Runtime API subprocess
         env = dict(os.environ)
         env["LYSSTACK_CONTROL_URL"] = base_url
 

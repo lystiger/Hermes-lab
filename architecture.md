@@ -1,12 +1,12 @@
-# LysStack / Hermes Lab Architecture & Phase Evolution
+# Hermes Runtime Architecture & Phase Evolution
 
 ## 1. Executive Summary & System Overview
 
-**LysStack** (orchestration backend / control plane in `Hermes-lab`) and **LysControl** (operator-facing React/Vite control station) provide an end-to-end, capability-aware, multi-agent orchestration runtime for software engineering workflows.
+**Hermes** is the authoritative engineering execution runtime: it owns orchestration, job/task state, scheduling, agent execution, worktrees, verification, event history, recovery, and provider capacity. **LysStack** supplies bounded engineering context, policy, and decisions. **LysControl** is the operator-facing React/Vite UI and consumes Hermes through REST/SSE.
 
 ### Core Philosophy
 
-Traditional workflow orchestrators model jobs as static, predefined Directed Acyclic Graphs (DAGs) or rigid sequential phase loops. LysStack models execution as a **reactive runtime spine**:
+Hermes models execution as a **reactive runtime spine** with mutable task graphs and event-driven scheduling:
 
 ```text
 User Goal / Sprint Spec
@@ -45,6 +45,10 @@ Bounded Dynamic Replanner ──[Mutations: Add/Supersede Task]───┘
 
 ```mermaid
 flowchart TB
+    subgraph Context ["LysStack (Engineering Context & Policy)"]
+        ContextBundle["Bounded project context, decisions, constraints"]
+    end
+
     subgraph UI ["LysControl (Frontend Control Station)"]
         Station["Vite / React SPA"]
         DAGView["Dynamic DAG Visualizer"]
@@ -52,7 +56,7 @@ flowchart TB
         EventStream["Live Event / Telemetry Feed"]
     end
 
-    subgraph API ["Control Plane & API Layer (FastAPI)"]
+    subgraph API ["Hermes Runtime REST API (FastAPI)"]
         Router["main.py API Router"]
         JobSvc["JobService (Runtime Registry)"]
         EvtBus["RuntimeEventBus (SSE Broadcaster)"]
@@ -86,6 +90,7 @@ flowchart TB
     Router <--> MsgMgr
 
     JobSvc --> Engine
+    ContextBundle -. "bounded context" .-> Engine
     Engine --> TGraph
     Engine --> Sched
     Engine --> ExecMgr
@@ -263,7 +268,7 @@ Phase 10: Runtime Resilience, Recovery, Capacity Awareness & Rerouting
    ├── Dynamic Capability-Based Task Rerouting & Failover (ReroutePolicy)
    ├── Closed/Open/Half-Open Circuit Breakers (CircuitBreaker, CircuitBreakerRegistry)
    ├── Non-terminal JobState.WAITING_FOR_CAPACITY state and automatic capacity restoration
-   └── Control-Plane APIs: GET /jobs/recoverable, POST /jobs/{id}/resume, GET /jobs/{id}/recovery
+   └── Hermes Runtime APIs: GET /jobs/recoverable, POST /jobs/{id}/resume, GET /jobs/{id}/recovery
 ```
 
 ---

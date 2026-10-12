@@ -1,5 +1,5 @@
 """
-LysStack Reactive Runtime Spine (Phase 8).
+Hermes Reactive Runtime Spine (Phase 8).
 Provides an event-driven, mutable, capability-aware execution runtime.
 """
 

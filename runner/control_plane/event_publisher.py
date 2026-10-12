@@ -20,10 +20,10 @@ logger = logging.getLogger("hermes.event_publisher")
 class RuntimeEventPublisher:
     """
     Runner-side lightweight HTTP publisher that streams sprint execution telemetry,
-    messages, threads, and artifacts to the LysStack control-plane API process.
+    messages, threads, and artifacts to the Hermes runtime REST API.
 
     Failure isolation:
-    If the control plane URL is not configured or unavailable, execution continues unaffected.
+    If the Hermes Runtime API URL is unavailable, event publishing is skipped and execution continues.
     """
 
     def __init__(self, control_url: Optional[str] = None, timeout: float = 1.0):
@@ -52,7 +52,7 @@ class RuntimeEventPublisher:
                 if resp.status in {200, 201, 202}:
                     return True
                 logger.warning(
-                    "Control plane returned unexpected status %s for %s",
+                    "Hermes Runtime API returned unexpected status %s for %s",
                     resp.status,
                     endpoint_path,
                 )

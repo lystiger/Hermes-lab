@@ -90,7 +90,7 @@ class AgentSummaryDTO:
 
 class AgentService:
     """
-    Service that exposes dynamic agent registrations from the Hermes / LysStack registry with Persona profiles.
+    Service that exposes dynamic agent registrations from the Hermes runtime registry with Persona profiles.
     """
 
     def __init__(self, registry=None):

@@ -34,7 +34,7 @@ def get_free_port():
 def run_phase511_smoke_test():
     port = get_free_port()
     base_url = f"http://127.0.0.1:{port}"
-    print(f"[*] 1. Starting LysStack control-plane on {base_url}...")
+    print(f"[*] 1. Starting Hermes Runtime on {base_url}...")
 
     config = uvicorn.Config(app=app, host="127.0.0.1", port=port, log_level="error")
     server = uvicorn.Server(config=config)
@@ -56,7 +56,7 @@ def run_phase511_smoke_test():
         target_repo = tmp_path / "target_repo"
         target_repo.mkdir()
         subprocess.run(["git", "init", "-b", "main"], cwd=target_repo, check=True, capture_output=True)
-        subprocess.run(["git", "config", "user.email", "smoke@lysstack.org"], cwd=target_repo, check=True)
+        subprocess.run(["git", "config", "user.email", "smoke@hermes.local"], cwd=target_repo, check=True)
         subprocess.run(["git", "config", "user.name", "Smoke Tester"], cwd=target_repo, check=True)
         (target_repo / "README.md").write_text("# Smoke Test Repo\n", encoding="utf-8")
         subprocess.run(["git", "add", "."], cwd=target_repo, check=True)
@@ -112,8 +112,8 @@ def run_phase511_smoke_test():
         spec_file = tmp_path / "smoke-511.json"
         spec_file.write_text(json.dumps(spec, indent=2), encoding="utf-8")
 
-        # 4. Post Operator Guidance Message to Claude via Control Plane
-        print("[*] 2. Sending operator guidance message to Claude via Control Plane...")
+        # 4. Post operator guidance to Claude via Hermes Runtime API
+        print("[*] 2. Sending operator guidance message to Claude via Hermes Runtime API...")
         op_payload = json.dumps({
             "threadId": thread_id,
             "to": ["claude"],

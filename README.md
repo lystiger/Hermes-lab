@@ -1,10 +1,10 @@
-# Hermes Lab
+# Hermes Runtime
 
-FastAPI health service application and multi-agent experiment lab / orchestration control root.
+The authoritative engineering execution runtime for job orchestration, task scheduling, agent execution, worktrees, verification, event history, recovery, and provider capacity. LysStack supplies bounded engineering context, policy, and decisions; it does not execute agents or schedule runtime jobs. LysControl is the operator-facing UI and consumes Hermes through REST/SSE.
 
 ## Repository Structure
 
-This repository serves as Hermes' control root: it owns runner code, sprint specifications, prompts, and reports. Sprint specifications can target this repository directly or configure `target_repo` to orchestrate changes across external local Git repositories on Linux, WSL, or native Windows.
+This repository contains Hermes runtime and runner code, sprint specifications, prompts, and reports. Sprint specifications can target this repository directly or configure `target_repo` to orchestrate changes across external local Git repositories on Linux, WSL, or native Windows.
 
 ### Key Capabilities
 
@@ -12,6 +12,12 @@ This repository serves as Hermes' control root: it owns runner code, sprint spec
 - **Execution Backends**: `subprocess` runtime alongside one-shot and sessionful `herdr` agent lifecycle backends.
 - **External Repository & Platform Portability**: Clean separation between Hermes control root (`control_root`) and target repositories (`target_repo`) across Linux, WSL, and native Windows without cross-kernel path coupling.
 - **Generic Verification & Playwright Support**: Declarative, ordered verification pipeline supporting arbitrary test suites (Playwright E2E browser tests, pytest, uv, npm, etc.) with per-step timeouts, working directories, and sanitized reporting.
+
+## Compatibility Names
+
+`LYSSTACK_CONTROL_URL` and the `LYSSTACK_*` agent-message markers are retained
+for existing runner configurations and prompt protocols. They refer to Hermes
+Runtime APIs and messages, not a separate LysStack execution service.
 
 ## Worktree Layout
 

@@ -921,7 +921,7 @@ class TestPhase61PersonaLoaderRuntimeWiring(unittest.TestCase):
 class TestPhase61CrossProcessSmoke(unittest.TestCase):
     """
     Real cross-process smoke test:
-    Process A: Control Plane (FastAPI in background thread/process)
+    Process A: Hermes Runtime API (FastAPI in background thread/process)
     Process B: Hermes Runner spawned as separate subprocess with LYSSTACK_CONTROL_URL
     """
     @classmethod
@@ -1017,7 +1017,7 @@ class TestPhase61CrossProcessSmoke(unittest.TestCase):
             spec_file = tmp_path / "test-p61.json"
             spec_file.write_text(json.dumps(sprint_spec, indent=2), encoding="utf-8")
 
-            # 1. Post initial Operator message targeted to Claude via Control Plane HTTP endpoint
+            # 1. Post initial operator message to Claude via the Hermes Runtime API
             op_payload = json.dumps({
                 "threadId": thread_id,
                 "to": ["claude"],
@@ -1079,7 +1079,7 @@ sys.exit(0 if success else 1)
 
             self.assertEqual(run_proc.returncode, 0, f"Runner failed:\n{run_proc.stdout}\n{run_proc.stderr}")
 
-            # 3. Verify messages were delivered and recorded into Control Plane MessageStore
+            # 3. Verify messages were delivered and recorded in the Hermes MessageStore
             with urllib.request.urlopen(f"{self.control_url}/threads/{thread_id}/messages") as resp:
                 msgs = json.loads(resp.read().decode("utf-8"))
                 self.assertGreater(len(msgs), 0)

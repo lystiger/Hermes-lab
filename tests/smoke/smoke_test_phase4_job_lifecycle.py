@@ -25,7 +25,7 @@ def get_free_port():
 def run_phase4_smoke_test():
     port = get_free_port()
     base_url = f"http://127.0.0.1:{port}"
-    print(f"[*] Starting LysStack control-plane process on {base_url}...")
+    print(f"[*] Starting Hermes Runtime process on {base_url}...")
 
     config = uvicorn.Config(app=app, host="127.0.0.1", port=port, log_level="error")
     server = uvicorn.Server(config=config)
@@ -74,7 +74,7 @@ def run_phase4_smoke_test():
             job_id=job_id,
         )
 
-        # Step 3: Query /jobs in real control plane
+        # Step 3: Query /jobs from Hermes Runtime API
         print("[*] 3. Querying GET /jobs...")
         with urllib.request.urlopen(f"{base_url}/jobs", timeout=1.0) as resp:
             jobs = json.loads(resp.read().decode("utf-8"))

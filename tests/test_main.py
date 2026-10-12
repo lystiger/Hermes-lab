@@ -28,7 +28,7 @@ def test_health():
     assert response.status_code == 200
     data = response.json()
     assert data["status"] == "ok"
-    assert data["service"] == "lysstack"
+    assert data["service"] == "hermes"
 
 
 def test_ready():
@@ -47,7 +47,7 @@ def test_info():
     response = client.get("/info")
     assert response.status_code == 200
     data = response.json()
-    assert "LysStack" in data["name"]
+    assert data["name"] == "Hermes Runtime"
     assert data["version"] == "0.1.0"
     assert data["environment"] == "development"
 

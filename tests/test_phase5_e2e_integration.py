@@ -14,10 +14,10 @@ ROOT_DIR = Path(__file__).resolve().parent.parent
 class TestPhase5EndToEndIntegration(unittest.TestCase):
     """
     End-to-End Cross-Process integration test for Phase 5.1.
-    Process A: Uvicorn running LysStack Control Plane on a dynamic test port.
+    Process A: Uvicorn running Hermes Runtime on a dynamic test port.
     Process B: Managed Hermes Runner executing a multi-phase sprint.
     Verifies:
-      - Live operator message posted to control plane reaches target agent's effective prompt.
+      - Live operator message posted to the Hermes Runtime API reaches the target agent's prompt.
       - Unrelated agent does not receive the message.
       - Consumed message transitions from DELIVERED to ACKNOWLEDGED upon execution.
       - Artifact trust is truthfully validated and persisted.
@@ -29,7 +29,7 @@ class TestPhase5EndToEndIntegration(unittest.TestCase):
         self.port = 8995
         self.control_url = f"http://127.0.0.1:{self.port}"
 
-        # 1. Start Control Plane (Process A)
+        # 1. Start Hermes Runtime API (Process A)
         env = dict(os.environ)
         env["PYTHONUNBUFFERED"] = "1"
         self.server_proc = subprocess.Popen(
@@ -62,7 +62,7 @@ class TestPhase5EndToEndIntegration(unittest.TestCase):
             except Exception:
                 time.sleep(0.1)
 
-        self.assertTrue(started, "LysStack Control Plane failed to start within 5 seconds")
+        self.assertTrue(started, "Hermes Runtime failed to start within 5 seconds")
 
     def tearDown(self):
         if self.server_proc:
@@ -78,8 +78,8 @@ class TestPhase5EndToEndIntegration(unittest.TestCase):
         target_repo = self.tmp_path / "target_repo"
         target_repo.mkdir()
         subprocess.run(["git", "init", "-b", "main"], cwd=target_repo, check=True, capture_output=True)
-        subprocess.run(["git", "config", "user.email", "test@lysstack.org"], cwd=target_repo, check=True)
-        subprocess.run(["git", "config", "user.name", "LysStack Tester"], cwd=target_repo, check=True)
+        subprocess.run(["git", "config", "user.email", "test@hermes.local"], cwd=target_repo, check=True)
+        subprocess.run(["git", "config", "user.name", "Hermes Tester"], cwd=target_repo, check=True)
         (target_repo / "README.md").write_text("# Test Repo\n", encoding="utf-8")
         subprocess.run(["git", "add", "."], cwd=target_repo, check=True)
         subprocess.run(["git", "commit", "-m", "initial commit"], cwd=target_repo, check=True)
@@ -239,7 +239,7 @@ sys.exit(0 if success else 1)
         self.assertIn("intent: operator_note", claude_prompt)
         self.assertIn("Please inspect scheduler mutex contention before modifying state.", claude_prompt)
 
-        # 5. Verify Operator Message transitioned to ACKNOWLEDGED in Control Plane (Process A)
+        # 5. Verify operator message transitioned to ACKNOWLEDGED in Hermes Runtime API (Process A)
         with urllib.request.urlopen(f"{self.control_url}/agents/claude/inbox?state=ACKNOWLEDGED") as resp:
             inbox_acked = json.loads(resp.read().decode("utf-8"))
             acked_entry = next((e for e in inbox_acked if e["messageId"] == op_msg_id), None)

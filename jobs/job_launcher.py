@@ -631,7 +631,7 @@ class JobLauncher:
                 job_id=job_id,
             )
             event_bus.publish(
-                source_id="lysstack",
+                source_id="hermes",
                 source_kind="runtime",
                 source_name="JobLauncher",
                 kind="job.cancelled",
@@ -675,7 +675,7 @@ class JobLauncher:
                 job_id=job_id,
             )
             event_bus.publish(
-                source_id="lysstack",
+                source_id="hermes",
                 source_kind="runtime",
                 source_name="JobLauncher",
                 kind="job.cancelled",
@@ -731,7 +731,7 @@ class JobLauncher:
                 job_id=job_id,
             )
             event_bus.publish(
-                source_id="lysstack",
+                source_id="hermes",
                 source_kind="runtime",
                 source_name="JobLauncher",
                 kind="job.cancelled",

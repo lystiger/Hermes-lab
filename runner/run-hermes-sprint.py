@@ -469,7 +469,7 @@ class HermesSprintRunner:
         consumed = getattr(self, "_consumed_message_ids", set())
         messages_by_id = {}
 
-        # 1. Fetch remote messages from control plane inbox
+        # 1. Fetch remote messages from the Hermes Runtime API inbox
         if default_publisher and default_publisher.enabled:
             remote_entries = default_publisher.fetch_agent_inbox(
                 agent_id=current_agent,
@@ -1375,7 +1375,7 @@ class HermesSprintRunner:
                 from_actor={"id": agent, "kind": "agent", "displayName": agent.capitalize()},
                 to_actors=[
                     {"id": "hermes_runner", "kind": "runtime", "displayName": "Hermes Runner"},
-                    {"id": "lysstack", "kind": "runtime", "displayName": "LysStack"},
+                    {"id": "hermes", "kind": "runtime", "displayName": "Hermes"},
                 ],
                 kind="warning",
                 intent="phase_failure",
@@ -1401,7 +1401,7 @@ class HermesSprintRunner:
     def schedule_a2a_turns(self, phase, wt_dir, conversation_id=None):
         """
         Hermes A2A Turn Scheduler (Phase 6 / Phase 6.1):
-        Discovers pending schedulable messages from remote control plane inboxes and local store.
+        Discovers pending schedulable messages from Hermes Runtime API inboxes and the local store.
         Executes bounded multi-agent turns with structured prompt injection, extracts structured output,
         records outgoing messages with authoritative context inheritance, and tracks turn ACKs.
         Guarantees that agents never call each other directly; Hermes remains the sole execution authority.
@@ -1446,7 +1446,7 @@ class HermesSprintRunner:
             candidate_messages = []
             seen_ids = set()
 
-            # 1. Discover pending messages from Remote Control Plane inboxes (LysStack) with thread/job scoping
+            # 1. Discover pending messages from Hermes Runtime API inboxes with thread/job scoping
             if default_publisher and default_publisher.enabled:
                 for ag_id in phases_by_agent:
                     try:
@@ -2048,7 +2048,7 @@ class HermesSprintRunner:
         self._record_message(
             from_actor={"id": verifier_agent, "kind": "agent", "displayName": verifier_agent.capitalize()},
             to_actors=[
-                {"id": "lysstack", "kind": "runtime", "displayName": "LysStack"},
+                {"id": "hermes", "kind": "runtime", "displayName": "Hermes"},
                 {"id": "hermes_runner", "kind": "runtime", "displayName": "Hermes Runner"},
             ],
             kind="verification_result",
@@ -2144,7 +2144,7 @@ class HermesSprintRunner:
             for p in self.spec.get("phases", [])
         ]
         participants.append({"id": "hermes_runner", "kind": "runtime", "displayName": "Hermes Runner"})
-        participants.append({"id": "lysstack", "kind": "runtime", "displayName": "LysStack"})
+        participants.append({"id": "hermes", "kind": "runtime", "displayName": "Hermes"})
 
         if default_publisher:
             default_publisher.publish_thread(

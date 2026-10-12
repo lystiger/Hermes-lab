@@ -180,7 +180,7 @@ class RuntimeEventBridge:
             "metadata": job.metadata,
         }
         return await self.persist_and_publish(
-            source_id="lysstack.scheduler",
+            source_id="hermes.scheduler",
             source_kind="runtime",
             kind="job.created",
             detail=f"Job {job.job_id} created: {job.goal[:80]}",
@@ -205,7 +205,7 @@ class RuntimeEventBridge:
         state_str = meta["new_state"].lower()
         if state_str == "completed":
             return await self.persist_and_publish(
-                source_id="lysstack.scheduler",
+                source_id="hermes.scheduler",
                 source_kind="runtime",
                 kind="job.completed",
                 detail=f"Job {job.job_id} completed successfully",
@@ -215,7 +215,7 @@ class RuntimeEventBridge:
             )
         elif state_str == "blocked":
             return await self.persist_and_publish(
-                source_id="lysstack.scheduler",
+                source_id="hermes.scheduler",
                 source_kind="runtime",
                 kind="job.blocked",
                 detail=f"Job {job.job_id} blocked: {reason or 'no reason given'}",
@@ -225,7 +225,7 @@ class RuntimeEventBridge:
             )
         elif state_str == "failed":
             return await self.persist_and_publish(
-                source_id="lysstack.scheduler",
+                source_id="hermes.scheduler",
                 source_kind="runtime",
                 kind="job.failed",
                 detail=f"Job {job.job_id} failed: {reason or 'failure'}",
@@ -235,7 +235,7 @@ class RuntimeEventBridge:
             )
         elif state_str == "cancelled":
             return await self.persist_and_publish(
-                source_id="lysstack.scheduler",
+                source_id="hermes.scheduler",
                 source_kind="runtime",
                 kind="job.cancelled",
                 detail=f"Job {job.job_id} cancelled: {reason or 'cancelled'}",
@@ -245,7 +245,7 @@ class RuntimeEventBridge:
             )
         else:
             return await self.persist_and_publish(
-                source_id="lysstack.scheduler",
+                source_id="hermes.scheduler",
                 source_kind="runtime",
                 kind="job.state_changed",
                 detail=f"Job {job.job_id} transitioned from {meta['previous_state']} to {meta['new_state']}",
@@ -266,7 +266,7 @@ class RuntimeEventBridge:
             "metadata": task.metadata,
         }
         return await self.persist_and_publish(
-            source_id="lysstack.planner",
+            source_id="hermes.planner",
             source_kind="runtime",
             kind="task.created",
             detail=f"Task {task.task_id} added: {task.description[:80]}",
@@ -277,7 +277,7 @@ class RuntimeEventBridge:
 
     async def emit_task_ready(self, task: Any) -> StoredRuntimeEvent:
         return await self.persist_and_publish(
-            source_id="lysstack.scheduler",
+            source_id="hermes.scheduler",
             source_kind="runtime",
             kind="task.ready",
             detail=f"Task {task.task_id} is ready for dispatch",
@@ -288,7 +288,7 @@ class RuntimeEventBridge:
 
     async def emit_task_assigned(self, task: Any, actor_id: str, decision: Optional[Dict[str, Any]] = None) -> StoredRuntimeEvent:
         return await self.persist_and_publish(
-            source_id="lysstack.scheduler",
+            source_id="hermes.scheduler",
             source_kind="runtime",
             kind="task.assigned",
             detail=f"Task {task.task_id} assigned to actor '{actor_id}'",
@@ -351,7 +351,7 @@ class RuntimeEventBridge:
 
     async def emit_task_superseded(self, task_id: str, job_id: str, superseded_by: Optional[str] = None, reason: Optional[str] = None) -> StoredRuntimeEvent:
         return await self.persist_and_publish(
-            source_id="lysstack.planner",
+            source_id="hermes.planner",
             source_kind="runtime",
             kind="task.superseded",
             detail=f"Task {task_id} superseded (by {superseded_by or 'plan change'}): {reason or 'no reason'}",
@@ -374,7 +374,7 @@ class RuntimeEventBridge:
             return None
 
         res = await self.persist_and_publish(
-            source_id="lysstack.scheduler",
+            source_id="hermes.scheduler",
             source_kind="runtime",
             kind="task.cancelled",
             detail=f"Task {task_id} cancelled: {reason or 'no reason'}",
@@ -472,7 +472,7 @@ class RuntimeEventBridge:
     async def emit_observation_created(self, observation: Any) -> StoredRuntimeEvent:
         meta = observation.to_dict() if hasattr(observation, "to_dict") else dict(observation)
         return await self.persist_and_publish(
-            source_id=observation.actor_id or "lysstack.runtime",
+            source_id=observation.actor_id or "hermes.runtime",
             source_kind="agent" if observation.actor_id else "runtime",
             kind="observation.created",
             detail=f"Observation ({observation.kind}): {observation.content[:80]}",
@@ -486,7 +486,7 @@ class RuntimeEventBridge:
         meta = artifact.to_dict() if hasattr(artifact, "to_dict") else dict(artifact)
         jid = job_id or meta.get("job_id") or meta.get("jobId")
         return await self.persist_and_publish(
-            source_id="lysstack.artifacts",
+            source_id="hermes.artifacts",
             source_kind="runtime",
             kind="artifact.created",
             detail=f"Artifact created: {meta.get('label') or meta.get('id')}",
@@ -497,7 +497,7 @@ class RuntimeEventBridge:
 
     async def emit_verification_started(self, job_id: str, verifier_id: str) -> StoredRuntimeEvent:
         return await self.persist_and_publish(
-            source_id="lysstack.verifier",
+            source_id="hermes.verifier",
             source_kind="runtime",
             kind="verification.started",
             detail=f"Verification started for job {job_id} using '{verifier_id}'",
@@ -507,7 +507,7 @@ class RuntimeEventBridge:
 
     async def emit_verification_passed(self, job_id: str, result: Any) -> StoredRuntimeEvent:
         return await self.persist_and_publish(
-            source_id="lysstack.verifier",
+            source_id="hermes.verifier",
             source_kind="runtime",
             kind="verification.passed",
             detail=f"Verification passed for job {job_id}: {result.summary}",
@@ -518,7 +518,7 @@ class RuntimeEventBridge:
 
     async def emit_verification_failed(self, job_id: str, result: Any) -> StoredRuntimeEvent:
         return await self.persist_and_publish(
-            source_id="lysstack.verifier",
+            source_id="hermes.verifier",
             source_kind="runtime",
             kind="verification.failed",
             detail=f"Verification failed for job {job_id} (repairable={getattr(result, 'is_repairable', False)}): {result.summary}",
@@ -529,7 +529,7 @@ class RuntimeEventBridge:
 
     async def emit_replan_requested(self, job_id: str, reason: str, remaining_budget: int) -> StoredRuntimeEvent:
         return await self.persist_and_publish(
-            source_id="lysstack.scheduler",
+            source_id="hermes.scheduler",
             source_kind="runtime",
             kind="replan.requested",
             detail=f"Replanning requested for job {job_id} (reason: {reason}, budget remaining: {remaining_budget})",
@@ -539,7 +539,7 @@ class RuntimeEventBridge:
 
     async def emit_replan_completed(self, job_id: str, mutations_count: int, explanation: str) -> StoredRuntimeEvent:
         return await self.persist_and_publish(
-            source_id="lysstack.planner",
+            source_id="hermes.planner",
             source_kind="runtime",
             kind="replan.completed",
             detail=f"Replanning completed for job {job_id} with {mutations_count} mutations: {explanation}",
@@ -556,7 +556,7 @@ class RuntimeEventBridge:
         repo_dir: Optional[str] = None,
     ) -> StoredRuntimeEvent:
         return await self.persist_and_publish(
-            source_id="lysstack.planner",
+            source_id="hermes.planner",
             source_kind="runtime",
             kind="planning.started",
             detail=f"Initial planning started for goal: {goal[:80]}",
@@ -573,7 +573,7 @@ class RuntimeEventBridge:
         uncertainty: Optional[List[str]] = None,
     ) -> StoredRuntimeEvent:
         return await self.persist_and_publish(
-            source_id="lysstack.reconnaissance",
+            source_id="hermes.reconnaissance",
             source_kind="runtime",
             kind="repository.evidence_collected",
             detail=f"Collected {file_count} evidence files from repository",
@@ -592,7 +592,7 @@ class RuntimeEventBridge:
     ) -> StoredRuntimeEvent:
         mode = (plan_dict.get("planning_mode") if plan_dict else None) or planning_mode or "model_generated"
         return await self.persist_and_publish(
-            source_id="lysstack.planner",
+            source_id="hermes.planner",
             source_kind="runtime",
             kind="planning.generated",
             detail=f"Generated structured plan ({mode}) with {task_count} tasks: {summary[:80]}",
@@ -608,7 +608,7 @@ class RuntimeEventBridge:
         valid: bool = True,
     ) -> StoredRuntimeEvent:
         return await self.persist_and_publish(
-            source_id="lysstack.planner",
+            source_id="hermes.planner",
             source_kind="runtime",
             kind="planning.validated",
             detail=f"Plan validation passed for {task_count} tasks",
@@ -624,7 +624,7 @@ class RuntimeEventBridge:
         reasons: Optional[List[str]] = None,
     ) -> StoredRuntimeEvent:
         return await self.persist_and_publish(
-            source_id="lysstack.planner",
+            source_id="hermes.planner",
             source_kind="runtime",
             kind="planning.failed",
             detail=f"Planning failed for job {job_id}: {error}",
@@ -636,7 +636,7 @@ class RuntimeEventBridge:
     # --- Phase 10: Recovery Events ---
     async def emit_recovery_started(self, job_id: str, recovery_id: str, detected_interruption_at: Optional[str] = None) -> StoredRuntimeEvent:
         return await self.persist_and_publish(
-            source_id="lysstack.recovery",
+            source_id="hermes.recovery",
             source_kind="runtime",
             kind="recovery.started",
             detail=f"Recovery started for job {job_id} (session {recovery_id})",
@@ -647,7 +647,7 @@ class RuntimeEventBridge:
 
     async def emit_recovery_job_rehydrated(self, job_id: str, tasks_count: int, runs_count: int) -> StoredRuntimeEvent:
         return await self.persist_and_publish(
-            source_id="lysstack.recovery",
+            source_id="hermes.recovery",
             source_kind="runtime",
             kind="recovery.job_rehydrated",
             detail=f"Job {job_id} state rehydrated from event store ({tasks_count} tasks, {runs_count} runs)",
@@ -657,7 +657,7 @@ class RuntimeEventBridge:
 
     async def emit_recovery_task_interrupted(self, task_id: str, job_id: str, reason: str = "Process interrupted") -> StoredRuntimeEvent:
         return await self.persist_and_publish(
-            source_id="lysstack.recovery",
+            source_id="hermes.recovery",
             source_kind="runtime",
             kind="recovery.task_interrupted",
             detail=f"Task {task_id} in job {job_id} was interrupted: {reason}",
@@ -669,7 +669,7 @@ class RuntimeEventBridge:
 
     async def emit_recovery_task_reconciled(self, task_id: str, job_id: str, evidence: Dict[str, Any]) -> StoredRuntimeEvent:
         return await self.persist_and_publish(
-            source_id="lysstack.recovery",
+            source_id="hermes.recovery",
             source_kind="runtime",
             kind="recovery.task_reconciled",
             detail=f"Task {task_id} in job {job_id} reconciled from durable side-effect evidence",
@@ -681,7 +681,7 @@ class RuntimeEventBridge:
 
     async def emit_recovery_task_requeued(self, task_id: str, job_id: str, reason: str = "Safely requeued") -> StoredRuntimeEvent:
         return await self.persist_and_publish(
-            source_id="lysstack.recovery",
+            source_id="hermes.recovery",
             source_kind="runtime",
             kind="recovery.task_requeued",
             detail=f"Task {task_id} in job {job_id} requeued for safe execution: {reason}",
@@ -693,7 +693,7 @@ class RuntimeEventBridge:
 
     async def emit_recovery_completed(self, job_id: str, rto_seconds: float, summary: Dict[str, Any]) -> StoredRuntimeEvent:
         return await self.persist_and_publish(
-            source_id="lysstack.recovery",
+            source_id="hermes.recovery",
             source_kind="runtime",
             kind="recovery.completed",
             detail=f"Recovery completed for job {job_id} in {rto_seconds:.2f}s (RTO)",
@@ -704,7 +704,7 @@ class RuntimeEventBridge:
 
     async def emit_recovery_execution_resumed(self, job_id: str, rto_seconds: float, summary: Dict[str, Any]) -> StoredRuntimeEvent:
         return await self.persist_and_publish(
-            source_id="lysstack.recovery",
+            source_id="hermes.recovery",
             source_kind="runtime",
             kind="recovery.execution_resumed",
             detail=f"Execution resumed for job {job_id} in {rto_seconds:.2f}s (True RTO)",
@@ -715,7 +715,7 @@ class RuntimeEventBridge:
 
     async def emit_recovery_failed(self, job_id: str, error: str) -> StoredRuntimeEvent:
         return await self.persist_and_publish(
-            source_id="lysstack.recovery",
+            source_id="hermes.recovery",
             source_kind="runtime",
             kind="recovery.failed",
             detail=f"Recovery failed for job {job_id}: {error}",
@@ -727,7 +727,7 @@ class RuntimeEventBridge:
     # --- Phase 10: Rerouting Events ---
     async def emit_task_reroute_requested(self, task_id: str, job_id: str, from_actor: str, reason: str) -> StoredRuntimeEvent:
         return await self.persist_and_publish(
-            source_id="lysstack.scheduler",
+            source_id="hermes.scheduler",
             source_kind="runtime",
             kind="task.reroute_requested",
             detail=f"Reroute requested for task {task_id} from '{from_actor}': {reason}",
@@ -747,7 +747,7 @@ class RuntimeEventBridge:
         previous_run_id: Optional[str] = None,
     ) -> StoredRuntimeEvent:
         return await self.persist_and_publish(
-            source_id="lysstack.scheduler",
+            source_id="hermes.scheduler",
             source_kind="runtime",
             kind="task.rerouted",
             detail=f"Task {task_id} rerouted from '{from_actor}' to '{to_actor}': {reason}",
@@ -766,7 +766,7 @@ class RuntimeEventBridge:
 
     async def emit_task_reroute_failed(self, task_id: str, job_id: str, reason: str) -> StoredRuntimeEvent:
         return await self.persist_and_publish(
-            source_id="lysstack.scheduler",
+            source_id="hermes.scheduler",
             source_kind="runtime",
             kind="task.reroute_failed",
             detail=f"Reroute failed for task {task_id}: {reason}",
@@ -779,7 +779,7 @@ class RuntimeEventBridge:
     # --- Phase 10: Capacity Waiting Events ---
     async def emit_job_waiting_for_capacity(self, job: Any, reason: str) -> StoredRuntimeEvent:
         return await self.persist_and_publish(
-            source_id="lysstack.scheduler",
+            source_id="hermes.scheduler",
             source_kind="runtime",
             kind="job.waiting_for_capacity",
             detail=f"Job {job.job_id} waiting for provider capacity: {reason}",
@@ -790,7 +790,7 @@ class RuntimeEventBridge:
 
     async def emit_job_capacity_restored(self, job: Any, reason: str = "Capacity restored") -> StoredRuntimeEvent:
         return await self.persist_and_publish(
-            source_id="lysstack.scheduler",
+            source_id="hermes.scheduler",
             source_kind="runtime",
             kind="job.capacity_restored",
             detail=f"Provider capacity restored for job {job.job_id}: {reason}",

@@ -91,7 +91,7 @@ class JobDetailDTO:
 
 class JobService:
     """
-    Control-plane service that manages real Hermes sprint execution jobs and reactive runtime engines.
+    Runtime service that manages Hermes execution jobs and reactive runtime engines.
     Reconstructs historical runs from run summaries on startup and maintains live runtime state.
     """
 

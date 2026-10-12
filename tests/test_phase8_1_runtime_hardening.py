@@ -10,7 +10,7 @@ Verifies:
 7. Authoritative runtime limits on task attempts and max tasks.
 8. Execution timeouts producing TIMED_OUT AgentRun status and structured failure.
 9. Event-reactive scheduling unlocking newly-ready dependent work immediately.
-10. Control plane endpoints truthfully exposing live ReactiveJobEngine state.
+10. Hermes Runtime API endpoints truthfully exposing live ReactiveJobEngine state.
 """
 
 import asyncio

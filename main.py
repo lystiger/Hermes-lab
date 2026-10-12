@@ -38,21 +38,21 @@ async def lifespan(app: FastAPI):
 
     # Publish initial runtime startup event
     event_bus.publish(
-        source_id="lysstack",
+        source_id="hermes",
         source_kind="runtime",
-        source_name="LysStack Control Plane",
+        source_name="Hermes Runtime",
         kind="runtime.started",
-        detail="LysStack control-plane runtime initialized and listening on control bus",
+        detail="Hermes Runtime initialized and listening on the event bus",
         accent_color="#CBA35C",
     )
     yield
     # Publish stopping event on shutdown
     event_bus.publish(
-        source_id="lysstack",
+        source_id="hermes",
         source_kind="runtime",
-        source_name="LysStack Control Plane",
+        source_name="Hermes Runtime",
         kind="runtime.stopping",
-        detail="LysStack control-plane runtime shutting down",
+        detail="Hermes Runtime shutting down",
         accent_color="#CBA35C",
     )
     await store.close()
@@ -61,7 +61,7 @@ async def lifespan(app: FastAPI):
         store._closed = False
 
 
-app = FastAPI(title="LysStack Control Plane", version="0.1.0", lifespan=lifespan)
+app = FastAPI(title="Hermes Runtime", version="0.1.0", lifespan=lifespan)
 
 # Allow local frontend origins
 origins = [
@@ -113,7 +113,7 @@ class InternalEventPayload(BaseModel):
 
 
 # -------------------------------------------------------------
-# Internal Ingress Endpoint (Cross-Process Runner -> Control Plane)
+# Internal Ingress Endpoint (Runner -> Hermes Runtime API)
 # -------------------------------------------------------------
 
 @app.post("/internal/events", status_code=status.HTTP_202_ACCEPTED)
@@ -237,7 +237,7 @@ async def ingest_internal_artifact(payload: InternalArtifactPayload):
 
 
 # -------------------------------------------------------------
-# Core LysStack Control API Endpoints
+# Hermes Runtime REST API Endpoints
 # -------------------------------------------------------------
 
 @app.get("/health")
@@ -245,7 +245,7 @@ async def health_check():
     uptime = max(0, int(time.monotonic() - _start_monotonic))
     return {
         "status": "ok",
-        "service": "lysstack",
+        "service": "hermes",
         "version": "0.1.0",
         "uptimeSeconds": uptime,
         "timestamp": datetime.now(timezone.utc).isoformat(),
@@ -265,7 +265,7 @@ async def version():
 @app.get("/info")
 async def info():
     return {
-        "name": "LysStack Control Plane",
+        "name": "Hermes Runtime",
         "version": "0.1.0",
         "environment": "development",
     }
@@ -300,7 +300,7 @@ async def get_jobs(
     limit: int = Query(default=50, ge=1, le=100),
 ):
     """
-    Returns real sprint execution jobs tracked by the control plane.
+    Returns sprint execution jobs tracked by the Hermes runtime.
     """
     return job_service.list_jobs(status=status_filter, limit=limit)
 
@@ -564,7 +564,10 @@ async def send_operator_message(payload: SendOperatorMessagePayload):
     Does NOT execute arbitrary shell commands or trigger autonomous loops.
     """
     from_actor = {"id": "operator", "kind": "operator", "displayName": "Operator"}
-    to_actors = payload.to or ["lysstack"]
+    to_actors = payload.to or ["hermes"]
+    # Older LysControl clients address the runtime as "lysstack". Keep that
+    # recipient alias while Hermes is the canonical runtime actor ID.
+    to_actors = ["hermes" if actor == "lysstack" else actor for actor in to_actors]
 
     msg = message_router.send_message(
         thread_id=payload.threadId,

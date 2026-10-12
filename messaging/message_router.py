@@ -19,8 +19,8 @@ logger = logging.getLogger("hermes.message_router")
 
 class MessageRouter:
     """
-    Control-plane service that governs operational messaging, thread lifecycles,
-    structured A2A conversation turns, artifact association, and event broadcasting for LysStack.
+    Hermes service that governs operational messaging, thread lifecycles,
+    structured A2A conversation turns, artifact association, and event broadcasting for Hermes.
     """
 
     def __init__(self, store=None, registry=None, bus=None):
@@ -48,6 +48,8 @@ class MessageRouter:
             return ActorRefDTO.from_dict(actor)
         if isinstance(actor, str):
             normalized = normalize_agent_id(actor) if kind == "agent" else actor.lower()
+            if normalized in {"lysstack", "hermes"}:
+                return ActorRefDTO(id="hermes", kind="runtime", displayName="Hermes")
             return ActorRefDTO(
                 id=normalized,
                 kind=kind,
@@ -79,9 +81,9 @@ class MessageRouter:
 
         # Broadcast thread.created event
         self.bus.publish(
-            source_id="lysstack",
+            source_id="hermes",
             source_kind="runtime",
-            source_name="LysStack MessageRouter",
+            source_name="Hermes Message Router",
             kind="thread.created",
             detail=f"Operational thread created: {thread_id}",
             job_id=job_id,
@@ -116,7 +118,7 @@ class MessageRouter:
         to_dtos = [self.build_actor_ref(to) for to in to_actors] if to_actors else []
 
         if not to_dtos:
-            to_dtos = [ActorRefDTO(id="lysstack", kind="runtime", displayName="LysStack")]
+            to_dtos = [ActorRefDTO(id="hermes", kind="runtime", displayName="Hermes")]
 
         # Process artifact references
         resolved_artifacts: List[ArtifactRef] = []

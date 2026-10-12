@@ -104,7 +104,7 @@ def make_request(tmp_path):
 
 
 def test_default_registry_exposes_only_builtin_backends():
-    assert default_backend_registry.supported_backends == ("herdr", "subprocess")
+    assert default_backend_registry.supported_backends == ("herdr", "openrig", "subprocess")
 
 
 def test_new_backend_registers_by_name_and_receives_construction_kwargs(tmp_path):

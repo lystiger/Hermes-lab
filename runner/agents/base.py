@@ -81,7 +81,8 @@ class AgentAdapter(ABC):
                     timeout_seconds=context.timeout_seconds,
                     stdout_file=context.stdout_file,
                     stderr_file=context.stderr_file,
-                    metadata={"phase": phase_name},
+                    # Sessionful backends deliver the prompt directly instead of via argv.
+                    metadata={"phase": phase_name, "prompt": context.prompt},
                 )
             )
         except Exception as exc:

@@ -21,6 +21,7 @@ import logging
 import os
 from pathlib import Path, PureWindowsPath
 import subprocess
+import sys
 import threading
 import time
 from typing import Any, Callable, Dict, List, Optional, Sequence, Union
@@ -47,6 +48,19 @@ from tools.tools import (
 logger = logging.getLogger("hermes.runtime.hermes_adapter")
 
 DEFAULT_CONTEXT_MAX_BYTES = 131072
+
+
+def _sprint_runner_error_types() -> tuple:
+    """SprintRunnerError under both import paths.
+
+    Backends import it as ``agents.errors`` (runner/ on sys.path) while this module
+    imports ``runner.agents.errors``; the two are distinct classes at runtime.
+    """
+    types = [SprintRunnerError]
+    bare = getattr(sys.modules.get("agents.errors"), "SprintRunnerError", None)
+    if bare is not None and bare is not SprintRunnerError:
+        types.append(bare)
+    return tuple(types)
 
 
 class WorktreeError(RuntimeError):
@@ -781,6 +795,9 @@ class HermesActorAdapter(ActorAdapter):
         Runs on a worker thread. Git mutations inside are serialized by the per-repository
         lock; the agent process itself runs unlocked so concurrent tasks make real progress.
         """
+        # This path obtains its own backend instance per task, so it owns releasing it.
+        backend = None
+        task_succeeded = False
         try:
             # Ensure authoritative integration worktree
             self.ensure_integration_worktree()
@@ -1018,6 +1035,12 @@ class HermesActorAdapter(ActorAdapter):
                 "commit_sha": commit_sha,
                 "fresh_session_recommended": handoff_obs is not None,
                 "usage_snapshot": usage_snapshot.to_dict(),
+                # Backend-owned identifiers (e.g. pane/session IDs); scalars only so they stay serializable.
+                "execution_backend": getattr(raw_res, "backend", backend_name),
+                "backend_runtime_metadata": {
+                    k: v for k, v in runtime_meta.items()
+                    if isinstance(v, (str, int, float, bool)) or v is None
+                },
             }
             if runtime_meta.get("trigger_replan"):
                 exec_meta["trigger_replan"] = True
@@ -1030,6 +1053,7 @@ class HermesActorAdapter(ActorAdapter):
 
             error_msg = stderr_text if exit_code != 0 else (runtime_meta.get("summary") if status_str == "failed" else None)
 
+            task_succeeded = status_str == "succeeded"
             return TaskExecutionResult(
                 status=status_str,
                 output={"stdout": stdout_text[:5000], "exit_code": exit_code, "commit_sha": commit_sha},
@@ -1049,7 +1073,7 @@ class HermesActorAdapter(ActorAdapter):
                 metadata={"actor": actor_id, "fail_closed": True},
             )
 
-        except SprintRunnerError as exc:
+        except _sprint_runner_error_types() as exc:
             logger.warning("Agent runner error for task %s on actor %s: %s (%s)", task.task_id, actor_id, exc.code, exc.message)
             return TaskExecutionResult(
                 status="failed",
@@ -1066,6 +1090,13 @@ class HermesActorAdapter(ActorAdapter):
                 exit_reason="exception",
                 metadata={"actor": actor_id},
             )
+
+        finally:
+            if backend is not None:
+                try:
+                    backend.cleanup(success=task_succeeded)
+                except Exception as cleanup_exc:
+                    logger.error("Backend cleanup failed for task %s: %s", task.task_id, cleanup_exc)
 
 
 class HermesVerifierAdapter(VerifierAdapter):

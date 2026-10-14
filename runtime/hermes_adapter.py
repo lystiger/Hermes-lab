@@ -833,7 +833,7 @@ class HermesActorAdapter(ActorAdapter):
             backend_reg = self.backend_registry or default_backend_registry
 
             agent_adapter = reg.get(actor_id)
-            backend_name = task.metadata.get("execution_backend") or task.metadata.get("backend") or "subprocess"
+            backend_name = self._resolve_backend_name(task, actor_id, backend_reg)
             backend = backend_reg.get(
                 backend_name,
                 run_dir=self.run_dir,
@@ -1115,6 +1115,27 @@ class HermesActorAdapter(ActorAdapter):
                 self._event_loop = loop
                 # A drain scheduled on a previous loop may never finish; let this loop start one.
                 self._event_drain_running = False
+
+    def _resolve_backend_name(self, task: TaskNode, actor_id: Optional[str] = None, backend_reg: Any = None) -> str:
+        """Task setting first (an explicit choice is honoured and fails closed if unsupported).
+
+        Job-level work (repairs, discovery, unblocking) carries none and follows the sprint's
+        execution_backend, but only when that backend can run the actor the scheduler chose;
+        otherwise it keeps the subprocess default rather than failing.
+        """
+        explicit = task.metadata.get("execution_backend") or task.metadata.get("backend")
+        if explicit:
+            return explicit
+        sprint_default = (self.spec or {}).get("execution_backend")
+        if sprint_default and sprint_default != "subprocess":
+            supports = getattr(backend_reg, "supports_agent", None)
+            if actor_id is None or supports is None or supports(sprint_default, actor_id):
+                return sprint_default
+            logger.info(
+                "Sprint backend %s cannot run %s for task %s; using subprocess",
+                sprint_default, actor_id, task.task_id,
+            )
+        return "subprocess"
 
     @staticmethod
     def _fallback_failure_section(task: TaskNode) -> str:

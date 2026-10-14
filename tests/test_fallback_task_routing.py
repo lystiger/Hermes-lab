@@ -228,3 +228,26 @@ async def test_the_engine_blocks_a_job_whose_prerequisite_failed_instead_of_loop
 
     assert job.state == JobState.BLOCKED
     assert not any(t.task_id.startswith("unblock_") for t in engine.graph.list_tasks())
+
+
+def test_job_level_work_follows_the_sprint_execution_backend(tmp_path):
+    from runtime.hermes_adapter import HermesActorAdapter
+
+    adapter = HermesActorAdapter(run_dir=tmp_path, spec={"execution_backend": "openrig"}, job_id="j")
+    assert adapter._resolve_backend_name(TaskNode(task_id="repair_general_1")) == "openrig"
+    assert adapter._resolve_backend_name(TaskNode(task_id="t", metadata={"execution_backend": "herdr"})) == "herdr"
+    plain = HermesActorAdapter(run_dir=tmp_path, job_id="j")
+    assert plain._resolve_backend_name(TaskNode(task_id="t")) == "subprocess"
+
+
+def test_sprint_backend_is_skipped_when_it_cannot_run_the_chosen_actor(tmp_path):
+    from runner.backends.registry import default_backend_registry
+    from runtime.hermes_adapter import HermesActorAdapter
+
+    adapter = HermesActorAdapter(run_dir=tmp_path, spec={"execution_backend": "openrig"}, job_id="j")
+    repair = TaskNode(task_id="repair_general_1")
+    assert adapter._resolve_backend_name(repair, "claude", default_backend_registry) == "openrig"
+    assert adapter._resolve_backend_name(repair, "antigravity", default_backend_registry) == "subprocess"
+    # An explicit task choice is never second-guessed (it fails closed in the backend instead).
+    pinned = TaskNode(task_id="t", metadata={"execution_backend": "openrig"})
+    assert adapter._resolve_backend_name(pinned, "antigravity", default_backend_registry) == "openrig"

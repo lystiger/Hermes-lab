@@ -316,6 +316,10 @@ class OpenRigBackend(ExecutionBackend):
 
     name = "openrig"
 
+    @classmethod
+    def supports_agent(cls, agent_name):
+        return agent_name in SUPPORTED_RUNTIMES
+
     def __init__(
         self,
         run_dir,

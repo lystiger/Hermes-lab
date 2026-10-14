@@ -12,6 +12,14 @@ class BackendRegistry:
     def register(self, backend_type):
         self._backends[backend_type.name] = backend_type
 
+    def supports_agent(self, name, agent_name):
+        """True unless the backend type declares it cannot run `agent_name` (unknown names: False)."""
+        backend_type = self._backends.get(name)
+        if backend_type is None:
+            return False
+        check = getattr(backend_type, "supports_agent", None)
+        return True if check is None else bool(check(agent_name))
+
     def get(self, name, **kwargs):
         backend_type = self._backends.get(name)
         if backend_type is None:

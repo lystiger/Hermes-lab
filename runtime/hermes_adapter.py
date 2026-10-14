@@ -862,6 +862,7 @@ class HermesActorAdapter(ActorAdapter):
                     p_path = (self.target_repo / p_path).resolve()
                 if p_path.exists():
                     base_prompt = p_path.read_text(encoding="utf-8")
+            base_prompt += self._fallback_failure_section(task)
 
             # Gather task observations and prior failure telemetry for continuity
             obs_reg = getattr(self, "observation_registry", None)
@@ -872,25 +873,7 @@ class HermesActorAdapter(ActorAdapter):
                 except Exception:
                     pass
 
-            prior_obs = []
-            if obs_reg:
-                try:
-                    # 1. Observations from this task itself (e.g. retries)
-                    for o in obs_reg.list_for_task(task.task_id):
-                        if o not in prior_obs:
-                            prior_obs.append(o)
-                    # 2. Observations from dependency tasks
-                    if task.dependencies:
-                        for dep_id in task.dependencies:
-                            for dep_obs in obs_reg.list_for_task(dep_id):
-                                if dep_obs not in prior_obs:
-                                    prior_obs.append(dep_obs)
-                    elif task.job_id:
-                        for job_obs in obs_reg.list_for_job(task.job_id):
-                            if job_obs not in prior_obs:
-                                prior_obs.append(job_obs)
-                except Exception:
-                    pass
+            prior_obs = self._prior_observations(task, obs_reg)
 
             if not prior_obs and isinstance(task.metadata, dict) and task.metadata.get("observations"):
                 prior_obs = task.metadata["observations"]
@@ -1132,6 +1115,55 @@ class HermesActorAdapter(ActorAdapter):
                 self._event_loop = loop
                 # A drain scheduled on a previous loop may never finish; let this loop start one.
                 self._event_drain_running = False
+
+    @staticmethod
+    def _fallback_failure_section(task: TaskNode) -> str:
+        """For a fallback: why every earlier attempt failed, appended to its (unchanged) instructions."""
+        errors = (task.metadata or {}).get("fallback_errors") or []
+        if not errors:
+            return ""
+        lines = "\n".join(f"- {e.get('task_id')}: {e.get('error')}" for e in errors if isinstance(e, dict))
+        return (
+            "\n\n## Previous attempts failed\n"
+            "This task is a retry. Earlier attempts of the same task failed with:\n"
+            f"{lines}\n"
+            "Do the task above; avoid repeating these failures."
+        )
+
+    @staticmethod
+    def _prior_observations(task: TaskNode, obs_reg: Any) -> List[Any]:
+        """Observations a task's prompt carries for continuity: its own, the task it replaces, its inputs."""
+        prior_obs: List[Any] = []
+        if not obs_reg:
+            return prior_obs
+        try:
+            # 1. Observations from this task itself (e.g. retries)
+            for o in obs_reg.list_for_task(task.task_id):
+                if o not in prior_obs:
+                    prior_obs.append(o)
+            # 1b. A fallback also sees why every task it replaces failed (the whole chain, oldest first)
+            lineage = [
+                e.get("task_id") for e in (task.metadata or {}).get("fallback_errors") or [] if isinstance(e, dict)
+            ]
+            if task.parent_task_id and task.parent_task_id not in lineage:
+                lineage.append(task.parent_task_id)
+            for ancestor in lineage:
+                for o in obs_reg.list_for_task(ancestor):
+                    if o not in prior_obs:
+                        prior_obs.append(o)
+            # 2. Observations from dependency tasks
+            if task.dependencies:
+                for dep_id in task.dependencies:
+                    for dep_obs in obs_reg.list_for_task(dep_id):
+                        if dep_obs not in prior_obs:
+                            prior_obs.append(dep_obs)
+            elif task.job_id:
+                for job_obs in obs_reg.list_for_job(task.job_id):
+                    if job_obs not in prior_obs:
+                        prior_obs.append(job_obs)
+        except Exception:
+            pass
+        return prior_obs
 
     def _task_event_sink(self, task: TaskNode, run: AgentRun, actor_id: str):
         """A sink for one task's backend that stamps the runtime ids backends cannot know."""

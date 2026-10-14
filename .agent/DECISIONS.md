@@ -429,3 +429,19 @@ spell out. Human review is requested for them.
 Clients ignore execution events with `rawTs <= takenAt`, because the snapshot already reflects them. This matters
 because execution events are persisted best-effort: replaying older history must never bring back a resource that
 the snapshot shows as gone.
+
+## D-011: Replanned work keeps its execution path (2026-10-14)
+
+Found live (D-009 Execution page): a Claude/OpenRig verifier task failed, and its fallback `fix_*` tasks ran on Antigravity
+via subprocess with no role guard. A "diagnostic" fallback then passed, and the job reported COMPLETED.
+Fixed on fix/repair-task-routing. Four Codex rounds; MERGE OK with full agreement:
+- Task-failure fallbacks inherit `assigned_actor` and execution metadata (backend, role, prompt, limits, options). They get
+  a fresh worktree, branch and history. They keep the original description, so success means the work was done, and
+  carry `fallback_errors` (accumulated across chains) into the prompt. They see observations from their whole lineage,
+  and never invent capabilities the source task did not declare.
+- Verification repairs tied to a task (`obs.task_id`) inherit its actor, backend and lineage, use the source task's
+  capabilities, run with role=builder, and keep their own repair instructions (no inherited prompt file).
+- Deadlocks on failed/blocked/cancelled prerequisites are reported as unrecoverable (the job blocks), instead of adding
+  an unblock task that could never clear them.
+Agreed limits: unlinked/general repairs and discovery work stay capability-routed on the default backend, because the
+sprint-level execution_backend does not reach them. Verifier fallbacks keep the no-mutation guard.

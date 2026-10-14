@@ -143,6 +143,36 @@ class CallablePlannerAdapter(PlannerAdapter):
         return ReplanResult(mutations=[], explanation=str(res))
 
 
+# Per-attempt task metadata new work must not reuse: it gets its own worktree, branch and history.
+_PER_ATTEMPT_METADATA = ("worktree_dir", "branch", "observations", "prior_runs", "fallback_for", "repair_for")
+
+
+def _error_text(error: Any) -> str:
+    if isinstance(error, dict):
+        return str(error.get("message") or error.get("error") or error)[:500]
+    return str(error or "unknown failure")[:500]
+
+
+def _inherited_metadata(task: TaskNode, drop: tuple = ()) -> Dict[str, Any]:
+    """Execution settings (backend, role, prompt, limits, options) new work inherits from `task`."""
+    return {
+        key: value
+        for key, value in (task.metadata or {}).items()
+        if key not in _PER_ATTEMPT_METADATA and key not in drop
+    }
+
+
+def _fallback_metadata(failed_task: TaskNode) -> Dict[str, Any]:
+    """A fallback is the same work on the same agent and execution path, plus every earlier failure."""
+    inherited = _inherited_metadata(failed_task)
+    inherited["fallback_for"] = failed_task.task_id
+    # Chained fallbacks keep the whole history, so the prompt can explain every earlier failure.
+    inherited["fallback_errors"] = list((failed_task.metadata or {}).get("fallback_errors") or []) + [
+        {"task_id": failed_task.task_id, "error": _error_text(failed_task.error)}
+    ]
+    return inherited
+
+
 class ProductionPlannerAdapter(PlannerAdapter):
     """
     Authoritative production planning and replanning adapter.
@@ -236,12 +266,34 @@ class ProductionPlannerAdapter(PlannerAdapter):
             if failed_obs:
                 for idx, obs in enumerate(failed_obs, start=1):
                     repair_task_id = f"repair_check_{int(time.time())}_{idx}"
+                    source_task = (
+                        request.current_graph.get_task(obs.task_id)
+                        if getattr(obs, "task_id", None) and request.current_graph is not None
+                        else None
+                    )
+                    repair_meta: Dict[str, Any] = {}
+                    if source_task is not None:
+                        # Same agent and execution path as the task the failure belongs to. The repair has its
+                        # own instructions (so no inherited prompt file) and must be allowed to change files.
+                        repair_meta = _inherited_metadata(source_task, drop=("prompt_file", "expected_handoff"))
+                        repair_meta["role"] = "builder"
+                        repair_meta["repair_for"] = source_task.task_id
+                    repair_meta.update({"observation_ref": obs.id, "error_details": obs.metadata})
                     repair_node = TaskNode(
                         task_id=repair_task_id,
                         job_id=request.job_id,
                         description=f"Fix verification failure: {obs.content[:200]}",
-                        required_capabilities=["implementation", "testing.unit"],
-                        metadata={"observation_ref": obs.id, "error_details": obs.metadata},
+                        # A repair routed to the source task's actor must ask for what that actor has,
+                        # or the scheduler re-routes it away from the inherited agent and backend.
+                        required_capabilities=(
+                            list(source_task.required_capabilities)
+                            if source_task is not None and source_task.required_capabilities
+                            else ([] if source_task is not None and source_task.assigned_actor
+                                  else ["implementation", "testing.unit"])
+                        ),
+                        assigned_actor=source_task.assigned_actor if source_task is not None else None,
+                        parent_task_id=source_task.task_id if source_task is not None else None,
+                        metadata=repair_meta,
                         max_attempts=min(2, self.limits.max_task_attempts),
                     )
                     mutations.append(GraphMutation(mutation_type=GraphMutationType.ADD_TASK, task=repair_node, reason="Repair verification failure"))
@@ -275,9 +327,22 @@ class ProductionPlannerAdapter(PlannerAdapter):
                 fix_node = TaskNode(
                     task_id=fix_task_id,
                     job_id=request.job_id,
-                    description=f"Diagnostic & fallback for failed task '{failed_task.task_id}': {failed_task.error or failed_task.description}",
-                    required_capabilities=failed_task.required_capabilities or ["implementation"],
+                    # The original instructions, not a "diagnostic": success must mean the work was done.
+                    # The failure reaches the prompt through metadata["fallback_errors"].
+                    description=failed_task.description,
+                    # Same requirements as the task it replaces. Inventing "implementation" for a task that
+                    # declared none would make the scheduler re-route it away from the inherited actor.
+                    required_capabilities=(
+                        list(failed_task.required_capabilities)
+                        if failed_task.required_capabilities
+                        else ([] if failed_task.assigned_actor else ["implementation"])
+                    ),
                     dependencies=failed_task.dependencies,
+                    # The fallback is the same work on the same agent and execution path: without these
+                    # it would be routed by capability alone, on the default backend, with no role guard.
+                    assigned_actor=failed_task.assigned_actor,
+                    parent_task_id=failed_task.task_id,
+                    metadata=_fallback_metadata(failed_task),
                     max_attempts=min(2, self.limits.max_task_attempts),
                 )
                 mutations.append(GraphMutation(mutation_type=GraphMutationType.ADD_TASK, task=fix_node, reason=f"Fallback for {failed_task.task_id}"))
@@ -294,21 +359,22 @@ class ProductionPlannerAdapter(PlannerAdapter):
         if "blocked" in reason_str or "deadlock" in reason_str:
             blocked_tasks = request.current_graph.find_dependency_blocked_tasks()
             if blocked_tasks:
-                unblock_task_id = f"unblock_deadlock_{int(time.time())}"
-                unblock_node = TaskNode(
-                    task_id=unblock_task_id,
-                    job_id=request.job_id,
-                    description=f"Resolve dependency deadlock for blocked tasks: {', '.join([t.task_id for t in blocked_tasks])}",
-                    required_capabilities=["implementation"],
-                    max_attempts=min(2, self.limits.max_task_attempts),
-                )
-                mutations.append(GraphMutation(mutation_type=GraphMutationType.ADD_TASK, task=unblock_node, reason="Resolve graph deadlock"))
-                for bt in blocked_tasks:
-                    mutations.append(GraphMutation(mutation_type=GraphMutationType.ADD_DEPENDENCY, task_id=bt.task_id, depends_on_task_id=unblock_task_id))
+                # These tasks wait on prerequisites that failed, were blocked or were cancelled. Adding
+                # another dependency can never satisfy those, so an "unblock" task would succeed and leave
+                # the graph stalled. Report that automatic recovery cannot proceed; the job blocks.
+                blockers = sorted({
+                    dep for bt in blocked_tasks for dep in bt.dependencies
+                    if (request.current_graph.get_task(dep) is None
+                        or request.current_graph.get_task(dep).status in (TaskStatus.FAILED, TaskStatus.BLOCKED, TaskStatus.CANCELLED))
+                })
                 return ReplanResult(
-                    mutations=mutations,
-                    explanation=f"Planned unblock task '{unblock_task_id}' for {len(blocked_tasks)} deadlocked tasks",
-                    should_continue=True,
+                    mutations=[],
+                    explanation=(
+                        f"Automatic recovery cannot proceed: {len(blocked_tasks)} task(s) "
+                        f"({', '.join(t.task_id for t in blocked_tasks)}) depend on unsatisfiable prerequisites "
+                        f"({', '.join(blockers) or 'unknown'})"
+                    ),
+                    should_continue=False,
                 )
 
         return ReplanResult(mutations=[], explanation=f"No automatic mutations required for {reason_str}", should_continue=False)

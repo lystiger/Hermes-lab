@@ -211,3 +211,12 @@ def test_the_test_session_never_publishes_to_a_live_api():
 
     assert "LYSSTACK_CONTROL_URL" not in os.environ
     assert not default_publisher.enabled
+
+
+def test_jobs_recoverable_is_not_shadowed_by_the_job_id_route():
+    from fastapi.testclient import TestClient
+    from main import app
+
+    response = TestClient(app).get("/jobs/recoverable")
+    assert response.status_code == 200, response.text
+    assert "not found" not in response.text.lower()

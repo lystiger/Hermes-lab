@@ -335,6 +335,23 @@ async def get_jobs(
     return job_service.list_jobs(status=status_filter, limit=limit)
 
 
+# Declared before /jobs/{job_id}, which would otherwise capture 'recoverable' as a job id.
+@app.get("/jobs/recoverable")
+async def get_recoverable_jobs(limit: int = Query(default=50, ge=1, le=100)):
+    """
+    Discovers unfinished jobs from the canonical event ledger eligible for recovery.
+    """
+    store = get_global_event_store()
+    # The store interface has no limit parameter; apply it here.
+    unfinished_job_ids = (await store.list_unfinished_jobs())[:limit]
+    recoverable = []
+    for jid in unfinished_job_ids:
+        job = await job_service.get_job_async(jid)
+        if job and job.status not in ("COMPLETED", "CANCELLED"):
+            recoverable.append(job.to_summary_dict())
+    return recoverable
+
+
 @app.get("/jobs/{job_id}")
 async def get_job(job_id: str):
     """
@@ -450,21 +467,6 @@ async def cancel_job(job_id: str):
             detail=f"Active job '{job_id}' not found or not cancellable",
         )
     return {"cancelled": True, "jobId": job_id}
-
-
-@app.get("/jobs/recoverable")
-async def get_recoverable_jobs(limit: int = Query(default=50, ge=1, le=100)):
-    """
-    Discovers unfinished jobs from the canonical event ledger eligible for recovery.
-    """
-    store = get_global_event_store()
-    unfinished_job_ids = await store.list_unfinished_jobs(limit=limit)
-    recoverable = []
-    for jid in unfinished_job_ids:
-        job = await job_service.get_job_async(jid)
-        if job and job.status not in ("COMPLETED", "CANCELLED"):
-            recoverable.append(job.to_summary_dict())
-    return recoverable
 
 
 @app.post("/jobs/{job_id}/resume")

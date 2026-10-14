@@ -22,6 +22,7 @@ from artifacts.artifact_registry import ArtifactRef, artifact_registry
 from messaging.message_store import message_store
 from messaging.message_router import message_router
 from runtime.storage.config import init_storage_lifespan, get_global_event_store
+from runner.backends.execution_registry import build_execution_snapshot
 
 
 @asynccontextmanager
@@ -636,6 +637,16 @@ async def get_events(
     """
     events = event_bus.recent(limit=limit, after_id=after)
     return [e.to_dict() for e in events]
+
+
+@app.get("/execution")
+async def get_execution():
+    """
+    D-009 execution snapshot for LysControl: backend status, live execution resources
+    (seats, panes, processes), and OpenRig daemon reachability with its ownership ledger.
+    Read-only. The only rig calls are read-only probes; no mutating rig command ever runs here.
+    """
+    return await asyncio.to_thread(build_execution_snapshot)
 
 
 @app.get("/events/stream")

@@ -25,6 +25,9 @@ class RuntimeEvent:
     detail: str
     dur: str = "—"
     jobId: Optional[str] = None
+    taskId: Optional[str] = None
+    runId: Optional[str] = None
+    actorId: Optional[str] = None
     metadata: Dict[str, Any] = field(default_factory=dict)
 
     @property
@@ -64,6 +67,9 @@ class RuntimeEventBus:
         job_id: Optional[str] = None,
         metadata: Optional[Dict[str, Any]] = None,
         accent_color: Optional[str] = None,
+        task_id: Optional[str] = None,
+        run_id: Optional[str] = None,
+        actor_id: Optional[str] = None,
     ) -> RuntimeEvent:
         now_ts = time.time()
         # Formatted timestamp HH:MM:SS.mmm
@@ -87,6 +93,9 @@ class RuntimeEventBus:
             detail=detail,
             dur=duration,
             jobId=job_id,
+            taskId=task_id,
+            runId=run_id,
+            actorId=actor_id,
             metadata=metadata or {},
         )
 

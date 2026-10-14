@@ -10,6 +10,7 @@ from pathlib import Path
 
 from agents.errors import SprintRunnerError
 
+from . import events
 from .base import ExecutionBackend, ExecutionResult
 
 
@@ -27,6 +28,7 @@ class HerdrBackend(ExecutionBackend):
         run_process=None,
         which_func=None,
         herdr_executable="herdr",
+        event_sink=None,
         **kwargs,
     ):
         self.run_dir = Path(run_dir)
@@ -43,11 +45,34 @@ class HerdrBackend(ExecutionBackend):
         self.wrapper_dir = self.run_dir / "wrappers"
         self.commands_log = self.herdr_dir / "commands.log"
         self.runtime_file = self.herdr_dir / "runtime.json"
+        self.event_sink = event_sink
 
     def execute(self, request):
+        trace = self.trace(self.sprint_id)
+        trace.started(f"Herdr task for agent '{request.agent_name}' started")
+        try:
+            return self._execute(request, trace)
+        except BaseException as exc:
+            trace.fail(exc)
+            raise
+
+    def _execute(self, request, trace):
         self.preflight(request.command[0])
         self._ensure_workspace(request.cwd)
         pane_id = self._create_worker_pane(request)
+        label = str(request.metadata.get("phase", request.agent_name))[:80]
+        trace.bind(resource=events.resource("pane", pane_id, label))
+        trace.event(events.RESOURCE_ACQUIRED, f"Worker pane {pane_id} created")
+        try:
+            return self._run_in_pane(request, trace, pane_id)
+        except BaseException as exc:
+            trace.fail(exc)
+            raise
+        finally:
+            trace.event(events.RESOURCE_RELEASED, f"Worker pane {pane_id} finished its command")
+
+    def _run_in_pane(self, request, trace, pane_id):
+        trace.event(events.RESOURCE_READY, "Pane created and ready for the command")
         wrapper_path, nonce, exit_file = self.build_wrapper(request)
         marker_regex = self.completion_regex(nonce)
 
@@ -57,6 +82,7 @@ class HerdrBackend(ExecutionBackend):
                 failure_code="FAILED_HERDR_COMMAND",
                 allow_empty_output=True,
             )
+            trace.event(events.RUNNING, "Worker command running in the pane")
             try:
                 self._run_json(
                     [
@@ -110,6 +136,7 @@ class HerdrBackend(ExecutionBackend):
             "herdr_pane_id": pane_id,
         }
         self._record_operation("worker_complete", pane_id=pane_id, status=returncode)
+        trace.finish(f"Worker exited with code {returncode}")
         return ExecutionResult(
             command=tuple(request.command),
             returncode=returncode,

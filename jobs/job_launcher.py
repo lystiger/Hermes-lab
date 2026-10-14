@@ -318,6 +318,7 @@ class JobLauncher:
             job_id=job_id,
             base_ref=base_ref,
             target_branch=target_branch,
+            event_bridge=event_bridge,
         )
 
         verifier_adapter = HermesVerifierAdapter(
@@ -492,6 +493,7 @@ class JobLauncher:
             job_id=job_id,
             base_ref="main",
             target_branch=f"job/{job_id}/integration",
+            event_bridge=event_bridge,
         )
 
         verifier_adapter = HermesVerifierAdapter(
@@ -815,6 +817,7 @@ class JobLauncher:
                     job_id=job_id,
                     base_ref=base_ref,
                     target_branch=target_branch,
+                    event_bridge=engine.event_bridge,
                 )
                 verifier_adapter = HermesVerifierAdapter(
                     verification_steps=spec.get("verification_steps") or spec.get("verification", []),

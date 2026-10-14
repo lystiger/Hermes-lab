@@ -193,6 +193,24 @@ class OwnershipLedger:
                 stale.append(StaleOwner(path, pid, rig_ids))
         return stale
 
+    def summary(self):
+        """Read-only view: how many owners hold rigs, and which rigIds they are.
+
+        Unlike stale_owners(), this takes no lock, creates no directory and deletes nothing.
+        Writes are atomic replacements, so a plain read never sees a partial file.
+        """
+        owners = 0
+        rig_ids = []
+        for path in self._files():
+            try:
+                _, _, _, ids = _read(path)
+            except (OSError, ValueError):
+                continue
+            if ids:
+                owners += 1
+                rig_ids.extend(ids)
+        return {"owners": owners, "rigIds": rig_ids}
+
     @contextlib.contextmanager
     def _locked(self):
         """Serialize ledger reads and rewrites across threads and Hermes processes."""

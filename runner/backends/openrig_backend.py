@@ -10,12 +10,15 @@ import time
 import urllib.error
 import urllib.request
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
+from functools import partial
 from pathlib import Path
 
 from agents.errors import SprintRunnerError
 
+from . import events
 from .base import ExecutionBackend, ExecutionResult
+from .events import ExecutionTrace
 from .openrig_ledger import OwnershipLedger
 
 
@@ -35,6 +38,7 @@ POLL_QUERY_SECONDS = 10
 # OpenRig rigIds are ULIDs. `rig down` also resolves rig *names*, so anything else
 # (for example "kernel") must never reach it.
 RIG_ID_PATTERN = re.compile(r"[0-9A-HJKMNP-TV-Z]{26}")
+CANCELLED_CODE = "FAILED_OPENRIG_CANCELLED"
 # An idle pooled seat is released after this long. release_job() ends a job sooner.
 SEAT_IDLE_SECONDS = 120
 # Shared budget for releasing rigs that a crashed Hermes process left in the ledger.
@@ -53,10 +57,27 @@ class _Seat:
     granted_root: Path
     release: object  # callable(rig_id) bound to the backend that created the rig
     generation: str = None  # occupant generation of the last task; a reuse must differ
+    emitter: object = None  # the execution that last held the seat; receives its D-009 events
 
     @property
     def seat_dir(self):
         return self.rig_dir / "seat"
+
+    def bind(self, emitter):
+        self.emitter = emitter
+
+    def event(self, kind, detail="", **fields):
+        """Emit a D-009 event for this seat through the execution holding it. No holder, no event."""
+        if self.emitter is None:
+            return
+        base = {
+            "resource": events.resource("seat", self.rig_id, self.rig_name),
+            "rig_id": self.rig_id,
+            "session_name": self.session,
+        }
+        if self.generation is not None:
+            base["generation"] = self.generation
+        self.emitter.event(kind, detail, **{**base, **fields})
 
 
 class _SeatPool:
@@ -97,6 +118,7 @@ class _SeatPool:
         token = object()
         timer = self._timer_factory(self.idle_seconds, self._expire, (seat.rig_id, token))
         timer.daemon = True
+        expires_at = _iso(datetime.now(timezone.utc) + timedelta(seconds=self.idle_seconds))
         # Register the token first and publish the seat only after the timer started,
         # so no other task can lease a seat whose timer might still fail to start.
         with self._lock:
@@ -121,12 +143,20 @@ class _SeatPool:
             current = self._timers.get(seat.rig_id, (None, None))[1] is token
             if current and seat.job not in self._closed_jobs:
                 self._idle.setdefault(seat.job, []).append(seat)
-                return
-            # The timer already fired, a drain ran, or the job ended while the timer was
-            # starting: never publish, tear down now.
-            if current:
-                del self._timers[seat.rig_id]
-            self._inflight[seat.rig_id] = seat
+                # Emitted under the pool lock, so a concurrent release_job()/expiry, which needs
+                # this lock to take the seat, can only report its release after this event.
+                # Sinks never block and never call back into the pool.
+                seat.event(events.RESOURCE_POOLED, "Seat returned to the job pool", expires_at=expires_at)
+                pooled = True
+            else:
+                # The timer already fired, a drain ran, or the job ended while the timer was
+                # starting: never publish, tear down now.
+                if current:
+                    del self._timers[seat.rig_id]
+                self._inflight[seat.rig_id] = seat
+                pooled = False
+        if pooled:
+            return
         timer.cancel()
         self._release(seat)
 
@@ -302,10 +332,12 @@ class OpenRigBackend(ExecutionBackend):
         ledger=None,
         daemon_down=None,
         cancel_event=None,
+        event_sink=None,
         **kwargs,
     ):
         self.run_dir = Path(run_dir)
         self.sprint_id = str(sprint_id)
+        self.event_sink = event_sink
         self.logger = logger
         self.rig_executable = rig_executable
         self.poll_interval = poll_interval
@@ -328,6 +360,15 @@ class OpenRigBackend(ExecutionBackend):
     # -- contract -------------------------------------------------------------
 
     def execute(self, request):
+        trace = self.trace(self.sprint_id, cancel_codes=(CANCELLED_CODE,))
+        trace.started(f"OpenRig task for agent '{request.agent_name}' started")
+        try:
+            return self._execute(request, trace)
+        except BaseException as exc:
+            trace.fail(exc)
+            raise
+
+    def _execute(self, request, trace):
         deadline = self._monotonic() + request.timeout_seconds
         runtime = SUPPORTED_RUNTIMES.get(request.agent_name)
         if runtime is None:
@@ -356,10 +397,18 @@ class OpenRigBackend(ExecutionBackend):
                     self.pooled_rig_ids.remove(seat.rig_id)
                 if seat.rig_id not in self.owned_rig_ids:
                     self.owned_rig_ids.append(seat.rig_id)
+                seat.bind(trace)
+                self._bind_seat(trace, seat)
                 expected_generation = self._fresh_occupant(seat, deadline)
+                trace.bind(reused=True, generation=expected_generation)
+                trace.event(events.RESOURCE_ACQUIRED, f"Pooled seat {seat.session} leased with a fresh occupant")
             else:
                 seat = self._new_seat(runtime, request.cwd, deadline)
+                seat.bind(trace)
+                self._bind_seat(trace, seat)
+                trace.bind(reused=False)
                 expected_generation = None
+                trace.event(events.RESOURCE_ACQUIRED, f"New seat {seat.session} launched")
             metadata.update(
                 openrig_rig_name=seat.rig_name,
                 openrig_rig_id=seat.rig_id,
@@ -377,11 +426,14 @@ class OpenRigBackend(ExecutionBackend):
                     f"OpenRig seat {seat.session} reported no occupant generation",
                 )
             metadata.update(openrig_node_id=ready.get("nodeId"), openrig_generation=generation)
+            trace.bind(generation=generation, node_id=ready.get("nodeId"))
+            trace.event(events.RESOURCE_READY, f"Seat {seat.session} is idle and ready for the prompt")
 
             result_file = seat.seat_dir / f"hermes-result-{nonce}.json"
             send_started = self._utcnow()
             self._send(seat.session, self._task_text(prompt, request.cwd, result_file), deadline)
             send_confirmed = self._utcnow()
+            trace.event(events.RUNNING, "Prompt delivered; waiting for the completion hook")
             started = self._wait_for_completion(
                 seat.rig_name, seat.rig_id, seat.session,
                 send_started, send_confirmed, generation, deadline,
@@ -390,16 +442,24 @@ class OpenRigBackend(ExecutionBackend):
 
             outcome = self._read_result(result_file)
             self._save_transcript(seat.session, seat.rig_dir / f"transcript-{nonce}.txt", deadline)
+            trace.finish(f"Task reported {outcome['status']}")
 
             # Clean protocol completion: the seat is healthy enough to serve the job again.
             seat.generation = generation
             self.seat_pool.put(seat)
             self.pooled_rig_ids.append(seat.rig_id)
+        except BaseException as exc:
+            # Recorded before the rig is released, so the failure precedes its release events.
+            trace.fail(exc)
+            raise
         finally:
             # Covers rigs recorded by _launch even when it raised afterwards.
             for owned in list(self.owned_rig_ids):
                 if owned not in self.released_rig_ids and owned not in self.pooled_rig_ids:
-                    self._release_quietly(owned)
+                    if seat is not None and seat.rig_id == owned:
+                        self._release_quietly(owned, emitter=seat, label=seat.rig_name)
+                    else:
+                        self._release_quietly(owned, emitter=trace)
 
         unreleased = [
             r for r in self.owned_rig_ids
@@ -530,9 +590,19 @@ class OpenRigBackend(ExecutionBackend):
         granted_root = Path(worktree).resolve().parent
         spec_path = self._write_spec(rig_dir, rig_dir / "seat", rig_name, runtime, granted_root)
         rig_id, session = self._launch(spec_path, rig_name, deadline)
-        return _Seat(
+        seat = _Seat(
             job=self.sprint_id, rig_id=rig_id, rig_name=rig_name, session=session,
-            rig_dir=rig_dir, granted_root=granted_root, release=self._release,
+            rig_dir=rig_dir, granted_root=granted_root, release=None,
+        )
+        seat.release = partial(self._release, emitter=seat, label=rig_name)
+        return seat
+
+    @staticmethod
+    def _bind_seat(trace, seat):
+        trace.bind(
+            resource=events.resource("seat", seat.rig_id, seat.rig_name),
+            rig_id=seat.rig_id,
+            session_name=seat.session,
         )
 
     def _fresh_occupant(self, seat, deadline):
@@ -813,7 +883,28 @@ class OpenRigBackend(ExecutionBackend):
             # Diagnostics only; the result is already proven.
             self._log("warning", "OpenRig transcript capture failed: %s", exc.message)
 
-    def _release(self, rig_id, deadline=None):
+    def _release(self, rig_id, deadline=None, *, emitter=None, label=None):
+        """Tear one rig down by id and report it through `emitter` (its seat or execution)."""
+        emitter = emitter or self._rig_emitter(rig_id)
+        resource = events.resource("seat", rig_id, label or rig_id)
+        try:
+            self._teardown(rig_id, deadline)
+        except SprintRunnerError as exc:
+            emitter.event(
+                events.RELEASE_FAILED, f"OpenRig rig {rig_id} could not be released; kept for retry",
+                resource=resource, rig_id=rig_id, error_code=exc.code, error=exc.message,
+            )
+            raise
+        emitter.event(
+            events.RESOURCE_RELEASED, f"OpenRig rig {rig_id} released",
+            resource=resource, rig_id=rig_id,
+        )
+
+    def _rig_emitter(self, rig_id):
+        """Rigs that no task holds (ledger reconcile, cleanup retries) get their own event stream."""
+        return ExecutionTrace(self.name, self.event_sink, self.sprint_id, execution_id=f"release:{rig_id}")
+
+    def _teardown(self, rig_id, deadline=None):
         if not is_rig_id(rig_id):
             raise SprintRunnerError(
                 "FAILED_OPENRIG_PROTOCOL", f"refusing to tear down {rig_id!r}: not an OpenRig rigId"
@@ -851,9 +942,9 @@ class OpenRigBackend(ExecutionBackend):
             # "No rig found" from rig down, which counts as released, and drops it.
             self._log("warning", "OpenRig ledger could not drop released rig %s: %s", rig_id, exc)
 
-    def _release_quietly(self, rig_id):
+    def _release_quietly(self, rig_id, emitter=None, label=None):
         try:
-            self._release(rig_id)
+            self._release(rig_id, emitter=emitter, label=label)
         except SprintRunnerError as exc:
             # Left in owned_rig_ids for cleanup() to retry.
             self._log("error", "OpenRig release of %s failed: %s", rig_id, exc.message)
@@ -957,6 +1048,37 @@ class OpenRigBackend(ExecutionBackend):
     def _log(self, level, message, *args):
         if self.logger is not None:
             getattr(self.logger, level)(message, *args)
+
+
+def _iso(moment):
+    return moment.isoformat().replace("+00:00", "Z")
+
+
+STATUS_QUERY_SECONDS = 3
+
+
+def describe_openrig(rig_executable="rig", *, run_process=None, which=None, ledger=None):
+    """Read-only OpenRig status for GET /execution: daemon reachability and the ownership ledger.
+
+    Runs only `rig ps --json`. It never runs a mutating command and never reconciles the ledger.
+    Returns None when the rig executable is not installed.
+    """
+    if (which or shutil.which)(rig_executable) is None:
+        return None
+    run = run_process or subprocess.run
+    daemon = "unknown"
+    try:
+        result = run([rig_executable, "ps", "--json"], capture_output=True, text=True, timeout=STATUS_QUERY_SECONDS)
+    except (OSError, subprocess.TimeoutExpired):
+        result = None
+    if result is not None and result.returncode != 0:
+        daemon = "down"
+    elif result is not None:
+        try:
+            daemon = "up" if isinstance(json.loads(result.stdout or ""), list) else "unknown"
+        except ValueError:
+            daemon = "unknown"
+    return {"daemon": daemon, "ledger": (ledger or OwnershipLedger()).summary()}
 
 
 def _is_hook(activity):

@@ -22,6 +22,7 @@ Hermes (sprint runner / ReactiveJobEngine → HermesActorAdapter)
 | `execute(request) -> ExecutionResult` | Blocking. Runs one request to completion. This is the only abstract method. |
 | `cleanup(success=False)` | Releases resources owned by **this instance**. The default is a no-op. |
 | `release_job(job)` | Called once by the sprint runner at job end. Releases resources pooled for `job`. Must be safe to repeat. The default is a no-op. |
+| `event_sink` (ctor kwarg) | Optional D-009 sink for `execution.*` events. `None` (the default) makes every emit a no-op. See **Execution visibility**. |
 
 `ExecutionRequest` carries `agent_name`, `command` (complete argv), `cwd`, `timeout_seconds`,
 `stdout_file`, `stderr_file`, and an open `metadata` mapping (today: `{"phase": ..., "prompt": ...}`;
@@ -78,6 +79,77 @@ The runtime copies the scalar entries (str/int/float/bool/None) to
 `TaskExecutionResult.metadata["backend_runtime_metadata"]` and the backend name to
 `metadata["execution_backend"]`, so IDs reach the task record without interpreting them.
 
+## Execution visibility (D-009)
+
+Every backend reports its lifecycle through the same `execution.*` events, so LysControl's Execution page
+covers subprocess, herdr and openrig alike. The contract is `.agent/DECISIONS.md` D-009; D-010 records
+what was built and the clarifications made while building it.
+
+### Emitting
+
+- `runner/backends/events.py` holds the event kinds, `ExecutionEvent` (kind, job_id, detail, metadata),
+  `execution_metadata()` (D-009 camelCase keys, `None` dropped) and `ExecutionTrace`. A trace gives one
+  execution a stable `executionId`, carries bound context (resource, rigId, generation, ...) into every event,
+  and emits `finished` and `failed` at most once.
+- `ExecutionBackend.trace(job_id, cancel_codes=...)` starts a trace bound to the backend's `event_sink`.
+- A sink is any callable taking an `ExecutionEvent`. Emission never raises. A failing sink is logged and
+  dropped, and the task still succeeds.
+
+Order per execution: `started`, then `resource_acquired`, `resource_ready`, `running`, then `finished` or
+`failed` (or `cancelled`), then `resource_released` (and, for openrig, `resource_pooled`). A failure is
+recorded **before** its release, so the event stream reads in causal order.
+
+| Backend | Resource | Events |
+|---|---|---|
+| `subprocess` | process, id = executionId (see below) | started, acquired, ready, running, finished or failed, released |
+| `herdr` | pane (the worker pane) | started, acquired, ready, running, finished or failed, released |
+| `openrig` | seat (rigId) | started, acquired (`reused`, `rigId`, `sessionName`, `generation`), ready (`generation`, `nodeId`), running, finished or failed or cancelled, pooled (`expiresAt`), released, release_failed |
+
+OpenRig pool events come from the seat itself (`_Seat.event`), so they keep the context of the last execution
+that held the seat. That covers pool-timer expiry, `release_job()` and `drain()`. A rig that no task holds
+(ledger reconcile, cleanup retry) reports under `executionId = "release:<rigId>"`.
+
+### Wiring to the runtime
+
+`HermesActorAdapter` passes `event_sink=` to every backend it creates. The sink does two things:
+
+1. It updates `default_execution_registry` (`execution_registry.py`) at once, under a lock. That is cheap and never blocks.
+2. It queues the event for `RuntimeEventBridge.persist_and_publish(source_kind="runtime", source_id=<backend>)`.
+   One drain coroutine runs on the adapter's event loop (captured in `execute_task`) and persists the queue in
+   order. Workers never wait on the store. A store error drops only that event and is logged.
+
+`job_launcher` passes the job's bridge to the adapter (`event_bridge=`). Without a bridge, events still reach
+the registry but are not persisted.
+
+### Snapshot: `GET /execution`
+
+`build_execution_snapshot()` returns `{backends, resources, openrig}`:
+
+- `resources` comes from the registry, keyed by `(backend, kind, id)`. State follows the events: `acquiring`,
+  `ready`, `running`, `releasing` (after a failure), `idle` (pooled, with `expiresAt`), `failed` (release
+  failed). A `released` event removes the row.
+- `backends` and `openrig` are read-only probes. The only rig command is `rig ps --json` (daemon up or down).
+  `rig --version` is not called. `openrig` is `null` when `rig` is not on PATH.
+- `openrig.ledger` is `OwnershipLedger.summary()`. It reads the ledger without locking, creating the directory,
+  or reconciling, so it reports rigs left by earlier processes.
+
+The endpoint runs the probe in a worker thread (`asyncio.to_thread`). Each request spawns `rig ps` once, with a
+3 s cap.
+
+### Limits
+
+- **Runtime path only.** The sprint runner (`run-hermes-sprint.py`) builds backends without an adapter or bridge,
+  so it emits no events. Its runs are not visible on `/execution`.
+- **Subprocess resource id.** `subprocess.run` does not expose the child's pid, so the resource id is the
+  executionId and the label is the agent name.
+- **Herdr panes.** A pane is freed (`resource_released`) when its command finishes. The pane itself stays in the
+  workspace when `keep_workspace` is set, and the registry drops it.
+- **`task_id` is not set.** Backends do not know the runtime task. Events carry `job_id` and `executionId`.
+- **In-process registry.** The snapshot covers this process only. For openrig, the ledger summary covers rigs
+  left behind by earlier processes. Other backends have no equivalent.
+- **Drain lifetime.** Events are persisted only while the adapter's loop runs. Events emitted after the loop
+  closes (for example an `atexit` drain) reach the registry but not the store.
+
 ## Selection
 
 `registry.py` holds the one `default_backend_registry`. Callers resolve a name and call `get(name, **kwargs)`:
@@ -85,8 +157,8 @@ The runtime copies the scalar entries (str/int/float/bool/None) to
 - sprint runner: phase `execution_backend` > `--backend` > spec `execution_backend` > `"subprocess"`
 - runtime: task metadata `execution_backend` > `backend` > `"subprocess"`
 
-Construction kwargs: `run_dir`, `sprint_id`, `logger` (and `keep_workspace` from the sprint
-runner). Accept `**kwargs` so new kwargs do not break existing backends. Unknown names fail
+Construction kwargs: `run_dir`, `sprint_id`, `logger`, `event_sink` (and `keep_workspace` from the sprint
+runner, `cancel_event` from the runtime). Accept `**kwargs` so new kwargs do not break existing backends. Unknown names fail
 closed with `FAILED_UNKNOWN_BACKEND`.
 
 To add a backend, subclass `ExecutionBackend`, set `name`, and add one entry to

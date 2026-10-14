@@ -100,6 +100,7 @@ class RuntimeEventBridge:
         parent_event_id: Optional[str] = None,
         causation_id: Optional[str] = None,
         correlation_id: Optional[str] = None,
+        fail_closed: bool = True,
     ) -> StoredRuntimeEvent:
         """
         Core durable emission path:
@@ -144,6 +145,9 @@ class RuntimeEventBridge:
                 stored_event = persisted
             except Exception as exc:
                 logger.error("Failed to append event %s (%s) to event store: %s", stored_event.event_id, kind, exc)
+                if not fail_closed:
+                    # Observability-only events: a lost record must never halt the job at flush().
+                    return None
                 self._last_persistence_error = exc
                 raise
         else:
@@ -153,17 +157,22 @@ class RuntimeEventBridge:
         self._captured_events.append(event_dict)
 
         if self._bus and hasattr(self._bus, "publish"):
+            publish_kwargs = dict(
+                source_id=source_id,
+                source_kind=source_kind,
+                kind=kind,
+                detail=detail,
+                job_id=job_id,
+                duration=duration or "—",
+                metadata=meta,
+                accent_color=accent_color,
+            )
             try:
-                self._bus.publish(
-                    source_id=source_id,
-                    source_kind=source_kind,
-                    kind=kind,
-                    detail=detail,
-                    job_id=job_id,
-                    duration=duration or "—",
-                    metadata=meta,
-                    accent_color=accent_color,
-                )
+                try:
+                    # Runtime ids ride on the live event so /events and SSE consumers can link task -> event.
+                    self._bus.publish(**publish_kwargs, task_id=task_id, run_id=run_id, actor_id=actor_id)
+                except TypeError:
+                    self._bus.publish(**publish_kwargs)  # a bus without runtime-id support
             except Exception as exc:
                 logger.debug("Failed publishing event to live event_bus: %s", exc)
 

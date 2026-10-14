@@ -456,3 +456,27 @@ sprint-level execution_backend does not reach them. Verifier fallbacks keep the 
   OpenRig: claude only), else subprocess. An explicit task backend is never second-guessed.
 - **Cancel during `rig send`.** In production, send runs via Popen, polls the cancel event every 0.5 s, and is killed on
   cancel (FAILED_OPENRIG_CANCELLED; the rig is then released by id). `rig up` remains uninterruptible.
+
+## D-013: Persisted Execution page and interruptible rig up (2026-10-14)
+
+- **Persistence.** The API server enables `ExecutionRegistry` persistence at startup (`$HERMES_EXECUTION_STATE`, default
+  `~/.local/state/hermes/execution-registry.json`). It writes atomically after every change, with snapshot and write under
+  one lock. Reloaded rows are flagged `details.restored` and are not trusted: restored OpenRig rows whose rig the daemon no
+  longer lists are pruned at snapshot time (only when the daemon answered), any restored row unrefreshed for 30 min is
+  dropped, and the next live event clears the flag. The sprint runner and tests never persist.
+- **Interruptible `rig up`.** It uses the same Popen/cancel path as `rig send`. On cancel it is killed, and orphan
+  recovery adopts whatever it already created by exact rigId and releases it.
+
+### D-013 round 2 (Codex BLOCK, 3 x P2, all accepted)
+
+- **Late rigs from cancelled or lost launches.** Before `rig up`, the launch is recorded by its unique Hermes name in
+  `<ledger>/<owner>.pending` (state `launching`). It is cleared when its rigId is tracked, otherwise marked `abandoned`.
+  Every preflight reconciles abandoned launches, and launches whose owner died: a rig with exactly that name in the
+  `rig ps` listing is released by its rigId. A launch still in progress in a live process is never touched. Entries
+  are dropped after 1 h. If the pending record cannot be written, the launch does not start.
+- **Saves are off the execution path.** `apply()` only schedules a save. One background thread writes, coalescing
+  bursts.
+- **Restarts no longer renew stale rows.** `restoredAt` is kept across restarts, and TTL expiry is persisted.
+- Round 3 fixes: the pending launch record is cleared only after the rigId is *durably* written to the ledger, so a
+  failed ownership write followed by a failed teardown still leaves a recovery handle. The registry `flush()` waits for
+  queued writes and for a write already in progress, within one timeout. The API flushes the registry at shutdown.

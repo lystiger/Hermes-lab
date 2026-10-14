@@ -1260,7 +1260,10 @@ def test_ledger_write_failure_fails_closed_and_releases_the_rig(tmp_path, clock,
         backend.execute(make_request(tmp_path))
 
     assert excinfo.value.code == "FAILED_OPENRIG_UNAVAILABLE"
-    assert rig.rigs_down == [RIG_ID]
+    # The pending-launch record is written before `rig up`, so an unwritable ledger now stops the
+    # launch before any rig exists: nothing to release, nothing unrecorded.
+    assert "up" not in [c[0] for c in rig.calls]
+    assert rig.rigs_down == []
 
 
 def test_entries_from_another_host_are_never_judged_dead_here(tmp_path, clock, pool):
@@ -1498,6 +1501,12 @@ def test_teardown_refuses_anything_but_a_rig_id(tmp_path, clock):
     assert excinfo.value.code == "FAILED_OPENRIG_PROTOCOL"
 
 
+def _forget_all_in_another_process(directory):
+    other = OwnershipLedger(Path(directory))
+    for i in range(40):
+        other.forget(f"01F{i:023d}")
+
+
 def _record_many(directory, prefix, count):
     ledger = OwnershipLedger(directory)
     for i in range(count):
@@ -1508,17 +1517,13 @@ def test_concurrent_processes_never_lose_each_others_ledger_entries(tmp_path):
     # Another process forgets rigs while this one records: with only an in-process lock
     # the rewrite of a shared file could drop a live owner's new rigId.
     ledger_dir = tmp_path / "ledger"
-    ctx = multiprocessing.get_context("fork")
+    # spawn, not fork: this test process may already run background threads.
+    ctx = multiprocessing.get_context("spawn")
     ledger = OwnershipLedger(ledger_dir)
     for i in range(40):
         ledger.record(f"01F{i:023d}")
 
-    def forget_all():
-        other = OwnershipLedger(ledger_dir)
-        for i in range(40):
-            other.forget(f"01F{i:023d}")
-
-    forgetter = ctx.Process(target=forget_all)
+    forgetter = ctx.Process(target=_forget_all_in_another_process, args=(str(ledger_dir),))
     forgetter.start()
     _record_many(ledger_dir, "R", 40)
     forgetter.join(30)
@@ -1714,7 +1719,21 @@ def test_a_cancel_during_a_blocking_rig_send_stops_it_and_releases_the_rig(tmp_p
     event = threading.Event()
     send = BlockingSend(cancel_after_polls=2, event=event)
     backend = make_backend(tmp_path, clock, rig, pool=pool, cancel_event=event)
-    backend._popen = send
+
+    class Finished:
+        def __init__(self, result):
+            self.result = result
+
+        def communicate(self, timeout=None):
+            return self.result.stdout, ""
+
+        def kill(self):
+            pass
+
+    # `rig up` completes normally through the fake rig; only `rig send` blocks.
+    backend._popen = lambda argv, **kw: (
+        send(argv, **kw) if argv[1] == "send" else Finished(rig(argv, capture_output=True, text=True, timeout=30))
+    )
 
     with pytest.raises(SprintRunnerError) as excinfo:
         backend.execute(make_request(tmp_path))
@@ -1756,3 +1775,133 @@ def test_an_expired_deadline_never_spawns_a_send(tmp_path, clock, pool):
 
     assert excinfo.value.code == "FAILED_TIMEOUT"
     assert spawned == []
+
+
+def test_a_cancel_during_rig_up_kills_it_and_releases_what_it_created(tmp_path, clock, pool):
+    rig = FakeRig(clock)
+    event = threading.Event()
+
+    class BlockingUp(BlockingSend):
+        def __call__(self, argv, **kwargs):
+            assert argv[1] == "up"
+            # The daemon got as far as creating the rig before the cancel.
+            name = json.loads(Path(argv[2]).read_text())["name"]
+            rig.listed_rigs = [{"rigId": RIG_ID, "name": name, "status": "running"}]
+            return super().__call__(argv, **kwargs)
+
+    up = BlockingUp(cancel_after_polls=2, event=event)
+    backend = make_backend(tmp_path, clock, rig, pool=pool, cancel_event=event)
+    backend._popen = up
+
+    with pytest.raises(SprintRunnerError) as excinfo:
+        backend.execute(make_request(tmp_path))
+
+    assert excinfo.value.code == "FAILED_OPENRIG_CANCELLED"
+    assert up.killed
+    assert rig.rigs_down == [RIG_ID]  # adopted by exact id and released, never by name
+    assert pool.idle_rig_ids() == []
+
+
+def test_a_cancel_during_rig_up_before_anything_exists_releases_nothing(tmp_path, clock, pool):
+    rig = FakeRig(clock)
+    event = threading.Event()
+    up = BlockingSend(cancel_after_polls=1, event=event)
+    backend = make_backend(tmp_path, clock, rig, pool=pool, cancel_event=event)
+    backend._popen = up
+
+    with pytest.raises(SprintRunnerError) as excinfo:
+        backend.execute(make_request(tmp_path))
+
+    assert excinfo.value.code == "FAILED_OPENRIG_CANCELLED"
+    assert rig.rigs_down == []
+
+
+# --- pending launches: rigs that appear after we stopped waiting ----------------------
+def test_a_rig_that_appears_after_a_cancelled_launch_is_released_by_a_later_preflight(tmp_path, clock, pool):
+    ledger_dir = tmp_path / "ledger"
+    rig = FakeRig(clock)
+    event = threading.Event()
+    up = BlockingSend(cancel_after_polls=1, event=event)
+    backend = make_backend(tmp_path, clock, rig, pool=pool, cancel_event=event, ledger=OwnershipLedger(ledger_dir))
+    backend._popen = up
+    with pytest.raises(SprintRunnerError):
+        backend.execute(make_request(tmp_path))
+    assert rig.rigs_down == []  # nothing existed during the recovery window
+    late_name = json.loads(Path(up.argv[2]).read_text())["name"]
+
+    # The daemon finishes creating it afterwards.
+    rig.listed_rigs = [{"rigId": "01000000000000000000000031", "name": late_name, "status": "running"}]
+    rig2 = rig
+    later = make_backend(tmp_path, clock, rig2, pool=pool, ledger=OwnershipLedger(ledger_dir))
+    later.preflight(clock.monotonic() + 60)
+
+    assert rig.rigs_down == ["01000000000000000000000031"]
+    later.preflight(clock.monotonic() + 60)
+    assert rig.rigs_down == ["01000000000000000000000031"]  # cleared: not released twice
+
+
+def test_a_launch_still_in_progress_in_a_live_process_is_never_touched(tmp_path, clock, pool):
+    import time as _time
+
+    ledger_dir = tmp_path / "ledger"
+    ledger = OwnershipLedger(ledger_dir)
+    ledger.record_pending("hermes-sprint-07-proof-0badcafe", _time.time())  # this live process, launching
+    rig = FakeRig(clock)
+    rig.listed_rigs = [{"rigId": "01000000000000000000000032", "name": "hermes-sprint-07-proof-0badcafe"}]
+
+    make_backend(tmp_path, clock, rig, pool=pool, ledger=ledger).preflight(clock.monotonic() + 60)
+
+    assert rig.rigs_down == []
+
+
+def test_a_launch_whose_owner_died_is_reconciled_and_old_entries_expire(tmp_path, clock, pool):
+    import time as _time
+
+    ledger_dir = tmp_path / "ledger"
+    dead = OwnershipLedger(ledger_dir, identity=lambda: (dead_pid(), None))
+    dead.record_pending("hermes-sprint-07-proof-11111111", _time.time())
+    dead.record_pending("hermes-sprint-07-proof-22222222", _time.time() - 7200)  # too old: dropped
+    rig = FakeRig(clock)
+    rig.listed_rigs = [
+        {"rigId": "01000000000000000000000033", "name": "hermes-sprint-07-proof-11111111"},
+        {"rigId": "01000000000000000000000034", "name": "hermes-sprint-07-proof-22222222"},
+    ]
+
+    make_backend(tmp_path, clock, rig, pool=pool, ledger=OwnershipLedger(ledger_dir)).preflight(clock.monotonic() + 60)
+
+    assert rig.rigs_down == ["01000000000000000000000033"]
+
+
+def test_a_successful_launch_leaves_no_pending_record(tmp_path, clock, pool):
+    ledger_dir = tmp_path / "ledger"
+    run_backend = make_backend(tmp_path, clock, FakeRig(clock), pool=pool, ledger=OwnershipLedger(ledger_dir))
+    run_backend.execute(make_request(tmp_path))
+    assert list(ledger_dir.glob("*.pending")) == []
+
+
+def test_when_ownership_recording_and_teardown_both_fail_the_pending_record_survives(tmp_path, clock, pool):
+    import time as _time
+
+    ledger_dir = tmp_path / "ledger"
+
+    class NoRecord(OwnershipLedger):
+        def record(self, rig_id):
+            raise OSError("disk full")
+
+    rig = FakeRig(clock)
+    rig.down_results = [subprocess.CompletedProcess([], 1, "", "daemon hiccup")] * 3
+    backend = make_backend(tmp_path, clock, rig, pool=pool, ledger=NoRecord(ledger_dir))
+    with pytest.raises(SprintRunnerError):
+        backend.execute(make_request(tmp_path))
+
+    pending = list(ledger_dir.glob("*.pending"))
+    assert len(pending) == 1  # the only recovery handle left
+    [entry] = json.loads(pending[0].read_text())["pending"]
+    assert entry["state"] == "abandoned"
+
+    # A later preflight (daemon healthy again) finds the rig under that name and releases it by id.
+    rig.down_results = []
+    rig.listed_rigs = [{"rigId": RIG_ID, "name": entry["name"], "status": "running"}]
+    make_backend(tmp_path, clock, rig, pool=pool, ledger=OwnershipLedger(ledger_dir)).preflight(clock.monotonic() + 60)
+    assert rig.rigs_down[-1] == RIG_ID
+    assert list(ledger_dir.glob("*.pending")) == []

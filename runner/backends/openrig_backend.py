@@ -45,6 +45,8 @@ CANCELLED_CODE = "FAILED_OPENRIG_CANCELLED"
 SEAT_IDLE_SECONDS = 120
 # Shared budget for releasing rigs that a crashed Hermes process left in the ledger.
 LEDGER_RECONCILE_SECONDS = 20
+# A launch that never produced a visible rig is not waited on longer than this (seconds).
+PENDING_LAUNCH_MAX_AGE = 3600
 
 
 @dataclass
@@ -362,6 +364,7 @@ class OpenRigBackend(ExecutionBackend):
         self.pooled_rig_ids = []
         self.seat_pool = seat_pool if seat_pool is not None else DEFAULT_SEAT_POOL
         self.ledger = ledger if ledger is not None else OwnershipLedger()
+        self._ledger_recorded = set()  # rigIds whose ledger write succeeded
         self._daemon_down = daemon_down or daemon_down_by_id
         # Set by the caller to stop this task out of band. Checked at step boundaries only.
         self._cancel_event = cancel_event
@@ -546,6 +549,7 @@ class OpenRigBackend(ExecutionBackend):
             r.get("rigId") for r in rigs if isinstance(r, dict) and r.get("rigId")
         }
         self._reconcile_ledger(deadline)
+        self._reconcile_pending_launches(rigs, deadline)
         return match.group(1)
 
     def _reconcile_ledger(self, deadline):
@@ -576,6 +580,29 @@ class OpenRigBackend(ExecutionBackend):
                 else:
                     self._log("info", "Released OpenRig rig %s left by dead Hermes pid %s", rig_id, owner.pid)
 
+    def _reconcile_pending_launches(self, rigs, deadline):
+        """Release rigs from launches nobody waits for any more (cancelled, lost, or owner died).
+
+        Matched by their unique Hermes name in the `rig ps` listing taken this preflight; released
+        only by the rigId found there. Never fails the current task.
+        """
+        try:
+            names = self.ledger.pending_to_reconcile(time.time(), PENDING_LAUNCH_MAX_AGE)
+        except OSError as exc:
+            self._log("warning", "OpenRig pending launches could not be read: %s", exc)
+            return
+        for name in names:
+            matches = [r.get("rigId") for r in rigs if isinstance(r, dict) and r.get("name") == name]
+            if len(matches) != 1 or not is_rig_id(matches[0]):
+                continue  # not created (yet), or ambiguous: never guess
+            try:
+                self._release(matches[0], min(self._monotonic() + RELEASE_TIMEOUT_SECONDS, deadline))
+            except SprintRunnerError as exc:
+                self._log("warning", "Late OpenRig rig %s (%s) not released, kept for retry: %s", name, matches[0], exc.message)
+                continue
+            self.ledger.clear_pending(name)
+            self._log("info", "Released OpenRig rig %s (%s) from an abandoned launch", name, matches[0])
+
     def _track(self, rig_id):
         """Own `rig_id` for cleanup and persist it before anything relies on it.
 
@@ -586,6 +613,7 @@ class OpenRigBackend(ExecutionBackend):
             self.owned_rig_ids.append(rig_id)
         try:
             self.ledger.record(rig_id)
+            self._ledger_recorded.add(rig_id)
         except (OSError, ValueError) as exc:
             raise SprintRunnerError(
                 "FAILED_OPENRIG_UNAVAILABLE",
@@ -698,11 +726,37 @@ class OpenRigBackend(ExecutionBackend):
         return spec_path
 
     def _launch(self, spec_path, rig_name, deadline):
+        # Record the launch first: if `rig up` finishes after we stop waiting, a later preflight
+        # still finds the rig by its unique name and releases it by id.
         try:
-            payload = self._run_json(
-                ["up", str(spec_path), "--json"], deadline, "FAILED_OPENRIG_CREATE",
-                allow_failure_payload=True,
-            )
+            self.ledger.record_pending(rig_name, time.time())
+        except (OSError, ValueError) as exc:
+            raise SprintRunnerError(
+                "FAILED_OPENRIG_UNAVAILABLE", f"could not record pending OpenRig launch {rig_name}: {exc}",
+            ) from exc
+        recorded_before = set(self._ledger_recorded)
+        try:
+            return self._launch_tracked(spec_path, rig_name, deadline)
+        finally:
+            try:
+                # Only a rigId durably written to the ledger replaces the pending record: if that write
+                # failed, the pending entry is the last recovery handle and must survive.
+                if self._ledger_recorded - recorded_before:
+                    self.ledger.clear_pending(rig_name)
+                else:
+                    self.ledger.abandon_pending(rig_name)
+            except OSError as exc:
+                self._log("warning", "OpenRig pending launch %s not updated: %s", rig_name, exc)
+
+    def _launch_tracked(self, spec_path, rig_name, deadline):
+        args = ["up", str(spec_path), "--json"]
+        try:
+            if self._popen is not None and self._cancel_event is not None:
+                # Interruptible: a cancel kills `rig up` mid-launch. Whatever it already created is
+                # found by the orphan recovery below and released by id like any lost response.
+                payload = self._run_json_interruptible(args, deadline, "FAILED_OPENRIG_CREATE")
+            else:
+                payload = self._run_json(args, deadline, "FAILED_OPENRIG_CREATE", allow_failure_payload=True)
         except SprintRunnerError:
             # The daemon may have created the rig even though its response was lost.
             self._adopt_orphan(rig_name)
@@ -1105,11 +1159,12 @@ def _iso(moment):
 STATUS_QUERY_SECONDS = 3
 
 
-def describe_openrig(rig_executable="rig", *, run_process=None, which=None, ledger=None):
+def describe_openrig(rig_executable="rig", *, run_process=None, which=None, ledger=None, live_rig_ids=None):
     """Read-only OpenRig status for GET /execution: daemon reachability and the ownership ledger.
 
     Runs only `rig ps --json`. It never runs a mutating command and never reconciles the ledger.
-    Returns None when the rig executable is not installed.
+    Returns None when the rig executable is not installed. When `live_rig_ids` is a set and the
+    daemon answered, it is filled with the rigIds the daemon knows (stopped ones included).
     """
     if (which or shutil.which)(rig_executable) is None:
         return None
@@ -1123,7 +1178,10 @@ def describe_openrig(rig_executable="rig", *, run_process=None, which=None, ledg
         daemon = "down"
     elif result is not None:
         try:
-            daemon = "up" if isinstance(json.loads(result.stdout or ""), list) else "unknown"
+            listed = json.loads(result.stdout or "")
+            daemon = "up" if isinstance(listed, list) else "unknown"
+            if daemon == "up" and live_rig_ids is not None:
+                live_rig_ids.update(r.get("rigId") for r in listed if isinstance(r, dict) and r.get("rigId"))
         except ValueError:
             daemon = "unknown"
     return {"daemon": daemon, "ledger": (ledger or OwnershipLedger()).summary()}

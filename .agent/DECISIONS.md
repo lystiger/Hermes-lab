@@ -315,3 +315,41 @@ Tests: 482 passed / 5 skipped. Each new test fails when its fix is turned off.
 - P2: the adapter dropped job retry state once the first release succeeded, so a late seat's failed teardown could
   not be retried. The adapter now keeps the names. Backend release_job is idempotent, so every call retries.
 Tests: 485 passed / 5 skipped.
+
+## D-009: Execution visibility contract, Hermes → LysControl (2026-10-14)
+
+Human decisions: a new **Execution** page in LysControl; it covers **every backend** (subprocess, herdr, openrig), not only OpenRig.
+LysControl ships as an Omarchy web app (http://localhost:3000, class `chrome-localhost__-Default`, workspace 5).
+Phase A (Hermes) and Phase B (LysControl) are built in parallel against this contract. It is the source of truth.
+
+### Events (persisted and streamed like every runtime event: GET /events, GET /events/stream)
+`source_kind="runtime"`, `source_id=<backend name>`. job_id / task_id / run_id / actor_id are set when known.
+`kind` is one of:
+- `execution.started`: a backend began a task execution
+- `execution.resource_acquired`: the backend has a resource (openrig: a seat, new or reused; herdr: a pane; subprocess: a process)
+- `execution.resource_ready`: the resource can take the prompt (openrig: hook-idle on the new generation)
+- `execution.running`: the prompt/command was delivered and the work is in progress
+- `execution.finished`: clean completion (task succeeded or failed by the agent's own verdict)
+- `execution.failed`: backend/protocol failure (metadata.errorCode = the SprintRunnerError code)
+- `execution.cancelled`: stopped out of band
+- `execution.resource_pooled`: openrig: the seat went back to the job pool (idle; metadata.expiresAt)
+- `execution.resource_released`: the resource was torn down / freed
+- `execution.release_failed`: teardown failed and is kept for retry
+
+`metadata` (camelCase, every field optional except backend and executionId):
+```
+{ backend: "openrig"|"herdr"|"subprocess"|<other>,
+  executionId: "<stable id for this task execution>",
+  resource: { kind: "seat"|"pane"|"process", id: "<rigId|paneId|pid>", label: "<human label>" },
+  reused: bool, generation: str, rigId: str, sessionName: str, nodeId: str,
+  expiresAt: ISO8601, errorCode: str, error: str, durationMs: int }
+```
+
+### Snapshot: GET /execution
+```
+{ backends: [ { name, available: bool, detail: str } ],
+  resources: [ { backend, kind, id, label, state: "acquiring"|"ready"|"running"|"idle"|"releasing"|"failed",
+                 jobId, taskId, executionId, since: ISO8601, expiresAt: ISO8601|null, details: {} } ],
+  openrig: { daemon: "up"|"down"|"unknown", ledger: { owners: int, rigIds: [str] } } | null }
+```
+The snapshot is the initial state. Events after it are applied on top. In-process state only; it never calls `rig` mutating commands.

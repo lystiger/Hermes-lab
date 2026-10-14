@@ -26,16 +26,16 @@ export const ExecutionResourceCard: React.FC<ExecutionResourceCardProps> = ({ re
       data-testid="execution-resource"
       data-state={resource.state}
       style={{
-        borderColor: failed ? 'rgba(242,85,90,0.55)' : '#1F242B',
-        backgroundColor: failed ? 'rgba(242,85,90,0.07)' : '#101216'
+        borderColor: failed ? 'color-mix(in srgb, var(--lys-status-danger) 55%, transparent)' : 'var(--lys-border-subtle)',
+        backgroundColor: failed ? 'color-mix(in srgb, var(--lys-status-danger) 7%, transparent)' : 'var(--lys-surface-1)'
       }}
       className="p-3 border font-mono-code text-[11px] flex flex-col gap-2 min-w-0"
     >
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0">
-          <div className="text-[13px] font-sans text-[#E6E9ED] truncate" title={resource.label}>{resource.label}</div>
-          <div className="text-[#5C646E] flex items-center gap-2 min-w-0">
-            {seat !== undefined && <span className="text-[#8C949F]">SEAT {String(seat).padStart(2, '0')}</span>}
+          <div className="text-[13px] font-sans text-lys-primary truncate" title={resource.label}>{resource.label}</div>
+          <div className="text-lys-faint flex items-center gap-2 min-w-0">
+            {seat !== undefined && <span className="text-lys-muted">SEAT {String(seat).padStart(2, '0')}</span>}
             <span className="truncate" title={`${resource.kind} · ${resource.id}`}>{resource.kind}</span>
             <CopyId value={resource.id} className="text-[10px]" />
           </div>
@@ -44,24 +44,24 @@ export const ExecutionResourceCard: React.FC<ExecutionResourceCardProps> = ({ re
       </div>
 
       <div className="flex flex-wrap items-center gap-1.5">
-        {reused && <Badge label="reused" color="#7FB3D5" />}
-        {resource.details?.generation && <Badge label={`gen ${resource.details.generation}`} color="#8C949F" />}
-        {releaseFailed && <Badge label="release failed" color="#F2555A" />}
-        {expiry && <span className="text-[#CBA35C]">{expiry}</span>}
+        {reused && <Badge label="reused" color="var(--lys-accent-sky)" />}
+        {resource.details?.generation && <Badge label={`gen ${resource.details.generation}`} color="var(--lys-text-muted)" />}
+        {releaseFailed && <Badge label="release failed" color="var(--lys-status-danger)" />}
+        {expiry && <span className="text-lys-gold">{expiry}</span>}
       </div>
 
-      <div className="flex flex-col gap-0.5 text-[#8C949F]">
+      <div className="flex flex-col gap-0.5 text-lys-muted">
         <span className="truncate">
-          job <span className="text-[#E6E9ED]">{resource.jobId || '—'}</span>
-          {resource.taskId ? <> · task <span className="text-[#E6E9ED]">{resource.taskId}</span></> : null}
+          job <span className="text-lys-primary">{resource.jobId || '—'}</span>
+          {resource.taskId ? <> · task <span className="text-lys-primary">{resource.taskId}</span></> : null}
         </span>
         {resource.executionId && (
-          <span className="truncate text-[#5C646E]" title={resource.executionId}>exec {resource.executionId}</span>
+          <span className="truncate text-lys-faint" title={resource.executionId}>exec {resource.executionId}</span>
         )}
       </div>
 
       {failed && (errorCode || errorText) && (
-        <div className="text-[#F2555A] break-words">
+        <div className="text-lys-danger break-words">
           {errorCode && <span className="font-semibold">{errorCode}</span>}
           {errorCode && errorText ? ' · ' : ''}
           {errorText}

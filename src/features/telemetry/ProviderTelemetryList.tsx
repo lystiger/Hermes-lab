@@ -10,11 +10,11 @@ const NO_PROVIDERS = 'No provider usage reported by Hermes. The provider registr
 export function sourceLabel(source: string | null | undefined): { text: string; color: string } {
   switch (source) {
     case 'provider_reported':
-      return { text: 'provider reported', color: '#3FB950' };
+      return { text: 'provider reported', color: 'var(--lys-status-success)' };
     case 'hermes_estimated':
-      return { text: 'estimated by Hermes', color: '#E3A008' };
+      return { text: 'estimated by Hermes', color: 'var(--lys-status-warning)' };
     default:
-      return { text: 'source unknown', color: '#8C949F' };
+      return { text: 'source unknown', color: 'var(--lys-text-muted)' };
   }
 }
 
@@ -31,33 +31,33 @@ const ProviderRow: React.FC<{ provider: ProviderTelemetry; compact: boolean }> =
   );
 
   return (
-    <div className={`p-3 bg-[#101216] border border-[#1F242B] font-mono-code text-[11px] ${compact ? '' : 'mb-3'}`}>
+    <div className={`p-3 bg-lys-surface-1 border border-lys-subtle font-mono-code text-[11px] ${compact ? '' : 'mb-3'}`}>
       <div className="flex items-center justify-between">
-        <span className="text-[12px] text-[#E6E9ED] font-semibold">{provider.providerId}</span>
-        <span className="text-[#8C949F] tracking-wider">{provider.status}</span>
+        <span className="text-[12px] text-lys-primary font-semibold">{provider.providerId}</span>
+        <span className="text-lys-muted tracking-wider">{provider.status}</span>
       </div>
-      {provider.statusReason && <div className="mt-1 text-[#5C646E]">{provider.statusReason}</div>}
+      {provider.statusReason && <div className="mt-1 text-lys-faint">{provider.statusReason}</div>}
 
-      <div className="mt-2 grid grid-cols-2 gap-x-3 gap-y-1 text-[#8C949F]">
-        <span>requests <span className="text-[#E6E9ED]">{provider.totalRequests}</span></span>
-        <span>success rate <span className="text-[#E6E9ED]">{rate}</span></span>
-        <span>failures <span className="text-[#E6E9ED]">{provider.failureCount}</span></span>
-        <span>throttled <span className="text-[#E6E9ED]">{provider.throttlingCount}</span></span>
+      <div className="mt-2 grid grid-cols-2 gap-x-3 gap-y-1 text-lys-muted">
+        <span>requests <span className="text-lys-primary">{provider.totalRequests}</span></span>
+        <span>success rate <span className="text-lys-primary">{rate}</span></span>
+        <span>failures <span className="text-lys-primary">{provider.failureCount}</span></span>
+        <span>throttled <span className="text-lys-primary">{provider.throttlingCount}</span></span>
       </div>
 
       {!compact && (
-        <div className="mt-2 grid grid-cols-2 gap-x-3 gap-y-1 text-[#8C949F]">
-          <span>tokens used <span className="text-[#E6E9ED]">{orUnknown(usage?.tokensUsed, 'Provider did not report token usage')}</span></span>
-          <span>requests left <span className="text-[#E6E9ED]">{orUnknown(usage?.requestsRemaining, 'Provider did not report a remaining request count')}</span></span>
-          <span>context <span className="text-[#E6E9ED]">{orUnknown(usage?.contextUsed, 'Provider did not report context use')}</span>
+        <div className="mt-2 grid grid-cols-2 gap-x-3 gap-y-1 text-lys-muted">
+          <span>tokens used <span className="text-lys-primary">{orUnknown(usage?.tokensUsed, 'Provider did not report token usage')}</span></span>
+          <span>requests left <span className="text-lys-primary">{orUnknown(usage?.requestsRemaining, 'Provider did not report a remaining request count')}</span></span>
+          <span>context <span className="text-lys-primary">{orUnknown(usage?.contextUsed, 'Provider did not report context use')}</span>
             {' / '}
             {orUnknown(usage?.contextWindow, 'Provider did not report a context window')}
           </span>
-          <span>resets <span className="text-[#E6E9ED]">{usage?.resetAt ?? UNKNOWN}</span></span>
+          <span>resets <span className="text-lys-primary">{usage?.resetAt ?? UNKNOWN}</span></span>
         </div>
       )}
 
-      <div className="mt-2 flex flex-wrap justify-between gap-2 text-[#5C646E]">
+      <div className="mt-2 flex flex-wrap justify-between gap-2 text-lys-faint">
         <span style={{ color: src.color }}>{src.text}</span>
         <span>{CAPACITY_WINDOW_LABEL}</span>
       </div>
@@ -75,13 +75,13 @@ export const ProviderTelemetryList: React.FC<{ compact?: boolean }> = ({ compact
 
   return (
     <div className={compact ? 'p-3.5 select-none' : 'p-5 select-none'}>
-      <div className="font-mono-code text-[11px] tracking-wider text-[#5C646E] mb-1">
+      <div className="font-mono-code text-[11px] tracking-wider text-lys-faint mb-1">
         {compact ? 'PROVIDER USAGE' : '3 · PROVIDER USAGE'}
       </div>
-      <div className="font-mono-code text-[11px] text-[#5C646E] mb-3">{CAPACITY_WINDOW_LABEL}</div>
+      <div className="font-mono-code text-[11px] text-lys-faint mb-3">{CAPACITY_WINDOW_LABEL}</div>
 
       {error && (
-        <div role="alert" className="mb-2 font-mono-code text-[11px] text-[#E3A008]">
+        <div role="alert" className="mb-2 font-mono-code text-[11px] text-lys-warning">
           refresh failed, showing last loaded data: {error.message}
         </div>
       )}
@@ -93,7 +93,7 @@ export const ProviderTelemetryList: React.FC<{ compact?: boolean }> = ({ compact
       )}
 
       {!compact && (
-        <div className="mt-2 font-mono-code text-[11px] text-[#5C646E]">
+        <div className="mt-2 font-mono-code text-[11px] text-lys-faint">
           {capacity.summary ? (
             <span>
               {capacity.summary.totalProviders ?? UNKNOWN} providers · {capacity.summary.totalRequests ?? UNKNOWN} requests ·{' '}

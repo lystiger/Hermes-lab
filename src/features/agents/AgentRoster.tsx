@@ -42,9 +42,9 @@ export const AgentRoster: React.FC<AgentRosterProps> = ({
   const visible = filter === 'ALL' ? agents : agents.filter((a) => a.status === filter);
 
   return (
-    <aside aria-label="Agent roster" className="w-full md:w-72 flex-shrink-0 border-r border-[#1F242B] bg-[#0C0E11] flex flex-col">
-      <div className="p-3 border-b border-[#1F242B] flex flex-col gap-2">
-        <div className="flex items-center justify-between font-mono-code text-[11px] tracking-wider text-[#5C646E]">
+    <aside aria-label="Agent roster" className="w-full md:w-72 flex-shrink-0 border-r border-lys-subtle bg-lys-surface-0 flex flex-col">
+      <div className="p-3 border-b border-lys-subtle flex flex-col gap-2">
+        <div className="flex items-center justify-between font-mono-code text-[11px] tracking-wider text-lys-faint">
           <span>ROSTER · {agents.length}</span>
           <Freshness at={updatedAt} />
         </div>
@@ -57,7 +57,7 @@ export const AgentRoster: React.FC<AgentRosterProps> = ({
       {agents.length > 0 && visible.length === 0 && <EmptyState>No agent has status {filter.toLowerCase()}.</EmptyState>}
 
       <div ref={listRef} role="listbox" aria-label="Agents" className="flex flex-col p-2 gap-1 overflow-y-auto">
-        {visible.map((a) => {
+        {visible.map((a, idx) => {
           const selected = a.id === selectedId;
           const running = a.status === 'RUNNING';
           return (
@@ -68,26 +68,26 @@ export const AgentRoster: React.FC<AgentRosterProps> = ({
               aria-selected={selected}
               data-nav-item
               onClick={() => onSelect(a.id)}
-              style={{ borderLeftColor: a.presentation?.accentColor || '#3A4048' }}
-              className={`text-left p-2.5 border-l-2 border border-transparent cursor-pointer transition-colors ${
-                selected ? 'bg-[#14171C] border-[#1F242B]' : 'hover:bg-[#12151A]'
+              style={{ borderLeftColor: a.presentation?.accentColor || 'var(--lys-border-strong)', '--lys-stagger': idx } as React.CSSProperties}
+              className={`lys-enter text-left p-2.5 border-l-2 border border-transparent cursor-pointer transition-colors ${
+                selected ? 'bg-lys-surface-1 border-lys-subtle' : 'hover:bg-lys-surface-1'
               }`}
             >
               <div className="flex items-center justify-between gap-2">
-                <span className="text-[13px] font-semibold text-[#E6E9ED] truncate">{a.displayName}</span>
-                <span className={`font-mono-code text-[10px] tracking-wider ${running ? 'text-[#3FB950]' : 'text-[#8C949F]'}`}>
+                <span className="text-[13px] font-semibold text-lys-primary truncate">{a.displayName}</span>
+                <span className={`font-mono-code text-[10px] tracking-wider ${running ? 'text-lys-success' : 'text-lys-muted'}`}>
                   {a.status}
                 </span>
               </div>
-              <div className="mt-0.5 font-mono-code text-[11px] text-[#5C646E] truncate">
+              <div className="mt-0.5 font-mono-code text-[11px] text-lys-faint truncate">
                 {a.role || UNKNOWN} · {a.model || UNKNOWN}
               </div>
-              <div className="mt-0.5 text-[11px] text-[#8C949F] truncate">{a.currentTask || 'no current task reported'}</div>
+              <div className="mt-0.5 text-[11px] text-lys-muted truncate">{a.currentTask || 'no current task reported'}</div>
             </button>
           );
         })}
       </div>
-      <p className="mt-auto p-3 font-mono-code text-[10px] text-[#5C646E]">↑ ↓ move · Enter opens</p>
+      <p className="mt-auto p-3 font-mono-code text-[10px] text-lys-faint">↑ ↓ move · Enter opens</p>
     </aside>
   );
 };

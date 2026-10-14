@@ -50,15 +50,15 @@ export const Header: React.FC = () => {
   const getConnectionColor = () => {
     switch (connectionStatus) {
       case 'CONNECTED':
-        return '#3FB950';
+        return 'var(--lys-status-success)';
       case 'CONNECTING':
-        return '#E3A008';
+        return 'var(--lys-status-warning)';
       case 'DEGRADED':
-        return '#E3A008';
+        return 'var(--lys-status-warning)';
       case 'DISCONNECTED':
-        return '#F2555A';
+        return 'var(--lys-status-danger)';
       default:
-        return '#8C949F';
+        return 'var(--lys-text-muted)';
     }
   };
 
@@ -69,29 +69,29 @@ export const Header: React.FC = () => {
   const notMeasured = 'Not reported by the Hermes API';
 
   return (
-    <header className="h-[46px] flex-shrink-0 flex items-center justify-between px-5 border-b border-[#1F242B] bg-[#0C0E11] select-none">
+    <header className="h-[46px] flex-shrink-0 flex items-center justify-between px-5 border-b border-lys-subtle bg-lys-surface-0 select-none">
       <div className="flex items-center gap-3">
         {crumb && (
           <button
             onClick={() => navigate(backPath)}
-            className="font-mono-code text-[11px] text-[#5C646E] hover:text-[#E6E9ED] cursor-pointer transition-colors"
+            className="font-mono-code text-[11px] text-lys-faint hover:text-lys-primary cursor-pointer transition-colors"
           >
             ← {crumb}
           </button>
         )}
-        <h1 className="text-[14px] font-semibold tracking-wide text-[#E6E9ED]">
+        <h1 className="text-[14px] font-semibold tracking-wide text-lys-primary">
           {title}
         </h1>
-        <span className="font-mono-code text-[11px] text-[#5C646E]">
+        <span className="font-mono-code text-[11px] text-lys-faint">
           {subtitle}
         </span>
       </div>
 
-      <div className="flex items-center gap-4 font-mono-code text-[11px] text-[#8C949F]">
-        <span title={isRealApiMode ? notMeasured : undefined}>queue eta <span className={isRealApiMode ? 'text-[#8C949F]' : 'text-[#E6E9ED]'}>{isRealApiMode ? '—' : '~37 min'}</span></span>
-        <span className="text-[#2A3038]">|</span>
-        <span title={isRealApiMode ? notMeasured : undefined}>budget <span className={isRealApiMode ? 'text-[#8C949F]' : 'text-[#E3A008]'}>{isRealApiMode ? '—' : '58%'}</span></span>
-        <span className="text-[#2A3038]">|</span>
+      <div className="flex items-center gap-4 font-mono-code text-[11px] text-lys-muted">
+        <span title={isRealApiMode ? notMeasured : undefined}>queue eta <span className={isRealApiMode ? 'text-lys-muted' : 'text-lys-primary'}>{isRealApiMode ? '—' : '~37 min'}</span></span>
+        <span className="text-lys-default">|</span>
+        <span title={isRealApiMode ? notMeasured : undefined}>budget <span className={isRealApiMode ? 'text-lys-muted' : 'text-lys-warning'}>{isRealApiMode ? '—' : '58%'}</span></span>
+        <span className="text-lys-default">|</span>
         <span
           style={{ color: statusColor }}
           className="flex items-center gap-1.5"
@@ -99,7 +99,7 @@ export const Header: React.FC = () => {
         >
           <span
             style={{ backgroundColor: statusColor }}
-            className={`w-1.5 h-1.5 rounded-[1px] ${connectionStatus === 'CONNECTING' ? 'animate-pulse' : ''}`}
+            className={`w-1.5 h-1.5 rounded-[1px]`}
           />
           {statusLabel}
         </span>

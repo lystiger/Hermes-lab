@@ -23,13 +23,13 @@ export const CyberButton: React.FC<CyberButtonProps> = ({
   }[size];
 
   const variantClasses = {
-    primary: 'bg-[#CBA35C] text-[#0A0B0D] font-semibold hover:bg-[#E8CE9B] border border-[#CBA35C]',
-    secondary: 'bg-[#12151A] text-[#E6E9ED] border border-[#2A3038] hover:border-[#5C646E] hover:bg-[#161A20]',
-    ghost: 'bg-transparent text-[#8C949F] hover:text-[#E6E9ED] border border-transparent hover:border-[#2A3038]',
-    danger: 'bg-[rgba(242,85,90,0.1)] text-[#F2555A] border border-[rgba(242,85,90,0.4)] hover:bg-[rgba(242,85,90,0.2)]'
+    primary: 'bg-lys-gold text-lys-base font-semibold hover:bg-lys-gold-hover border border-lys-gold',
+    secondary: 'bg-lys-surface-1 text-lys-primary border border-lys-default hover:border-lys-strong hover:bg-lys-surface-2',
+    ghost: 'bg-transparent text-lys-muted hover:text-lys-primary border border-transparent hover:border-lys-default',
+    danger: 'bg-lys-danger/10 text-lys-danger border border-lys-danger/40 hover:bg-lys-danger/20'
   }[variant];
 
-  const activeClasses = active ? 'border-[#CBA35C] text-[#E6E9ED] bg-[#1F242B]' : '';
+  const activeClasses = active ? 'border-lys-gold text-lys-primary bg-lys-surface-interactive' : '';
 
   return (
     <button

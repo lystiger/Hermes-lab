@@ -12,23 +12,23 @@ export const JobModal: React.FC = () => {
   if (!activeModalJobId) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-8 bg-[rgba(10,11,13,0.85)] backdrop-blur-sm select-none">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-8 bg-lys-base/85 backdrop-blur-sm select-none">
       <div
         role="dialog"
         aria-modal="true"
         aria-label={`Job ${activeModalJobId}`}
-        className="relative w-full max-w-5xl max-h-[90vh] bg-[#0A0B0D] border border-[#2A3038] shadow-2xl flex flex-col overflow-hidden"
+        className="relative w-full max-w-5xl max-h-[90vh] bg-lys-base border border-lys-default shadow-2xl flex flex-col overflow-hidden lys-drawer"
       >
         {/* Modal Top Bar */}
-        <div className="flex items-center justify-between px-4 py-2.5 bg-[#0C0E11] border-b border-[#1F242B]">
-          <div className="font-mono-code text-[12px] text-[#8C949F] flex items-center gap-2">
-            <span className="text-[#CBA35C]">LYSCONTROL // JOB INSPECTOR</span>
+        <div className="flex items-center justify-between px-4 py-2.5 bg-lys-surface-0 border-b border-lys-subtle">
+          <div className="font-mono-code text-[12px] text-lys-muted flex items-center gap-2">
+            <span className="text-lys-gold">LYSCONTROL // JOB INSPECTOR</span>
             <span>·</span>
             <CopyId value={activeModalJobId} />
           </div>
           <button
             onClick={() => setActiveModalJobId(null)}
-            className="font-mono-code text-[12px] text-[#8C949F] hover:text-[#E6E9ED] px-2 py-0.5 border border-transparent hover:border-[#2A3038] cursor-pointer transition-colors"
+            className="font-mono-code text-[12px] text-lys-muted hover:text-lys-primary px-2 py-0.5 border border-transparent hover:border-lys-default cursor-pointer transition-colors"
           >
             ✕ CLOSE
           </button>

@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import { TraceEvent, AgentSummary, AgentDetail, ConnectionStatus, HealthStatus, AgentStatus } from '../api/types';
 import { isMockMode } from '../api/client';
+import { prefersReducedMotion } from '../theme/motion';
 
 function pad(n: number, w: number): string {
   return String(n).padStart(w, '0');
@@ -88,7 +89,8 @@ export const useConsoleStore = create<ConsoleUIState>((set, get) => ({
   activeDossierAgent: null,
   qFilter: 'All',
   eFilter: 'All',
-  liveMotion: true,
+  // Live pulses and crawls start off when the system asks for reduced motion.
+  liveMotion: !prefersReducedMotion(),
   ambient3d: true,
   portraits: 'both',
   

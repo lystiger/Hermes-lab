@@ -19,21 +19,21 @@ export const Meter: React.FC<{
   unknownReason: string;
   tone?: string;
   note?: string;
-}> = ({ label, value, limit, unit = '', window, unknownReason, tone = '#8C949F', note }) => {
+}> = ({ label, value, limit, unit = '', window, unknownReason, tone = 'var(--lys-text-muted)', note }) => {
   const known = typeof value === 'number';
   const hasLimit = typeof limit === 'number' && limit > 0;
   const pct = known && hasLimit ? Math.max(0, Math.min(100, (value / limit) * 100)) : null;
 
   return (
     <div className="flex flex-col gap-1.5 min-w-0">
-      <div className="flex items-baseline justify-between gap-2 font-mono-code text-[11px]">
-        <span className="text-[#8C949F] tracking-wider">{label}</span>
-        <span className="text-[#E6E9ED]">
+      <div className="lys-metric flex items-baseline justify-between gap-2 font-mono-code text-[11px]">
+        <span className="text-lys-muted tracking-wider">{label}</span>
+        <span className="text-lys-primary">
           {known ? (
             <>
               {value.toLocaleString()}
               {unit ? ` ${unit}` : ''}
-              {hasLimit ? <span className="text-[#5C646E]"> / {limit!.toLocaleString()}</span> : null}
+              {hasLimit ? <span className="text-lys-faint"> / {limit!.toLocaleString()}</span> : null}
             </>
           ) : (
             <UnknownValue reason={unknownReason} />
@@ -41,13 +41,13 @@ export const Meter: React.FC<{
         </span>
       </div>
       {pct !== null ? (
-        <div role="meter" aria-label={label} aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(pct)} className="h-2 bg-[#14171C] relative">
+        <div role="progressbar" aria-label={label} aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(pct)} className="h-2 bg-lys-surface-1 relative">
           <div className="absolute left-0 top-0 bottom-0" style={{ width: `${pct}%`, backgroundColor: tone }} />
         </div>
       ) : (
-        <div className="h-2 bg-[#14171C] border border-dashed border-[#1F242B]" aria-hidden="true" />
+        <div className="h-2 bg-lys-surface-1 border border-dashed border-lys-subtle" aria-hidden="true" />
       )}
-      <div className="flex flex-wrap justify-between gap-2 font-mono-code text-[10px] text-[#5C646E]">
+      <div className="flex flex-wrap justify-between gap-2 font-mono-code text-[10px] text-lys-faint">
         <span>{window}</span>
         {note && <span>{note}</span>}
       </div>
@@ -61,10 +61,10 @@ export const ProviderMeters: React.FC<{ provider: ProviderTelemetry }> = ({ prov
   const src = sourceLabel(usage?.source);
   const successes = provider.successCount;
   return (
-    <section aria-label={`Meters for ${provider.providerId}`} className="p-4 bg-[#101216] border border-[#1F242B] flex flex-col gap-4">
+    <section aria-label={`Meters for ${provider.providerId}`} className="p-4 bg-lys-surface-1 border border-lys-subtle flex flex-col gap-4">
       <div className="flex flex-wrap items-center justify-between gap-2 font-mono-code text-[11px]">
-        <span className="text-[13px] text-[#E6E9ED] font-semibold">{provider.providerId}</span>
-        <span className="text-[#8C949F]">status {provider.status}</span>
+        <span className="text-[13px] text-lys-primary font-semibold">{provider.providerId}</span>
+        <span className="text-lys-muted">status {provider.status}</span>
         <span style={{ color: src.color }}>{src.text}</span>
       </div>
       <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
@@ -75,7 +75,7 @@ export const ProviderMeters: React.FC<{ provider: ProviderTelemetry }> = ({ prov
           unit="%"
           window={PROCESS_WINDOW}
           unknownReason="No requests have been made, so no success rate exists"
-          tone="#3FB950"
+          tone="var(--lys-status-success)"
           note={`${successes} ok · ${provider.failureCount} failed`}
         />
         <Meter
@@ -84,7 +84,7 @@ export const ProviderMeters: React.FC<{ provider: ProviderTelemetry }> = ({ prov
           limit={usage?.requestLimit}
           window={usage?.resetAt ? `resets ${usage.resetAt}` : 'provider window · reset not reported'}
           unknownReason="Provider did not report a remaining request count"
-          tone="#7FB3D5"
+          tone="var(--lys-accent-sky)"
         />
         <Meter
           label="TOKENS USED"
@@ -93,7 +93,7 @@ export const ProviderMeters: React.FC<{ provider: ProviderTelemetry }> = ({ prov
           unit="tok"
           window={PROCESS_WINDOW}
           unknownReason="Provider did not report token usage"
-          tone="#CBA35C"
+          tone="var(--lys-accent-gold)"
         />
         <Meter
           label="CONTEXT"
@@ -102,11 +102,11 @@ export const ProviderMeters: React.FC<{ provider: ProviderTelemetry }> = ({ prov
           unit="tok"
           window="current context window"
           unknownReason="Provider did not report context use"
-          tone="#A5D6FF"
+          tone="var(--lys-text-secondary)"
         />
       </div>
       {provider.throttlingCount > 0 && (
-        <div className="font-mono-code text-[11px] text-[#E3A008]">
+        <div className="font-mono-code text-[11px] text-lys-warning">
           {provider.throttlingCount} throttling event(s) · {PROCESS_WINDOW}
         </div>
       )}

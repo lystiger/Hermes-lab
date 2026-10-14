@@ -7,30 +7,30 @@ import { EmptyState, ErrorState, Freshness, LoadingState, StaleNotice } from '..
 import { useRecoverableJobs } from '../api/hooks';
 
 export const QueueRoute: React.FC = () => {
-  const { setActiveModalJobId, liveMotion } = useConsoleStore();
+  const { setActiveModalJobId } = useConsoleStore();
   const { jobs, loading: jobsLoading, error: jobsError, updatedAt: jobsUpdatedAt, refetch: refetchJobs } = useJobs();
   const { pipeline, loading: pipelineLoading, error: pipelineError, updatedAt: pipelineUpdatedAt, refetch: refetchPipeline } = usePipeline();
   const { agents } = useAgents();
 
   const getStateColor = (state: string) => {
     switch (state) {
-      case 'COMPLETED': return '#5C646E';
-      case 'RUNNING': return '#3FB950';
-      case 'QUEUED': return '#8C949F';
-      case 'CLAIMED': return '#CBA35C';
-      case 'BLOCKED': return '#E3A008';
-      case 'FAILED': return '#F2555A';
-      default: return '#5C646E';
+      case 'COMPLETED': return 'var(--lys-text-faint)';
+      case 'RUNNING': return 'var(--lys-status-success)';
+      case 'QUEUED': return 'var(--lys-text-muted)';
+      case 'CLAIMED': return 'var(--lys-accent-gold)';
+      case 'BLOCKED': return 'var(--lys-status-warning)';
+      case 'FAILED': return 'var(--lys-status-danger)';
+      default: return 'var(--lys-text-faint)';
     }
   };
 
   return (
-    <div className="flex flex-col pb-10 select-none bg-[#0A0B0D]">
+    <div className="flex flex-col pb-10 select-none bg-lys-base">
       {/* Execution Order Pipeline Section */}
-      <div className="p-5 border-b border-[#1F242B] bg-[#0C0E11]">
+      <div className="p-5 border-b border-lys-subtle bg-lys-surface-0">
         <div className="flex items-center gap-3.5 mb-3 font-mono-code text-[11px]">
-          <span className="tracking-wider text-[#5C646E]">EXECUTION ORDER</span>
-          <span className="text-[#8C949F]">phases of the active job, in the order Hermes reports them</span>
+          <span className="tracking-wider text-lys-faint">EXECUTION ORDER</span>
+          <span className="text-lys-muted">phases of the active job, in the order Hermes reports them</span>
           <Freshness at={pipelineUpdatedAt} />
         </div>
 
@@ -47,7 +47,7 @@ export const QueueRoute: React.FC = () => {
             const isRunning = p.state === 'RUNNING';
             const isBlocked = p.state === 'BLOCKED';
             const actor = p.agentId ? resolveActorPresentation(p.agentId, agents) : null;
-            const agentCol = actor?.accentColor || '#8C949F';
+            const agentCol = actor?.accentColor || 'var(--lys-text-muted)';
             const stateCol = getStateColor(p.state);
             const agentName = p.agentName || actor?.displayName || '—';
 
@@ -56,16 +56,16 @@ export const QueueRoute: React.FC = () => {
                 <div
                   onClick={() => p.jobId && setActiveModalJobId(p.jobId)}
                   style={{
-                    borderColor: isRunning ? 'rgba(217,160,91,0.45)' : isBlocked ? 'rgba(227,160,8,0.3)' : '#1F242B',
-                    backgroundColor: isRunning ? 'rgba(217,160,91,0.06)' : isBlocked ? 'rgba(227,160,8,0.04)' : '#0C0E11'
+                    borderColor: isRunning ? 'color-mix(in srgb, var(--lys-agent-claude) 45%, transparent)' : isBlocked ? 'color-mix(in srgb, var(--lys-status-warning) 30%, transparent)' : 'var(--lys-border-subtle)',
+                    backgroundColor: isRunning ? 'color-mix(in srgb, var(--lys-agent-claude) 6%, transparent)' : isBlocked ? 'color-mix(in srgb, var(--lys-status-warning) 4%, transparent)' : 'var(--lys-surface-0)'
                   }}
-                  className="flex items-center gap-3.5 px-3 py-2 border cursor-pointer hover:border-[#3A4048] transition-colors"
+                  className="flex items-center gap-3.5 px-3 py-2 border cursor-pointer hover:border-lys-strong transition-colors"
                 >
-                  <span className="w-12 flex-shrink-0 font-mono-code text-[12px] text-[#8C949F]">
+                  <span className="w-12 flex-shrink-0 font-mono-code text-[12px] text-lys-muted">
                     {p.id}
                   </span>
                   <span
-                    style={{ color: isRunning ? '#E6E9ED' : p.state === 'COMPLETED' ? '#8C949F' : '#5C646E' }}
+                    style={{ color: isRunning ? 'var(--lys-text-primary)' : p.state === 'COMPLETED' ? 'var(--lys-text-muted)' : 'var(--lys-text-faint)' }}
                     className="w-16 flex-shrink-0 font-mono-code text-[11px] tracking-wider font-semibold"
                   >
                     {p.phase}
@@ -82,10 +82,10 @@ export const QueueRoute: React.FC = () => {
                     </span>
                     {agentName}
                   </span>
-                  <span className="flex-1 min-w-0 text-[12px] text-[#B7BEC7] truncate font-sans">
+                  <span className="flex-1 min-w-0 text-[12px] text-lys-secondary truncate font-sans">
                     {p.task}
                   </span>
-                  <span className="w-24 flex-shrink-0 text-right font-mono-code text-[11px] text-[#5C646E]">
+                  <span className="w-24 flex-shrink-0 text-right font-mono-code text-[11px] text-lys-faint">
                     {p.meta}
                   </span>
                   <span
@@ -94,7 +94,7 @@ export const QueueRoute: React.FC = () => {
                   >
                     <span
                       style={{ backgroundColor: stateCol }}
-                      className={`w-1.5 h-1.5 rounded-[1px] ${isRunning && liveMotion ? 'animate-pulse' : ''}`}
+                      className={`w-1.5 h-1.5 rounded-[1px]`}
                     />
                     {p.state}
                   </span>
@@ -104,7 +104,7 @@ export const QueueRoute: React.FC = () => {
                 {idx < pipeline.length - 1 && (
                   <div
                     style={{
-                      backgroundColor: p.state === 'COMPLETED' ? 'rgba(63,185,80,0.4)' : '#1F242B'
+                      backgroundColor: p.state === 'COMPLETED' ? 'color-mix(in srgb, var(--lys-status-success) 40%, transparent)' : 'var(--lys-border-subtle)'
                     }}
                     className="h-3 w-[1px] ml-5"
                   />
@@ -133,7 +133,7 @@ export const QueueRoute: React.FC = () => {
       {/* Recoverable jobs: read-only discovery from GET /jobs/recoverable. Resume and cancel are not offered here. */}
       <RecoverableJobs onSelect={(id) => setActiveModalJobId(id)} />
 
-      <div className="px-5 pt-3.5 font-mono-code text-[11px] text-[#5C646E]">
+      <div className="px-5 pt-3.5 font-mono-code text-[11px] text-lys-faint">
         time estimates: not available (Hermes exposes no estimator) · concurrency policy: not reported by Hermes
       </div>
     </div>
@@ -143,9 +143,9 @@ export const QueueRoute: React.FC = () => {
 const RecoverableJobs: React.FC<{ onSelect: (jobId: string) => void }> = ({ onSelect }) => {
   const { jobs, loading, error, updatedAt, refetch } = useRecoverableJobs();
   return (
-    <div className="p-5 border-t border-[#1F242B]">
+    <div className="p-5 border-t border-lys-subtle">
       <div className="flex items-center justify-between mb-2.5 font-mono-code text-[11px]">
-        <span className="tracking-wider text-[#5C646E]">RECOVERABLE · {jobs.length} · read-only</span>
+        <span className="tracking-wider text-lys-faint">RECOVERABLE · {jobs.length} · read-only</span>
         <Freshness at={updatedAt} />
       </div>
       {loading && jobs.length === 0 && <LoadingState label="Loading recoverable jobs…" />}
@@ -159,15 +159,15 @@ const RecoverableJobs: React.FC<{ onSelect: (jobId: string) => void }> = ({ onSe
             key={j.id}
             type="button"
             onClick={() => onSelect(j.id)}
-            className="flex flex-wrap justify-between gap-2 p-2.5 bg-[#101216] border border-[#1F242B] text-left font-mono-code text-[11px] hover:border-[#3A4048] cursor-pointer"
+            className="flex flex-wrap justify-between gap-2 p-2.5 bg-lys-surface-1 border border-lys-subtle text-left font-mono-code text-[11px] hover:border-lys-strong cursor-pointer"
           >
-            <span className="text-[#E6E9ED]">{j.id}</span>
-            <span className="text-[#B7BEC7] font-sans">{j.title}</span>
-            <span className="text-[#8C949F]">{j.status}</span>
+            <span className="text-lys-primary">{j.id}</span>
+            <span className="text-lys-secondary font-sans">{j.title}</span>
+            <span className="text-lys-muted">{j.status}</span>
           </button>
         ))}
       </div>
-      <p className="mt-2 font-mono-code text-[11px] text-[#5C646E]">
+      <p className="mt-2 font-mono-code text-[11px] text-lys-faint">
         Resume and cancel are not available from this console.
       </p>
     </div>

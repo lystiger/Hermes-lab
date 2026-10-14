@@ -15,7 +15,7 @@ export const MOCK_PROVIDER_QUOTAS: ProviderQuota[] = [
   {
     id: 'claude',
     name: 'CLAUDE',
-    color: '#D9A05B',
+    color: 'var(--lys-agent-claude)',
     pct: '41%',
     tag: 'EXACT',
     window: '5-hour rolling window',
@@ -30,7 +30,7 @@ export const MOCK_PROVIDER_QUOTAS: ProviderQuota[] = [
   {
     id: 'codex',
     name: 'CODEX',
-    color: '#4EC9A0',
+    color: 'var(--lys-agent-codex)',
     pct: '78%',
     tag: 'ESTIMATED',
     window: 'Weekly plan allowance',
@@ -45,7 +45,7 @@ export const MOCK_PROVIDER_QUOTAS: ProviderQuota[] = [
   {
     id: 'gemini',
     name: 'ANTIGRAVITY / GEMINI',
-    color: '#5B8CFF',
+    color: 'var(--lys-agent-gemini)',
     pct: '56%',
     tag: 'EXACT',
     window: 'Daily request quota',
@@ -75,9 +75,9 @@ export const MOCK_PROVIDER_QUOTAS: ProviderQuota[] = [
 ];
 
 export const MOCK_PROJECTIONS: ProjectionItem[] = [
-  { id: '#145', task: 'Queue scheduler regression tests', est: '~22k', w: '24%', wLow: '18%', color: '#4EC9A0', conf: 'medium' },
-  { id: '#146', task: 'Frontend accessibility audit', est: '~14k', w: '15%', wLow: '12%', color: '#5B8CFF', conf: 'high' },
-  { id: '#147', task: 'Memory compaction policy', est: '~27k', w: '30%', wLow: '21%', color: '#D9A05B', conf: 'medium' },
+  { id: '#145', task: 'Queue scheduler regression tests', est: '~22k', w: '24%', wLow: '18%', color: 'var(--lys-agent-codex)', conf: 'medium' },
+  { id: '#146', task: 'Frontend accessibility audit', est: '~14k', w: '15%', wLow: '12%', color: 'var(--lys-agent-gemini)', conf: 'high' },
+  { id: '#147', task: 'Memory compaction policy', est: '~27k', w: '30%', wLow: '21%', color: 'var(--lys-agent-claude)', conf: 'medium' },
   { id: '#148', task: 'Redis client compat matrix', est: '~16–34k', w: '37%', wLow: '18%', color: '#E3A008', conf: 'low' }
 ];
 

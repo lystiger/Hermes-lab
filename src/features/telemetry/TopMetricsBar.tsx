@@ -14,8 +14,8 @@ interface MetricProps {
 }
 
 const Metric: React.FC<MetricProps> = ({ label, children, className = '' }) => (
-  <div className={`px-5 py-3 border-r border-[#1F242B] ${className}`}>
-    <div className="text-[11px] tracking-wider text-[#5C646E] mb-1 font-mono-code">{label}</div>
+  <div className={`px-5 py-3 border-r border-lys-subtle ${className}`}>
+    <div className="text-[11px] tracking-wider text-lys-faint mb-1 font-mono-code">{label}</div>
     {children}
   </div>
 );
@@ -27,7 +27,7 @@ export const TopMetricsBar: React.FC = () => {
 
   if (error && !telemetry) {
     return (
-      <div className="px-5 py-3 border-b border-[#1F242B] bg-[#0C0E11] font-mono-code text-[12px] text-[#F2555A] flex items-center gap-3">
+      <div className="px-5 py-3 border-b border-lys-subtle bg-lys-surface-0 font-mono-code text-[12px] text-lys-danger flex items-center gap-3">
         <span>Metrics unavailable: {error.message}</span>
         <button type="button" onClick={refetch} className="underline cursor-pointer">retry</button>
       </div>
@@ -41,22 +41,22 @@ export const TopMetricsBar: React.FC = () => {
   const failed = telemetry?.failed24hCount;
 
   return (
-    <div className="flex flex-col border-b border-[#1F242B] bg-[#0C0E11] select-none">
+    <div className="flex flex-col border-b border-lys-subtle bg-lys-surface-0 select-none">
       <div className="flex items-stretch overflow-x-auto">
         <Metric label="RUNNING" className="flex-1 min-w-[120px]">
-          <div className="font-mono-code text-[19px] text-[#E6E9ED]">{count(telemetry?.runningJobsCount)}</div>
+          <div className="lys-metric font-mono-code text-[19px] text-lys-primary">{count(telemetry?.runningJobsCount)}</div>
         </Metric>
 
         <Metric label="QUEUED" className="flex-1 min-w-[120px]">
-          <div className="font-mono-code text-[19px] text-[#E6E9ED]">{count(telemetry?.queuedJobsCount)}</div>
+          <div className="lys-metric font-mono-code text-[19px] text-lys-primary">{count(telemetry?.queuedJobsCount)}</div>
         </Metric>
 
         <Metric label="BLOCKED" className="flex-1 min-w-[120px]">
-          <div className="font-mono-code text-[19px] text-[#E3A008]">{count(telemetry?.blockedJobsCount)}</div>
+          <div className="lys-metric font-mono-code text-[19px] text-lys-warning">{count(telemetry?.blockedJobsCount)}</div>
         </Metric>
 
         <Metric label="FAILED 24H" className="flex-1 min-w-[120px]">
-          <div className="font-mono-code text-[19px] text-[#8C949F]">
+          <div className="lys-metric font-mono-code text-[19px] text-lys-muted">
             {failed === null || failed === undefined ? (
               <UnknownValue reason="A failed job has no completion time, so the 24h window cannot be applied" />
             ) : (
@@ -67,28 +67,28 @@ export const TopMetricsBar: React.FC = () => {
 
         {/* Process totals are since runtime start. They are never labelled as today's usage. */}
         <Metric label="TOKENS · SINCE START" className="flex-[1.2] min-w-[150px]">
-          <div className="font-mono-code text-[19px] text-[#E6E9ED]" title={CAPACITY_WINDOW_LABEL}>
+          <div className="lys-metric font-mono-code text-[19px] text-lys-primary" title={CAPACITY_WINDOW_LABEL}>
             {isKnown(processTokens) ? processTokens : <UnknownValue reason={NO_TOKEN_TOTALS} />}
           </div>
         </Metric>
 
         <Metric label="EST. SPEND" className="flex-[1.2] min-w-[140px]">
-          <div className="font-mono-code text-[19px] text-[#E6E9ED]">
+          <div className="lys-metric font-mono-code text-[19px] text-lys-primary">
             <UnknownValue reason={NO_SPEND} />
           </div>
         </Metric>
 
         <div className="flex-[1.4] min-w-[180px] px-5 py-3 flex flex-col justify-center">
-          <div className="text-[11px] tracking-wider text-[#5C646E] mb-1 font-mono-code">SPRINT BUDGET</div>
-          <div className="flex items-center gap-2.5 font-mono-code text-[11px] text-[#5C646E]">
-            <UnknownValue reason={NO_BUDGET} className="text-[#8C949F]" />
+          <div className="text-[11px] tracking-wider text-lys-faint mb-1 font-mono-code">SPRINT BUDGET</div>
+          <div className="flex items-center gap-2.5 font-mono-code text-[11px] text-lys-faint">
+            <UnknownValue reason={NO_BUDGET} className="text-lys-muted" />
             <span>no budget exposed</span>
           </div>
         </div>
       </div>
 
       {error && <div className="px-5 pt-2"><StaleNotice label="Metrics" error={error} onRetry={refetch} /></div>}
-      <div className="px-5 pb-2 flex flex-wrap items-center gap-x-4 font-mono-code text-[11px] text-[#5C646E]">
+      <div className="px-5 pb-2 flex flex-wrap items-center gap-x-4 font-mono-code text-[11px] text-lys-faint">
         <span>
           counts from the latest {telemetry ? telemetry.sampleSize : '—'} jobs (GET /jobs)
         </span>

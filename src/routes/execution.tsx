@@ -21,27 +21,27 @@ export const ExecutionRoute: React.FC = () => {
   const loaded = snapshotStatus === 'ready';
 
   return (
-    <div className="flex flex-col pb-10 select-none bg-[#0A0B0D]">
+    <div className="flex flex-col pb-10 select-none bg-lys-base">
       {!isRealApiMode && (
-        <div className="px-5 py-2 border-b border-[#3A2F12] bg-[rgba(227,160,8,0.06)] font-mono-code text-[11px] text-[#E3A008]">
+        <div className="px-5 py-2 border-b border-lys-subtle bg-lys-warning/6 font-mono-code text-[11px] text-lys-warning">
           MOCK FIXTURES · not live Hermes data. Start the Hermes runtime API to see real execution state.
         </div>
       )}
 
       {/* Backend status strip */}
-      <section className="p-5 border-b border-[#1F242B] bg-[#0C0E11]">
+      <section className="p-5 border-b border-lys-subtle bg-lys-surface-0">
         <div className="flex items-center justify-between gap-3 mb-3 font-mono-code text-[11px]">
-          <span className="tracking-wider text-[#5C646E]">BACKENDS · SNAPSHOT</span>
-          <span className="flex items-center gap-3 text-[#5C646E]">
+          <span className="tracking-wider text-lys-faint">BACKENDS · SNAPSHOT</span>
+          <span className="flex items-center gap-3 text-lys-faint">
             {snapshotStatus === 'error' && (
-              <span className="text-[#F2555A]" title={snapshotError ?? undefined}>
+              <span className="text-lys-danger" title={snapshotError ?? undefined}>
                 snapshot failed · showing last known state
               </span>
             )}
             {snapshotLoadedAt && <span>loaded {formatTimeOfDay(snapshotLoadedAt)}</span>}
             <button
               onClick={() => void refresh()}
-              className="text-[#8C949F] hover:text-[#E6E9ED] cursor-pointer border border-[#1F242B] hover:border-[#3A4048] px-2 py-0.5"
+              className="text-lys-muted hover:text-lys-primary cursor-pointer border border-lys-subtle hover:border-lys-strong px-2 py-0.5"
             >
               ↻ refresh
             </button>
@@ -51,12 +51,12 @@ export const ExecutionRoute: React.FC = () => {
       </section>
 
       {/* Live resources grouped by backend */}
-      <section className="p-5 border-b border-[#1F242B]">
-        <div className="font-mono-code text-[11px] tracking-wider text-[#5C646E] mb-3.5">
+      <section className="p-5 border-b border-lys-subtle">
+        <div className="font-mono-code text-[11px] tracking-wider text-lys-faint mb-3.5">
           DEPLOYED SEATS · {resources.length} · BY BACKEND
         </div>
         {groups.length === 0 ? (
-          <div className="font-mono-code text-[11px] text-[#5C646E]">
+          <div className="font-mono-code text-[11px] text-lys-faint">
             {loaded ? 'No live execution resources.' : 'Waiting for the execution snapshot…'}
           </div>
         ) : (
@@ -64,8 +64,8 @@ export const ExecutionRoute: React.FC = () => {
             {groups.map((g) => (
               <div key={g.backend}>
                 <div className="flex items-center gap-2.5 mb-2 font-mono-code text-[11px]">
-                  <span className="text-[#E6E9ED] font-semibold tracking-wider uppercase">{g.backend}</span>
-                  <span className="text-[#5C646E]">{g.resources.length} resource{g.resources.length === 1 ? '' : 's'}</span>
+                  <span className="text-lys-primary font-semibold tracking-wider uppercase">{g.backend}</span>
+                  <span className="text-lys-faint">{g.resources.length} resource{g.resources.length === 1 ? '' : 's'}</span>
                 </div>
                 <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3">
                   {g.resources.map((r, idx) => (
@@ -81,8 +81,8 @@ export const ExecutionRoute: React.FC = () => {
       {/* Recent execution timeline */}
       <section className="p-5">
         <div className="flex items-center justify-between mb-3.5 font-mono-code text-[11px]">
-          <span className="tracking-wider text-[#5C646E]">RECENT EXECUTION TIMELINE</span>
-          <span className="text-[#5C646E]">{timeline.length} events</span>
+          <span className="tracking-wider text-lys-faint">RECENT EXECUTION TIMELINE</span>
+          <span className="text-lys-faint">{timeline.length} events</span>
         </div>
         <ExecutionTimeline events={timeline} />
       </section>

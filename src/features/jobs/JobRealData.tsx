@@ -5,7 +5,7 @@ import { EmptyState, ErrorState, Freshness, LoadingState, UnknownValue } from '.
 import { JobDetail } from '../../api/types';
 import { explainFailure } from './jobEvents';
 
-const SECTION = 'font-mono-code text-[11px] tracking-wider text-[#5C646E] mb-2.5';
+const SECTION = 'font-mono-code text-[11px] tracking-wider text-lys-faint mb-2.5';
 
 const Section: React.FC<{ title: string; updatedAt?: number | null; children: React.ReactNode }> = ({
   title,
@@ -26,9 +26,9 @@ export const JobFailure: React.FC<{ job: JobDetail }> = ({ job }) => {
   const explanation = explainFailure(job);
   if (!explanation) return null;
   return (
-    <div role="alert" className="mb-5 p-3 border border-[rgba(242,85,90,0.35)] bg-[rgba(242,85,90,0.05)] font-mono-code text-[11px]">
-      <div className="text-[#F2555A] font-semibold">{explanation.headline}</div>
-      <ul className="mt-1.5 flex flex-col gap-1 text-[#D7DCE2] break-words">
+    <div role="alert" className="mb-5 p-3 border border-lys-danger/35 bg-lys-danger/5 font-mono-code text-[11px]">
+      <div className="text-lys-danger font-semibold">{explanation.headline}</div>
+      <ul className="mt-1.5 flex flex-col gap-1 text-lys-primary break-words">
         {explanation.lines.map((line, i) => (
           <li key={i}>{line}</li>
         ))}
@@ -40,10 +40,10 @@ export const JobFailure: React.FC<{ job: JobDetail }> = ({ job }) => {
 /** Job token totals from GET /jobs/{id}/telemetry. Zero means no usage was tracked for this job. */
 export const JobTokens: React.FC<{ jobId: string }> = ({ jobId }) => {
   const { telemetry, loading, error, refetch } = useJobTelemetry(jobId);
-  if (loading && !telemetry) return <span className="text-[#5C646E]">tokens loading…</span>;
+  if (loading && !telemetry) return <span className="text-lys-faint">tokens loading…</span>;
   if (error && !telemetry) {
     return (
-      <span className="text-[#F2555A]" title={error.message}>
+      <span className="text-lys-danger" title={error.message}>
         tokens unavailable{' '}
         <button type="button" onClick={refetch} className="underline cursor-pointer">retry</button>
       </span>
@@ -53,13 +53,13 @@ export const JobTokens: React.FC<{ jobId: string }> = ({ jobId }) => {
   if (telemetry.totalTokens === 0) {
     return (
       <span title="No token usage has been tracked for this job. That is not proof that none was spent.">
-        0 tracked <span className="text-[#5C646E]">(no usage recorded)</span>
+        0 tracked <span className="text-lys-faint">(no usage recorded)</span>
       </span>
     );
   }
   return (
     <span title={`input ${telemetry.inputTokens} · output ${telemetry.outputTokens} · cached ${telemetry.cachedTokens}`}>
-      {telemetry.totalTokens} <span className="text-[#5C646E]">tokens tracked for this job</span>
+      {telemetry.totalTokens} <span className="text-lys-faint">tokens tracked for this job</span>
     </span>
   );
 };
@@ -73,19 +73,19 @@ export const JobTasks: React.FC<{ jobId: string }> = ({ jobId }) => {
       {!loading && !error && tasks.length === 0 && <EmptyState>Hermes recorded no tasks for this job.</EmptyState>}
       <div className="flex flex-col gap-1.5 font-mono-code text-[11px]">
         {tasks.map((t) => (
-          <div key={t.taskId} className="p-2 bg-[#101216] border border-[#1F242B]">
+          <div key={t.taskId} className="p-2 bg-lys-surface-1 border border-lys-subtle">
             <div className="flex justify-between gap-3">
-              <span className="text-[#E6E9ED] font-sans text-[12px]">{t.description || t.taskId}</span>
-              <span className="text-[#8C949F]">{t.status}</span>
+              <span className="text-lys-primary font-sans text-[12px]">{t.description || t.taskId}</span>
+              <span className="text-lys-muted">{t.status}</span>
             </div>
-            <div className="mt-1 text-[#5C646E]">
+            <div className="mt-1 text-lys-faint">
               {t.taskId} · attempt {t.attempt}
               {t.maxAttempts !== null ? ` of ${t.maxAttempts}` : ''}
               {t.assignedActor ? ` · ${t.assignedActor}` : ''}
               {t.dependencies.length > 0 ? ` · after ${t.dependencies.join(', ')}` : ''}
             </div>
             {t.error !== null && t.error !== undefined && (
-              <div className="mt-1 text-[#F2555A] break-words">{describeError(t.error)}</div>
+              <div className="mt-1 text-lys-danger break-words">{describeError(t.error)}</div>
             )}
           </div>
         ))}
@@ -103,13 +103,13 @@ export const JobRuns: React.FC<{ jobId: string }> = ({ jobId }) => {
       {!loading && !error && runs.length === 0 && <EmptyState>Hermes recorded no runs for this job.</EmptyState>}
       <div className="flex flex-col gap-1.5 font-mono-code text-[11px]">
         {runs.map((r) => (
-          <div key={r.runId} className="p-2 bg-[#101216] border border-[#1F242B] flex flex-wrap justify-between gap-2">
-            <span className="text-[#D7DCE2]">{r.runId}</span>
-            <span className="text-[#8C949F]">{r.actorId} · {r.taskId} · attempt {r.attempt}</span>
-            <span className="text-[#E6E9ED]">{r.status}</span>
-            {r.exitReason && <span className="w-full text-[#5C646E]">exit: {r.exitReason}</span>}
+          <div key={r.runId} className="p-2 bg-lys-surface-1 border border-lys-subtle flex flex-wrap justify-between gap-2">
+            <span className="text-lys-primary">{r.runId}</span>
+            <span className="text-lys-muted">{r.actorId} · {r.taskId} · attempt {r.attempt}</span>
+            <span className="text-lys-primary">{r.status}</span>
+            {r.exitReason && <span className="w-full text-lys-faint">exit: {r.exitReason}</span>}
             {r.error !== null && r.error !== undefined && (
-              <span className="w-full text-[#F2555A] break-words">{describeError(r.error)}</span>
+              <span className="w-full text-lys-danger break-words">{describeError(r.error)}</span>
             )}
           </div>
         ))}
@@ -129,13 +129,13 @@ export const JobObservations: React.FC<{ jobId: string }> = ({ jobId }) => {
       )}
       <div className="flex flex-col gap-1.5 font-mono-code text-[11px]">
         {observations.map((o) => (
-          <div key={o.observationId} className="p-2 bg-[#101216] border border-[#1F242B]">
-            <div className="text-[#8C949F]">
+          <div key={o.observationId} className="p-2 bg-lys-surface-1 border border-lys-subtle">
+            <div className="text-lys-muted">
               {o.kind}
               {o.actorId ? ` · ${o.actorId}` : ''}
               {o.confidence !== null ? ` · confidence ${o.confidence}` : ''}
             </div>
-            <div className="mt-1 text-[#D7DCE2] font-sans text-[12px] break-words">{o.content}</div>
+            <div className="mt-1 text-lys-primary font-sans text-[12px] break-words">{o.content}</div>
           </div>
         ))}
       </div>

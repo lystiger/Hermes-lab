@@ -27,10 +27,10 @@ const NAV_ITEMS: NavItem[] = [
 ];
 
 const CONNECTION_LABEL: Record<ConnectionStatus, { text: string; color: string }> = {
-  CONNECTED: { text: 'Reachable', color: '#3FB950' },
-  CONNECTING: { text: 'Connecting', color: '#E3A008' },
-  DEGRADED: { text: 'Degraded', color: '#E3A008' },
-  DISCONNECTED: { text: 'Unreachable', color: '#F2555A' }
+  CONNECTED: { text: 'Reachable', color: 'var(--lys-status-success)' },
+  CONNECTING: { text: 'Connecting', color: 'var(--lys-status-warning)' },
+  DEGRADED: { text: 'Degraded', color: 'var(--lys-status-warning)' },
+  DISCONNECTED: { text: 'Unreachable', color: 'var(--lys-status-danger)' }
 };
 
 export const Sidebar: React.FC = () => {
@@ -48,25 +48,25 @@ export const Sidebar: React.FC = () => {
   const badges: Record<string, { badge: string; badgeColor?: string } | undefined> = {
     '/queue': !jobsError && jobs.length > 0 ? { badge: String(queueCount) } : undefined,
     '/agents': !agentsError && agents.length > 0 ? { badge: String(agents.length) } : undefined,
-    '/events': connectionStatus === 'CONNECTED' ? { badge: 'live', badgeColor: '#3FB950' } : undefined,
-    '/execution': activeCount > 0 ? { badge: String(activeCount), badgeColor: '#3FB950' } : undefined
+    '/events': connectionStatus === 'CONNECTED' ? { badge: 'live', badgeColor: 'var(--lys-status-success)' } : undefined,
+    '/execution': activeCount > 0 ? { badge: String(activeCount), badgeColor: 'var(--lys-status-success)' } : undefined
   };
   const navItems = NAV_ITEMS.map((item) => ({ ...item, ...badges[item.to] }));
 
   // "Available" means the herdr executable is on PATH. It does not mean a running sandbox.
   const herdrStatus = herdr
     ? herdr.available
-      ? { text: 'Available', color: '#3FB950' }
-      : { text: 'Unavailable', color: '#F2555A' }
-    : { text: snapshotStatus === 'error' ? 'Unknown' : '—', color: '#8C949F' };
+      ? { text: 'Available', color: 'var(--lys-status-success)' }
+      : { text: 'Unavailable', color: 'var(--lys-status-danger)' }
+    : { text: snapshotStatus === 'error' ? 'Unknown' : '—', color: 'var(--lys-text-muted)' };
   const hermesStatus = CONNECTION_LABEL[connectionStatus];
 
   return (
-    <aside className="w-52 flex-shrink-0 bg-[#0C0E11] border-r border-[#1F242B] flex flex-col py-4 select-none">
+    <aside className="w-52 flex-shrink-0 bg-lys-surface-0 border-r border-lys-subtle flex flex-col py-4 select-none">
       {/* Brand Header */}
       <div className="flex items-center gap-2.5 px-4 pb-4.5">
         <AnimatedCube size={26} />
-        <div className="text-[12px] font-bold tracking-[0.16em] text-[#E6E9ED]">
+        <div className="text-[12px] font-bold tracking-[0.16em] text-lys-primary">
           LYSCONTROL
         </div>
       </div>
@@ -81,14 +81,14 @@ export const Sidebar: React.FC = () => {
             className={({ isActive }) => `
               flex items-center justify-between px-4 py-2 text-[13px] transition-colors border-l-2
               ${isActive 
-                ? 'border-[#CBA35C] bg-[#14171C] text-[#E6E9ED]' 
-                : 'border-transparent text-[#8C949F] hover:bg-[#14171C] hover:text-[#E6E9ED]'}
+                ? 'border-lys-gold bg-lys-surface-1 text-lys-primary' 
+                : 'border-transparent text-lys-muted hover:bg-lys-surface-1 hover:text-lys-primary'}
             `}
           >
             <span>{item.label}</span>
             {item.badge && (
               <span
-                style={{ color: item.badgeColor || '#5C646E' }}
+                style={{ color: item.badgeColor || 'var(--lys-text-faint)' }}
                 className="font-mono-code text-[11px]"
               >
                 {item.badge}
@@ -101,22 +101,22 @@ export const Sidebar: React.FC = () => {
       <div className="flex-1" />
 
       {/* Daemon & Health Monitor */}
-      <div className="border-t border-[#1F242B] mx-0 px-4 pt-3 flex flex-col gap-1.5">
-        <div className="flex items-center justify-between font-mono-code text-[11px] text-[#8C949F]" title="Connection to the Hermes runtime API">
+      <div className="border-t border-lys-subtle mx-0 px-4 pt-3 flex flex-col gap-1.5">
+        <div className="flex items-center justify-between font-mono-code text-[11px] text-lys-muted" title="Connection to the Hermes runtime API">
           <span>Hermes</span>
           <span style={{ color: hermesStatus.color }} className="flex items-center gap-1.5">
             <span style={{ backgroundColor: hermesStatus.color }} className="w-1.5 h-1.5" />
             {hermesStatus.text}
           </span>
         </div>
-        <div className="flex items-center justify-between font-mono-code text-[11px] text-[#8C949F]" title={herdr?.detail}>
+        <div className="flex items-center justify-between font-mono-code text-[11px] text-lys-muted" title={herdr?.detail}>
           <span>Herdr</span>
           <span style={{ color: herdrStatus.color }} className="flex items-center gap-1.5">
             <span style={{ backgroundColor: herdrStatus.color }} className="w-1.5 h-1.5" />
             {herdrStatus.text}
           </span>
         </div>
-        <div className="flex items-center justify-between font-mono-code text-[11px] text-[#5C646E] pt-1">
+        <div className="flex items-center justify-between font-mono-code text-[11px] text-lys-faint pt-1">
           <span>v0.1.0</span>
           <span>{clock}</span>
         </div>

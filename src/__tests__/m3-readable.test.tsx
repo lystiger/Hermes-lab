@@ -209,7 +209,7 @@ describe('M3 queue: mission board grouped by real status', () => {
     expect(await screen.findByRole('list', { name: 'Running jobs' })).toBeInTheDocument();
     expect(screen.getByRole('list', { name: 'Failed jobs' })).toBeInTheDocument();
     expect(screen.getByText(/MISSION INTERRUPTED/)).toBeInTheDocument();
-    expect(screen.getAllByRole('meter', { name: 'Job progress' })[0]).toHaveAttribute('aria-valuenow', '40');
+    expect(screen.getAllByRole('progressbar', { name: 'Job progress' })[0]).toHaveAttribute('aria-valuenow', '40');
     // Hermes reports no priority for this job, so none is shown.
     const failedList = screen.getByRole('list', { name: 'Failed jobs' });
     expect(within(failedList).queryByText('P1')).not.toBeInTheDocument();
@@ -261,7 +261,7 @@ describe('M3 events: filterable log with the failure taxonomy', () => {
     useConsoleStore.setState({ allEvents: [event('e1', 'agent.started', 'Claude'), event('e2', 'agent.started', 'Codex')] });
     renderIn(<EventsRoute />, '/events');
     fireEvent.click(screen.getByRole('button', { name: /^Codex\s*1/ }));
-    expect(screen.getAllByRole('list', { name: 'Events' })[0].querySelectorAll('[data-nav-item]').length).toBe(1);
+    expect(screen.getByRole('log', { name: 'Events' }).querySelectorAll('[data-nav-item]').length).toBe(1);
   });
 });
 
@@ -284,13 +284,13 @@ describe('M3 usage: meters with window labels', () => {
     const providerSection = await screen.findByRole('region', { name: 'Meters for claude' });
     // Tokens are reported without a limit: a value, a window label, and no meter bar.
     expect(within(providerSection).getByText('800 tok')).toBeInTheDocument();
-    expect(within(providerSection).queryByRole('meter', { name: 'TOKENS USED' })).not.toBeInTheDocument();
+    expect(within(providerSection).queryByRole('progressbar', { name: 'TOKENS USED' })).not.toBeInTheDocument();
     // Context is not reported: unknown, with the reason.
     expect(within(providerSection).getByLabelText('unknown: Provider did not report context use')).toBeInTheDocument();
     // Every total says which window it covers.
     expect(screen.getAllByText(/since runtime start \(process lifetime, not daily\)/).length).toBeGreaterThan(2);
     // Aggregate and provider success rates are both 3 of 4.
-    for (const meter of screen.getAllByRole('meter', { name: 'SUCCESS RATE' })) {
+    for (const meter of screen.getAllByRole('progressbar', { name: 'SUCCESS RATE' })) {
       expect(meter).toHaveAttribute('aria-valuenow', '75');
     }
   });

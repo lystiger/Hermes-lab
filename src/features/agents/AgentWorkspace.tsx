@@ -24,7 +24,7 @@ export const AgentWorkspace: React.FC<{ selectedId?: string }> = ({ selectedId }
   }, [effectiveId, setSelectedAgentId]);
 
   return (
-    <div className="flex flex-col md:flex-row min-h-0 bg-[#0A0B0D]">
+    <div className="flex flex-col md:flex-row min-h-0 bg-lys-base">
       <AgentRoster
         agents={roster.agents}
         selectedId={effectiveId}

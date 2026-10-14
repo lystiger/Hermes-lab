@@ -31,10 +31,10 @@ export const ActiveExecutionCard: React.FC<ActiveExecutionCardProps> = ({ onOpen
 
   if (!activeJob) {
     return (
-      <div className="p-5 border-b border-[#1F242B] bg-[#0A0B0D] select-none">
-        <div className="font-mono-code text-[11px] text-[#5C646E] tracking-wider mb-2">ACTIVE EXECUTION</div>
-        <div className="text-[18px] font-semibold text-[#8C949F]">No active execution</div>
-        <p className="mt-1 font-mono-code text-[11px] text-[#5C646E]">
+      <div className="p-5 border-b border-lys-subtle bg-lys-base select-none">
+        <div className="font-mono-code text-[11px] text-lys-faint tracking-wider mb-2">ACTIVE EXECUTION</div>
+        <div className="text-[18px] font-semibold text-lys-muted">No active execution</div>
+        <p className="mt-1 font-mono-code text-[11px] text-lys-faint">
           None of the latest {jobs.length} jobs is in RUNNING, PLANNING, PREPARING, VERIFYING or REPAIRING state.
         </p>
       </div>
@@ -44,15 +44,15 @@ export const ActiveExecutionCard: React.FC<ActiveExecutionCardProps> = ({ onOpen
   const branch = activeJob.branch;
 
   return (
-    <div className="relative p-5 pb-6 border-b border-[#1F242B] overflow-hidden select-none bg-[#0A0B0D]">
+    <div className="relative p-5 pb-6 border-b border-lys-subtle overflow-hidden select-none bg-lys-base">
       {ambient3d && <AmbientGyro enabled={ambient3d} size={150} />}
 
       {/* Header Status */}
       <div className="flex items-center gap-2.5 mb-2">
-        <span className="font-mono-code text-[11px] text-[#5C646E] tracking-wider">
+        <span className="font-mono-code text-[11px] text-lys-faint tracking-wider">
           ACTIVE EXECUTION
         </span>
-        <span className="flex items-center gap-1.5 font-mono-code text-[11px] text-[#3FB950] border border-[rgba(63,185,80,0.35)] px-1.5 py-0.5 bg-[rgba(63,185,80,0.05)]">
+        <span className="flex items-center gap-1.5 font-mono-code text-[11px] text-lys-success border border-lys-success/35 px-1.5 py-0.5 bg-lys-success/5">
           {activeJob.status}
         </span>
       </div>
@@ -63,22 +63,22 @@ export const ActiveExecutionCard: React.FC<ActiveExecutionCardProps> = ({ onOpen
         onClick={() => onOpenJob?.(activeJob.id)}
         className="flex items-baseline flex-wrap gap-x-3 gap-y-0.5 text-left cursor-pointer hover:opacity-80 transition-opacity"
       >
-        <span className="font-mono-code text-[26px] text-[#5C646E]">{activeJob.id}</span>
-        <span className="text-[22px] font-semibold tracking-tight text-[#E6E9ED]">{activeJob.title}</span>
+        <span className="font-mono-code text-[26px] text-lys-faint">{activeJob.id}</span>
+        <span className="text-[22px] font-semibold tracking-tight text-lys-primary">{activeJob.title}</span>
       </button>
 
       {/* Metadata Bar */}
-      <div className="flex items-center flex-wrap gap-x-3.5 gap-y-1 mt-2 font-mono-code text-[11px] text-[#8C949F]">
+      <div className="flex items-center flex-wrap gap-x-3.5 gap-y-1 mt-2 font-mono-code text-[11px] text-lys-muted">
         <span>{activeJob.repository}</span>
         {branch && (
           <>
-            <span className="text-[#2A3038]">·</span>
-            <span className="text-[#CBA35C]">{branch}</span>
+            <span className="text-lys-default">·</span>
+            <span className="text-lys-gold">{branch}</span>
           </>
         )}
-        <span className="text-[#2A3038]">·</span>
-        <span>elapsed <span className="text-[#E6E9ED]">{formatElapsed(activeJob.startedAt, activeJob.completedAt, nowMs)}</span></span>
-        <span className="text-[#2A3038]">·</span>
+        <span className="text-lys-default">·</span>
+        <span>elapsed <span className="text-lys-primary">{formatElapsed(activeJob.startedAt, activeJob.completedAt, nowMs)}</span></span>
+        <span className="text-lys-default">·</span>
         <span>tokens <JobTokens jobId={activeJob.id} /></span>
       </div>
 
@@ -88,16 +88,16 @@ export const ActiveExecutionCard: React.FC<ActiveExecutionCardProps> = ({ onOpen
       </div>
 
       {/* Completion footer: no estimator exists in the Hermes API */}
-      <div className="mt-5 flex flex-wrap gap-6 pt-3.5 border-t border-[#1F242B] font-mono-code text-[11px]">
-        <span className="text-[#5C646E]">ESTIMATED COMPLETION</span>
-        <span className="text-[#8C949F]">
-          <UnknownValue reason="Hermes exposes no estimator for phase or job completion" className="text-[#8C949F]" />
+      <div className="mt-5 flex flex-wrap gap-6 pt-3.5 border-t border-lys-subtle font-mono-code text-[11px]">
+        <span className="text-lys-faint">ESTIMATED COMPLETION</span>
+        <span className="text-lys-muted">
+          <UnknownValue reason="Hermes exposes no estimator for phase or job completion" className="text-lys-muted" />
         </span>
         {onOpenJob && (
           <button
             type="button"
             onClick={() => onOpenJob(activeJob.id)}
-            className="text-[#CBA35C] hover:underline cursor-pointer"
+            className="text-lys-gold hover:underline cursor-pointer"
           >
             open job →
           </button>

@@ -25,12 +25,12 @@ export const FilterPills: React.FC<{
           aria-pressed={active}
           onClick={() => onChange(o.id)}
           className={`px-2.5 py-1 border cursor-pointer transition-colors ${
-            active ? 'text-[#E6E9ED] bg-[#1F242B] border-[#3A4048]' : 'text-[#8C949F] border-[#1F242B] hover:border-[#3A4048]'
+            active ? 'text-lys-primary bg-lys-surface-interactive border-lys-strong' : 'text-lys-muted border-lys-subtle hover:border-lys-strong'
           }`}
         >
           {o.label}
           {o.count !== undefined && (
-            <span className="ml-1.5" style={{ color: o.tone ?? '#5C646E' }}>
+            <span className="ml-1.5" style={{ color: o.tone ?? 'var(--lys-text-faint)' }}>
               {o.count}
             </span>
           )}

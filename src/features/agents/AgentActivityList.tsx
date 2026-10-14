@@ -4,21 +4,21 @@ import { AgentDetail } from '../../api/types';
 export const AgentActivityList: React.FC<{ agent: AgentDetail }> = ({ agent }) => {
   const getOpColor = (op: string) => {
     switch (op) {
-      case 'WRITE': return '#E3A008';
-      case 'RUN': return '#3FB950';
-      case 'NOTE': return '#F2555A';
-      case 'STAGE': return '#4EC9A0';
-      default: return '#8C949F';
+      case 'WRITE': return 'var(--lys-status-warning)';
+      case 'RUN': return 'var(--lys-status-success)';
+      case 'NOTE': return 'var(--lys-status-danger)';
+      case 'STAGE': return 'var(--lys-agent-codex)';
+      default: return 'var(--lys-text-muted)';
     }
   };
 
   return (
     <div className="flex-1 min-w-[280px]">
-      <div className="text-[11px] tracking-wider text-[#5C646E] mb-2 font-mono-code">
+      <div className="text-[11px] tracking-wider text-lys-faint mb-2 font-mono-code">
         CURRENT ACTIVITY
       </div>
       {agent.activity.length === 0 && (
-        <div className="font-mono-code text-[11px] text-[#5C646E]">
+        <div className="font-mono-code text-[11px] text-lys-faint">
           Activity is not loaded in this build. Live events for this agent appear in Events.
         </div>
       )}
@@ -26,7 +26,7 @@ export const AgentActivityList: React.FC<{ agent: AgentDetail }> = ({ agent }) =
         {agent.activity.map((act, idx) => (
           <div
             key={idx}
-            className="flex items-center gap-3.5 px-2.5 py-1.5 bg-[#101216] font-mono-code text-[11px] border-l border-transparent hover:border-[#3A4048]"
+            className="flex items-center gap-3.5 px-2.5 py-1.5 bg-lys-surface-1 font-mono-code text-[11px] border-l border-transparent hover:border-lys-strong"
           >
             <span
               style={{ color: getOpColor(act.op) }}
@@ -34,10 +34,10 @@ export const AgentActivityList: React.FC<{ agent: AgentDetail }> = ({ agent }) =
             >
               {act.op}
             </span>
-            <span className="flex-1 min-w-0 text-[#D7DCE2] truncate">
+            <span className="flex-1 min-w-0 text-lys-primary truncate">
               {act.path}
             </span>
-            <span className="w-18 flex-shrink-0 text-right text-[#5C646E]">
+            <span className="w-18 flex-shrink-0 text-right text-lys-faint">
               {act.meta}
             </span>
           </div>

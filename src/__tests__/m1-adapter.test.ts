@@ -157,7 +157,7 @@ describe('M1 derived values', () => {
       expect(isErrorKind(kind)).toBe(true);
     }
     expect(isErrorKind('agent.started')).toBe(false);
-    expect(eventKindColor('job.failed')).toBe('#F2555A');
+    expect(eventKindColor('job.failed')).toBe('var(--lys-status-danger)');
   });
 });
 

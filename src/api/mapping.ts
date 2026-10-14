@@ -9,7 +9,7 @@ import {
   TraceEvent,
   UsageSnapshotView
 } from './types';
-import { resolveActorPresentation } from './actors';
+import { actorAccent } from '../theme/agents';
 import { UNKNOWN } from './unknown';
 
 /** Label for every capacity total. These are counted since the runtime process started, never per day. */
@@ -66,7 +66,7 @@ export function mapBusEvent(dto: any): TraceEvent {
       id: dto.source.id,
       kind: dto.source.kind,
       displayName: dto.source.displayName,
-      accentColor: dto.source.accentColor || resolveActorPresentation(dto.source.id).accentColor
+      accentColor: actorAccent(dto.source.id, dto.source.accentColor)
     },
     kind: dto.kind,
     detail: dto.detail,
@@ -89,7 +89,7 @@ export function mapStoredEvent(dto: any): TraceEvent {
     ts: formatClock(occurredAt),
     rawTs: epochSeconds(occurredAt),
     source: actorId
-      ? { id: actorId, kind: 'agent', displayName: actorId, accentColor: resolveActorPresentation(actorId).accentColor }
+      ? { id: actorId, kind: 'agent', displayName: actorId, accentColor: actorAccent(actorId) }
       : { id: 'runtime', kind: 'runtime', displayName: 'Runtime' },
     kind,
     // Same rule as StoredRuntimeEvent.to_dict(): detail, else payload reason, else the event type.

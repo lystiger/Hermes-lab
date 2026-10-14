@@ -33,7 +33,7 @@ export const JobDetailView: React.FC<JobDetailViewProps> = ({ jobId = '' }) => {
 
   if (!job) {
     return (
-      <div className="w-full p-12 bg-[#0A0B0D] font-mono-code text-[12px] text-[#8C949F] flex items-center justify-center">
+      <div className="w-full p-12 bg-lys-base font-mono-code text-[12px] text-lys-muted flex items-center justify-center">
         <span>Job '{jobId}' not found or not loaded.</span>
       </div>
     );
@@ -42,18 +42,18 @@ export const JobDetailView: React.FC<JobDetailViewProps> = ({ jobId = '' }) => {
   const getStatusColor = (status: string) => {
     switch (status) {
       case 'RUNNING':
-        return '#3FB950';
+        return 'var(--lys-status-success)';
       case 'COMPLETED':
-        return '#5C646E';
+        return 'var(--lys-text-faint)';
       case 'FAILED':
-        return '#F2555A';
+        return 'var(--lys-status-danger)';
       case 'CANCELLED':
-        return '#5C646E';
+        return 'var(--lys-text-faint)';
       case 'PREPARING':
       case 'QUEUED':
-        return '#CBA35C';
+        return 'var(--lys-accent-gold)';
       default:
-        return '#8C949F';
+        return 'var(--lys-text-muted)';
     }
   };
 
@@ -62,36 +62,36 @@ export const JobDetailView: React.FC<JobDetailViewProps> = ({ jobId = '' }) => {
   const traceRows = mergeJobEvents(durable.events, liveEvents);
 
   return (
-    <div className="w-full bg-[#0A0B0D] select-none">
+    <div className="w-full bg-lys-base select-none">
       {/* Header Banner */}
-      <div className="p-5 border-b border-[#1F242B] bg-[#0C0E11]">
+      <div className="p-5 border-b border-lys-subtle bg-lys-surface-0">
         <div className="flex items-center gap-3">
-          <CopyId value={job.id} className="text-[18px] text-[#5C646E]" />
-          <h2 className="text-[20px] font-semibold text-[#E6E9ED]">
+          <CopyId value={job.id} className="text-[18px] text-lys-faint" />
+          <h2 className="text-[20px] font-semibold text-lys-primary">
             {job.title}
           </h2>
           <span
             style={{
               color: statusCol,
-              borderColor: `${statusCol}55`,
-              backgroundColor: `${statusCol}14`
+              borderColor: `color-mix(in srgb, ${statusCol} 33%, transparent)`,
+              backgroundColor: `color-mix(in srgb, ${statusCol} 8%, transparent)`
             }}
             className="flex items-center gap-1.5 font-mono-code text-[11px] tracking-wider border px-2 py-0.5"
           >
             {job.status === 'RUNNING' && (
-              <span style={{ backgroundColor: statusCol }} className="w-1 h-1 rounded-[1px] animate-pulse" />
+              <span style={{ backgroundColor: statusCol }} className="w-1 h-1 rounded-[1px]" />
             )}
             {job.status}
           </span>
         </div>
 
-        <div className="mt-2.5 flex items-center flex-wrap gap-x-4 gap-y-1 font-mono-code text-[11px] text-[#8C949F]">
+        <div className="mt-2.5 flex items-center flex-wrap gap-x-4 gap-y-1 font-mono-code text-[11px] text-lys-muted">
           <span>{job.repository}</span>
-          {job.branch && <span className="text-[#CBA35C]">{job.branch}</span>}
-          <span className="text-[#2A3038]">·</span>
+          {job.branch && <span className="text-lys-gold">{job.branch}</span>}
+          <span className="text-lys-default">·</span>
           <span>started {formatDateTime(job.startedAt)}</span>
           <span>completed {formatDateTime(job.completedAt)}</span>
-          <span>elapsed <span className="text-[#E6E9ED]">{formatElapsed(job.startedAt, job.completedAt, nowMs)}</span></span>
+          <span>elapsed <span className="text-lys-primary">{formatElapsed(job.startedAt, job.completedAt, nowMs)}</span></span>
           <span>tokens <JobTokens jobId={job.id} /></span>
         </div>
       </div>
@@ -103,8 +103,8 @@ export const JobDetailView: React.FC<JobDetailViewProps> = ({ jobId = '' }) => {
       {/* Main Body Split */}
       <div className="flex flex-col lg:flex-row items-stretch">
         {/* Left Column: Generic Execution Graph */}
-        <div className="w-full lg:w-80 flex-shrink-0 border-r border-b lg:border-b-0 border-[#1F242B] p-5 bg-[#0A0B0D]">
-          <div className="font-mono-code text-[11px] tracking-wider text-[#5C646E] mb-4">
+        <div className="w-full lg:w-80 flex-shrink-0 border-r border-b lg:border-b-0 border-lys-subtle p-5 bg-lys-base">
+          <div className="font-mono-code text-[11px] tracking-wider text-lys-faint mb-4">
             EXECUTION GRAPH · {job.phases?.length || job.executionGraph?.length || 0} PHASES
           </div>
 
@@ -112,7 +112,7 @@ export const JobDetailView: React.FC<JobDetailViewProps> = ({ jobId = '' }) => {
             <div style={{ transformStyle: 'preserve-3d' }} className="flex flex-col">
               {(job.phases || []).map((p, idx) => {
                 const actor = p.agentId ? resolveActorPresentation(p.agentId, agents) : null;
-                const col = actor?.accentColor || '#3A4048';
+                const col = actor?.accentColor || 'var(--lys-border-strong)';
                 const isDone = p.status === 'SUCCEEDED';
                 const isActive = p.status === 'RUNNING';
                 const isFailed = p.status === 'FAILED';
@@ -121,19 +121,19 @@ export const JobDetailView: React.FC<JobDetailViewProps> = ({ jobId = '' }) => {
                   <div key={p.id || idx}>
                     <div
                       style={{
-                        borderColor: isActive ? 'rgba(217,160,91,0.45)' : isDone ? '#1F242B' : isFailed ? 'rgba(242,85,90,0.4)' : '#161A1F',
-                        backgroundColor: isActive ? 'rgba(217,160,91,0.06)' : isDone ? '#0E1116' : 'transparent',
+                        borderColor: isActive ? 'color-mix(in srgb, var(--lys-agent-claude) 45%, transparent)' : isDone ? 'var(--lys-border-subtle)' : isFailed ? 'color-mix(in srgb, var(--lys-status-danger) 40%, transparent)' : 'var(--lys-border-subtle)',
+                        backgroundColor: isActive ? 'color-mix(in srgb, var(--lys-agent-claude) 6%, transparent)' : isDone ? 'var(--lys-surface-0)' : 'transparent',
                         transform: isActive ? 'translateZ(18px) rotateX(2deg)' : 'translateZ(0)',
-                        boxShadow: isActive ? '0 14px 26px -14px rgba(217,160,91,0.55)' : 'none'
+                        boxShadow: isActive ? '0 14px 26px -14px color-mix(in srgb, var(--lys-agent-claude) 55%, transparent)' : 'none'
                       }}
                       className="flex gap-3 items-start p-3 border"
                     >
                       {/* Mark Icon */}
                       <div
                         style={{
-                          borderColor: isDone ? 'rgba(63,185,80,0.6)' : isFailed ? '#F2555A' : isActive ? col : '#2A3038',
-                          backgroundColor: isDone ? 'rgba(63,185,80,0.14)' : isFailed ? 'rgba(242,85,90,0.14)' : 'transparent',
-                          color: isDone ? '#3FB950' : isFailed ? '#F2555A' : isActive ? col : '#3A4048'
+                          borderColor: isDone ? 'color-mix(in srgb, var(--lys-status-success) 60%, transparent)' : isFailed ? 'var(--lys-status-danger)' : isActive ? col : 'var(--lys-border-default)',
+                          backgroundColor: isDone ? 'color-mix(in srgb, var(--lys-status-success) 14%, transparent)' : isFailed ? 'color-mix(in srgb, var(--lys-status-danger) 14%, transparent)' : 'transparent',
+                          color: isDone ? 'var(--lys-status-success)' : isFailed ? 'var(--lys-status-danger)' : isActive ? col : 'var(--lys-text-faint)'
                         }}
                         className="w-4.5 h-4.5 flex-shrink-0 flex items-center justify-center font-mono-code text-[11px] clip-hex"
                       >
@@ -142,7 +142,7 @@ export const JobDetailView: React.FC<JobDetailViewProps> = ({ jobId = '' }) => {
 
                       <div className="flex-1 min-w-0">
                         <div
-                          style={{ color: isDone || isActive ? '#E6E9ED' : '#5C646E' }}
+                          style={{ color: isDone || isActive ? 'var(--lys-text-primary)' : 'var(--lys-text-faint)' }}
                           className="font-mono-code text-[11px] tracking-wider font-semibold"
                         >
                           {p.name}
@@ -150,12 +150,12 @@ export const JobDetailView: React.FC<JobDetailViewProps> = ({ jobId = '' }) => {
                         <div style={{ color: col }} className="text-[12px] mt-0.5">
                           {p.agentName || actor?.displayName || p.agentId || '—'}
                         </div>
-                        <div className="font-mono-code text-[10.5px] text-[#5C646E] mt-0.5">
+                        <div className="font-mono-code text-[10.5px] text-lys-faint mt-0.5">
                           {p.role} {p.commitSha ? `· ${p.commitSha.slice(0, 7)}` : ''}
                         </div>
                       </div>
 
-                      <div className="font-mono-code text-[11px] text-[#5C646E] text-right">
+                      <div className="font-mono-code text-[11px] text-lys-faint text-right">
                         {p.durationMs ? `${(p.durationMs / 1000).toFixed(1)}s` : p.status.toLowerCase()}
                       </div>
                     </div>
@@ -163,7 +163,7 @@ export const JobDetailView: React.FC<JobDetailViewProps> = ({ jobId = '' }) => {
                     {/* Step Connector */}
                     {idx < (job.phases?.length || 0) - 1 && (
                       <div
-                        style={{ backgroundColor: isDone ? 'rgba(63,185,80,0.4)' : '#1F242B' }}
+                        style={{ backgroundColor: isDone ? 'color-mix(in srgb, var(--lys-status-success) 40%, transparent)' : 'var(--lys-border-subtle)' }}
                         className="h-4 w-[1px] ml-5"
                       />
                     )}
@@ -175,15 +175,15 @@ export const JobDetailView: React.FC<JobDetailViewProps> = ({ jobId = '' }) => {
 
           {/* Artifact References */}
           {job.artifacts && job.artifacts.length > 0 && (
-            <div className="mt-5 pt-3.5 border-t border-[#1F242B]">
-              <div className="font-mono-code text-[11px] tracking-wider text-[#5C646E] mb-2.5">
+            <div className="mt-5 pt-3.5 border-t border-lys-subtle">
+              <div className="font-mono-code text-[11px] tracking-wider text-lys-faint mb-2.5">
                 ARTIFACT REFERENCES
               </div>
               <div className="flex flex-col gap-1.5 font-mono-code text-[11px]">
                 {job.artifacts.map((art, idx) => (
-                  <div key={art.id || idx} className="flex justify-between text-[#8C949F]">
-                    <span className="text-[#CBA35C]">{art.label}</span>
-                    <span className="text-[#5C646E] truncate max-w-[120px]" title={art.ref}>{art.ref}</span>
+                  <div key={art.id || idx} className="flex justify-between text-lys-muted">
+                    <span className="text-lys-gold">{art.label}</span>
+                    <span className="text-lys-faint truncate max-w-[120px]" title={art.ref}>{art.ref}</span>
                   </div>
                 ))}
               </div>
@@ -209,7 +209,7 @@ export const JobDetailView: React.FC<JobDetailViewProps> = ({ jobId = '' }) => {
           {/* Job trace: durable history merged with the live buffer */}
           <div className="pb-8">
             <div className="flex items-center justify-between mb-2.5">
-              <span className="font-mono-code text-[11px] tracking-wider text-[#5C646E]">
+              <span className="font-mono-code text-[11px] tracking-wider text-lys-faint">
                 RUNTIME EVENTS &amp; TRACES · {job.id}
               </span>
               <Freshness at={durable.updatedAt} />
@@ -224,21 +224,21 @@ export const JobDetailView: React.FC<JobDetailViewProps> = ({ jobId = '' }) => {
               {traceRows.slice(0, 50).map(({ event: e, origin }) => (
                 <div
                   key={e.id}
-                  className="flex items-center gap-3.5 py-1 font-mono-code text-[11px] border-b border-[#101216]"
+                  className="flex items-center gap-3.5 py-1 font-mono-code text-[11px] border-b border-lys-subtle"
                 >
-                  <span className="w-24 text-[#5C646E]">{e.ts}</span>
+                  <span className="w-24 text-lys-faint">{e.ts}</span>
                   <span
-                    style={{ color: e.source.accentColor || '#8C949F' }}
+                    style={{ color: e.source.accentColor || 'var(--lys-text-muted)' }}
                     className="w-16 font-medium"
                   >
                     {e.source.displayName}
                   </span>
-                  <span className="w-28 text-[#8C949F]">{e.kind}</span>
-                  <span className="flex-1 min-w-0 text-[#B7BEC7] truncate font-sans">
+                  <span className="w-28 text-lys-muted">{e.kind}</span>
+                  <span className="flex-1 min-w-0 text-lys-secondary truncate font-sans">
                     {e.detail}
                   </span>
-                  <span className="w-16 text-right text-[#8C949F]">{e.dur}</span>
-                  <span className="w-14 text-right text-[#5C646E]" title={origin === 'stored' ? 'durable history' : 'live buffer only'}>
+                  <span className="w-16 text-right text-lys-muted">{e.dur}</span>
+                  <span className="w-14 text-right text-lys-faint" title={origin === 'stored' ? 'durable history' : 'live buffer only'}>
                     {origin}
                   </span>
                 </div>

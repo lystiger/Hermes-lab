@@ -11,20 +11,20 @@ import { formatDateTime } from '../time/format';
 
 /** Board columns follow the real job statuses. Each job appears in exactly one column. */
 export const BOARD_GROUPS = [
-  { id: 'RUNNING', label: 'Running', statuses: ACTIVE_JOB_STATUSES, tone: '#3FB950' },
-  { id: 'BLOCKED', label: 'Blocked', statuses: ['BLOCKED'], tone: '#E3A008' },
-  { id: 'QUEUED', label: 'Queued', statuses: ['QUEUED', 'CLAIMED'], tone: '#8C949F' },
-  { id: 'FAILED', label: 'Failed', statuses: ['FAILED'], tone: '#F2555A' },
-  { id: 'COMPLETED', label: 'Completed', statuses: ['COMPLETED'], tone: '#5C646E' },
-  { id: 'CANCELLED', label: 'Cancelled', statuses: ['CANCELLED'], tone: '#5C646E' }
+  { id: 'RUNNING', label: 'Running', statuses: ACTIVE_JOB_STATUSES, tone: 'var(--lys-status-success)' },
+  { id: 'BLOCKED', label: 'Blocked', statuses: ['BLOCKED'], tone: 'var(--lys-status-warning)' },
+  { id: 'QUEUED', label: 'Queued', statuses: ['QUEUED', 'CLAIMED'], tone: 'var(--lys-text-muted)' },
+  { id: 'FAILED', label: 'Failed', statuses: ['FAILED'], tone: 'var(--lys-status-danger)' },
+  { id: 'COMPLETED', label: 'Completed', statuses: ['COMPLETED'], tone: 'var(--lys-text-faint)' },
+  { id: 'CANCELLED', label: 'Cancelled', statuses: ['CANCELLED'], tone: 'var(--lys-text-faint)' }
 ];
 
-const PRIORITY_COLOR: Record<string, string> = { P0: '#F2555A', P1: '#E3A008', P2: '#8C949F', P3: '#5C646E' };
+const PRIORITY_COLOR: Record<string, string> = { P0: 'var(--lys-status-danger)', P1: 'var(--lys-status-warning)', P2: 'var(--lys-text-muted)', P3: 'var(--lys-text-faint)' };
 
 /** The board column a job belongs to. Unrecognised statuses get their own column, never a guessed one. */
 export function groupOf(job: Job): { id: string; label: string; tone: string } {
   const known = BOARD_GROUPS.find((g) => g.statuses.includes(job.status));
-  return known ?? { id: `OTHER:${job.status}`, label: `Other · ${job.status}`, tone: '#8C949F' };
+  return known ?? { id: `OTHER:${job.status}`, label: `Other · ${job.status}`, tone: 'var(--lys-text-muted)' };
 }
 
 export const MissionBoard: React.FC<{
@@ -55,7 +55,7 @@ export const MissionBoard: React.FC<{
   ];
 
   return (
-    <section aria-label="Mission board" className="flex flex-col gap-3 p-5 border-b border-[#1F242B]">
+    <section aria-label="Mission board" className="flex flex-col gap-3 p-5 border-b border-lys-subtle">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <FilterPills label="Filter jobs by status" options={pills} value={filter} onChange={setFilter} />
         <Freshness at={updatedAt} />
@@ -72,7 +72,7 @@ export const MissionBoard: React.FC<{
             <div key={c.id} role="list" aria-label={`${c.label} jobs`} className="flex flex-col gap-2">
               <div className="flex items-center gap-2 font-mono-code text-[11px] tracking-wider" style={{ color: c.tone }}>
                 <span>{c.label.toUpperCase()}</span>
-                <span className="text-[#5C646E]">{counts.get(c.id)}</span>
+                <span className="text-lys-faint">{counts.get(c.id)}</span>
               </div>
               {jobs
                 .filter((j) => groupOf(j).id === c.id)
@@ -82,7 +82,7 @@ export const MissionBoard: React.FC<{
             </div>
           ))}
       </div>
-      {jobs.length > 0 && <p className="font-mono-code text-[10px] text-[#5C646E]">↑ ↓ move · Enter opens the job inspector</p>}
+      {jobs.length > 0 && <p className="font-mono-code text-[10px] text-lys-faint">↑ ↓ move · Enter opens the job inspector</p>}
     </section>
   );
 };
@@ -94,18 +94,18 @@ const JobCard: React.FC<{
   onOpen: (jobId: string) => void;
 }> = ({ job, tone, agentsList, onOpen }) => {
   const failed = job.status === 'FAILED';
-  const priorityColor = (job.priority && PRIORITY_COLOR[job.priority]) || '#3A4048';
+  const priorityColor = (job.priority && PRIORITY_COLOR[job.priority]) || 'var(--lys-border-strong)';
   const assigned = job.assignedAgentIds.map((id) => resolveActorPresentation(id, agentsList).displayName);
   const progress = typeof job.progress === 'number' ? Math.max(0, Math.min(1, job.progress)) : null;
 
   return (
-    <div role="listitem" className="border border-[#1F242B] bg-[#0C0E11]" style={{ borderLeft: `3px solid ${priorityColor}` }}>
+    <div role="listitem" className="lys-enter border border-lys-subtle bg-lys-surface-0" style={{ borderLeft: `3px solid ${priorityColor}` }}>
       <div className="p-3 flex flex-col gap-1.5">
         <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
           <span className="font-mono-code text-[10px] tracking-wider" style={{ color: priorityColor }}>
             {job.priority || UNKNOWN}
           </span>
-          <CopyId value={job.id} className="text-[#5C646E] text-[11px]" />
+          <CopyId value={job.id} className="text-lys-faint text-[11px]" />
           <span className="font-mono-code text-[10px] tracking-wider ml-auto" style={{ color: tone }}>
             {job.status}
           </span>
@@ -115,37 +115,37 @@ const JobCard: React.FC<{
           type="button"
           data-nav-item
           onClick={() => onOpen(job.id)}
-          className="text-left text-[14px] font-semibold text-[#E6E9ED] hover:underline cursor-pointer"
+          className="text-left text-[14px] font-semibold text-lys-primary hover:underline cursor-pointer"
         >
           {job.title}
         </button>
 
-        <div className="flex flex-wrap gap-x-3 gap-y-1 font-mono-code text-[11px] text-[#8C949F]">
+        <div className="flex flex-wrap gap-x-3 gap-y-1 font-mono-code text-[11px] text-lys-muted">
           <span>{job.repository || UNKNOWN}</span>
-          <span className="text-[#CBA35C]">{job.branch || UNKNOWN}</span>
+          <span className="text-lys-gold">{job.branch || UNKNOWN}</span>
           <span>assigned {assigned.length ? assigned.join(' → ') : UNKNOWN}</span>
           <span>phase {job.currentPhase || UNKNOWN}</span>
           <span>started {formatDateTime(job.startedAt)}</span>
         </div>
 
         {progress !== null ? (
-          <div className="flex items-center gap-2 font-mono-code text-[11px] text-[#8C949F]">
-            <div className="flex-1 h-1.5 bg-[#1F242B] relative" role="meter" aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(progress * 100)} aria-label="Job progress">
+          <div className="flex items-center gap-2 font-mono-code text-[11px] text-lys-muted">
+            <div className="flex-1 h-1.5 bg-lys-surface-interactive relative" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(progress * 100)} aria-label="Job progress">
               <div className="absolute left-0 top-0 bottom-0" style={{ width: `${progress * 100}%`, backgroundColor: tone }} />
             </div>
             <span>{Math.round(progress * 100)}%</span>
           </div>
         ) : (
-          <span className="font-mono-code text-[11px] text-[#5C646E]" title="Hermes reports no progress for this job">progress {UNKNOWN}</span>
+          <span className="font-mono-code text-[11px] text-lys-faint" title="Hermes reports no progress for this job">progress {UNKNOWN}</span>
         )}
 
         {failed && (
-          <div role="note" className="mt-1 px-2.5 py-1.5 border border-[rgba(242,85,90,0.4)] bg-[rgba(242,85,90,0.06)] font-mono-code text-[11px] text-[#F2555A]">
+          <div role="note" className="mt-1 px-2.5 py-1.5 border border-lys-danger/40 bg-lys-danger/6 font-mono-code text-[11px] text-lys-danger">
             MISSION INTERRUPTED · open the job for the failure explanation
           </div>
         )}
         {job.blockedReason && (
-          <div className="font-mono-code text-[11px] text-[#E3A008] break-words">blocked: {String(job.blockedReason)}</div>
+          <div className="font-mono-code text-[11px] text-lys-warning break-words">blocked: {String(job.blockedReason)}</div>
         )}
       </div>
     </div>

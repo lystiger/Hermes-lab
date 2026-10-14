@@ -194,8 +194,8 @@ export const MOCK_ACTIVE_JOB_DETAIL: JobDetail = {
   retriesUsed: 1,
   maxRetries: 3,
   tokenBreakdown: [
-    { agentId: 'gemini', agentName: 'Gemini', phase: 'BUILD', tokensFormatted: '30.4k', color: '#5B8CFF', percentage: 38 },
-    { agentId: 'claude', agentName: 'Claude', phase: 'HARDEN', tokensFormatted: '13.7k', color: '#D9A05B', percentage: 17 },
-    { agentId: 'codex', agentName: 'Codex', phase: 'VERIFY', tokensFormatted: '~19k', color: '#4EC9A0', percentage: 0 }
+    { agentId: 'gemini', agentName: 'Gemini', phase: 'BUILD', tokensFormatted: '30.4k', color: 'var(--lys-agent-gemini)', percentage: 38 },
+    { agentId: 'claude', agentName: 'Claude', phase: 'HARDEN', tokensFormatted: '13.7k', color: 'var(--lys-agent-claude)', percentage: 17 },
+    { agentId: 'codex', agentName: 'Codex', phase: 'VERIFY', tokensFormatted: '~19k', color: 'var(--lys-agent-codex)', percentage: 0 }
   ]
 };

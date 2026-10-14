@@ -25,6 +25,7 @@ import {
 import { resolveActorPresentation } from '../actors';
 import { HermesUnreachableError, recordContact, recordUnreachable } from '../connection';
 import { UNKNOWN } from '../unknown';
+import { actorAccent } from '../../theme/agents';
 import {
   mapEvent,
   mapCapacityTelemetry,
@@ -182,7 +183,7 @@ export class HttpHermesApi implements HermesApi {
         persona: dto.persona || dto.presentation?.persona,
         presentation: {
           displayName: dto.presentation?.displayName || dto.displayName || actor.displayName,
-          accentColor: dto.presentation?.accentColor || actor.accentColor,
+          accentColor: actorAccent(dto.id, dto.presentation?.accentColor || actor.accentColor),
           avatarUrl: dto.presentation?.avatarUrl || `/agents/${dto.id}.webp`,
           characterCardUrl: dto.presentation?.characterCardUrl || (['gemini', 'claude', 'codex'].includes(dto.id) ? `/agents/${dto.id}-card.webp` : undefined),
           sigil: dto.presentation?.sigil || dto.id.toUpperCase().slice(0, 4),
@@ -479,12 +480,12 @@ export class HttpHermesApi implements HermesApi {
   async getSettings(): Promise<{ runtime: SettingItem[]; policy: SettingItem[] }> {
     return {
       runtime: [
-        { label: 'Hermes Runtime API', value: this.baseUrl, color: '#3FB950' },
-        { label: 'Event Bus Transport', value: 'SSE / Server-Sent Events', color: '#CBA35C' }
+        { label: 'Hermes Runtime API', value: this.baseUrl, color: 'var(--lys-status-success)' },
+        { label: 'Event Bus Transport', value: 'SSE / Server-Sent Events', color: 'var(--lys-accent-gold)' }
       ],
       // The Hermes API does not expose its execution or merge policy, so none is claimed here.
       policy: [
-        { label: 'Policy', value: 'Not exposed by the Hermes API', color: '#8C949F' }
+        { label: 'Policy', value: 'Not exposed by the Hermes API', color: 'var(--lys-text-muted)' }
       ]
     };
   }
@@ -535,7 +536,7 @@ export class HttpHermesApi implements HermesApi {
         id: p.id,
         kind: p.kind,
         displayName: p.displayName || resolveActorPresentation(p.id).displayName,
-        accentColor: p.accentColor || resolveActorPresentation(p.id).accentColor
+        accentColor: actorAccent(p.id, p.accentColor)
       })),
       createdAt: t.createdAt,
       updatedAt: t.updatedAt
@@ -557,7 +558,7 @@ export class HttpHermesApi implements HermesApi {
         id: p.id,
         kind: p.kind,
         displayName: p.displayName || resolveActorPresentation(p.id).displayName,
-        accentColor: p.accentColor || resolveActorPresentation(p.id).accentColor
+        accentColor: actorAccent(p.id, p.accentColor)
       })),
       createdAt: t.createdAt,
       updatedAt: t.updatedAt
@@ -585,7 +586,7 @@ export class HttpHermesApi implements HermesApi {
           id: m.from?.id,
           kind: m.from?.kind || "agent",
           displayName: m.from?.displayName || fromActor.displayName,
-          accentColor: m.from?.accentColor || fromActor.accentColor,
+          accentColor: actorAccent(m.from?.id ?? fromActor.id, m.from?.accentColor || fromActor.accentColor),
           avatarUrl: m.from?.avatarUrl || fromActor.avatarUrl,
           subtitle: m.from?.subtitle || fromActor.subtitle
         },
@@ -595,7 +596,7 @@ export class HttpHermesApi implements HermesApi {
             id: to.id,
             kind: to.kind || "agent",
             displayName: to.displayName || toActor.displayName,
-            accentColor: to.accentColor || toActor.accentColor,
+            accentColor: actorAccent(to.id, to.accentColor || toActor.accentColor),
             avatarUrl: to.avatarUrl || toActor.avatarUrl,
             subtitle: to.subtitle || toActor.subtitle
           };
@@ -721,13 +722,13 @@ export class HttpHermesApi implements HermesApi {
         id: m.from?.id,
         kind: m.from?.kind || "operator",
         displayName: m.from?.displayName || fromActor.displayName,
-        accentColor: m.from?.accentColor || fromActor.accentColor
+        accentColor: actorAccent(m.from?.id ?? fromActor.id, m.from?.accentColor || fromActor.accentColor)
       },
       to: (m.to || []).map((to: any) => ({
         id: to.id,
         kind: to.kind || "agent",
         displayName: to.displayName || resolveActorPresentation(to.id).displayName,
-        accentColor: to.accentColor || resolveActorPresentation(to.id).accentColor
+        accentColor: actorAccent(to.id, to.accentColor || resolveActorPresentation(to.id).accentColor)
       })),
       kind: m.kind,
       text: m.text,

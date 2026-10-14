@@ -9,25 +9,25 @@ export function isErrorKind(kind: string): boolean {
 
 export function eventKindColor(kind: string): string {
   if (isErrorKind(kind)) {
-    return kind === 'retry' || kind === 'quota.warn' ? '#E3A008' : '#F2555A';
+    return kind === 'retry' || kind === 'quota.warn' ? 'var(--lys-status-warning)' : 'var(--lys-status-danger)';
   }
-  if (kind.startsWith('agent.')) return '#3FB950';
-  if (kind === 'job.start' || kind === 'phase.change') return '#CBA35C';
-  return '#8C949F';
+  if (kind.startsWith('agent.')) return 'var(--lys-status-success)';
+  if (kind === 'job.start' || kind === 'phase.change') return 'var(--lys-accent-gold)';
+  return 'var(--lys-text-muted)';
 }
 
 export type EventCategory = 'failures' | 'warnings' | 'agents' | 'jobs' | 'execution' | 'messages' | 'tools' | 'runtime' | 'other';
 
 export const EVENT_CATEGORIES: { id: EventCategory; label: string; tone: string }[] = [
-  { id: 'failures', label: 'Failures', tone: '#F2555A' },
-  { id: 'warnings', label: 'Warnings', tone: '#E3A008' },
-  { id: 'agents', label: 'Agents', tone: '#3FB950' },
-  { id: 'jobs', label: 'Jobs', tone: '#CBA35C' },
-  { id: 'execution', label: 'Execution', tone: '#7FB3D5' },
-  { id: 'messages', label: 'Messages', tone: '#8C949F' },
-  { id: 'tools', label: 'Tools', tone: '#8C949F' },
-  { id: 'runtime', label: 'Runtime', tone: '#8C949F' },
-  { id: 'other', label: 'Other', tone: '#5C646E' }
+  { id: 'failures', label: 'Failures', tone: 'var(--lys-status-danger)' },
+  { id: 'warnings', label: 'Warnings', tone: 'var(--lys-status-warning)' },
+  { id: 'agents', label: 'Agents', tone: 'var(--lys-status-success)' },
+  { id: 'jobs', label: 'Jobs', tone: 'var(--lys-accent-gold)' },
+  { id: 'execution', label: 'Execution', tone: 'var(--lys-accent-sky)' },
+  { id: 'messages', label: 'Messages', tone: 'var(--lys-text-muted)' },
+  { id: 'tools', label: 'Tools', tone: 'var(--lys-text-muted)' },
+  { id: 'runtime', label: 'Runtime', tone: 'var(--lys-text-muted)' },
+  { id: 'other', label: 'Other', tone: 'var(--lys-text-faint)' }
 ];
 
 /** Failure taxonomy for the log: a failure is a failure, a warning is a degraded state, the rest are normal. */
@@ -54,8 +54,8 @@ export function eventSeverity(kind: string): EventSeverity {
 }
 
 export const SEVERITY_COLOR: Record<EventSeverity, string> = {
-  error: '#F2555A',
-  warn: '#E3A008',
-  ok: '#3FB950',
-  info: '#8C949F'
+  error: 'var(--lys-status-danger)',
+  warn: 'var(--lys-status-warning)',
+  ok: 'var(--lys-status-success)',
+  info: 'var(--lys-text-muted)'
 };

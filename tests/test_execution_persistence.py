@@ -17,7 +17,9 @@ def ev(kind, rid="01AAAAAAAAAAAAAAAAAAAAAAAA", backend="openrig", **meta):
     })
 
 
-def restart(path):
+def restart(path, previous=None):
+    if previous is not None:
+        previous.flush()  # saves are asynchronous: wait for the write before "restarting"
     fresh = ExecutionRegistry()
     fresh.enable_persistence(path)
     return fresh
@@ -29,7 +31,7 @@ def test_rows_survive_a_restart_flagged_restored(tmp_path):
     reg.enable_persistence(path)
     reg.apply(ev(events.RUNNING))
 
-    [row] = restart(path).resources()
+    [row] = restart(path, reg).resources()
     assert row["state"] == "running" and row["taskId"] == "T1"
     assert row["details"]["restored"] is True
 
@@ -40,7 +42,7 @@ def test_released_rows_are_not_restored(tmp_path):
     reg.enable_persistence(path)
     reg.apply(ev(events.RUNNING))
     reg.apply(ev(events.RESOURCE_RELEASED))
-    assert restart(path).resources() == []
+    assert restart(path, reg).resources() == []
 
 
 def test_a_live_event_clears_the_restored_flag(tmp_path):
@@ -48,7 +50,7 @@ def test_a_live_event_clears_the_restored_flag(tmp_path):
     reg = ExecutionRegistry()
     reg.enable_persistence(path)
     reg.apply(ev(events.RUNNING))
-    again = restart(path)
+    again = restart(path, reg)
     again.apply(ev(events.RESOURCE_POOLED, expiresAt="2030-01-01T00:00:00Z"))
     [row] = again.resources()
     assert row["state"] == "idle" and "restored" not in row["details"] and "restoredAt" not in row
@@ -60,12 +62,12 @@ def test_restored_openrig_rows_whose_rig_is_gone_are_pruned(tmp_path):
     reg.enable_persistence(path)
     reg.apply(ev(events.RUNNING, rid="01AAAAAAAAAAAAAAAAAAAAAAAA"))
     reg.apply(ev(events.RUNNING, rid="01BBBBBBBBBBBBBBBBBBBBBBBB"))
-    again = restart(path)
+    again = restart(path, reg)
 
     again.prune_restored_rigs({"01BBBBBBBBBBBBBBBBBBBBBBBB"})
 
     assert [r["id"] for r in again.resources()] == ["01BBBBBBBBBBBBBBBBBBBBBBBB"]
-    assert [r["id"] for r in restart(path).resources()] == ["01BBBBBBBBBBBBBBBBBBBBBBBB"]
+    assert [r["id"] for r in restart(path, again).resources()] == ["01BBBBBBBBBBBBBBBBBBBBBBBB"]
 
 
 def test_live_openrig_rows_are_never_pruned_by_the_rig_check(tmp_path):
@@ -81,7 +83,7 @@ def test_stale_restored_rows_expire(tmp_path, monkeypatch):
     reg = ExecutionRegistry()
     reg.enable_persistence(path)
     reg.apply(ev(events.RUNNING, backend="subprocess", rid="exec-1"))
-    again = restart(path)
+    again = restart(path, reg)
     long_ago = (datetime.now(timezone.utc) - timedelta(hours=1)).isoformat()
     for row in again._resources.values():
         row["restoredAt"] = long_ago
@@ -91,7 +93,7 @@ def test_stale_restored_rows_expire(tmp_path, monkeypatch):
 def test_a_corrupt_state_file_starts_empty(tmp_path):
     path = tmp_path / "state.json"
     path.write_text("{not json")
-    assert restart(path).resources() == []
+    assert restart(path, None).resources() == []
 
 
 def test_without_persistence_nothing_is_written(tmp_path, monkeypatch):
@@ -108,7 +110,7 @@ def test_snapshot_prunes_restored_rigs_only_when_the_daemon_answered(tmp_path, m
     reg = ExecutionRegistry()
     reg.enable_persistence(path)
     reg.apply(ev(events.RUNNING))
-    again = restart(path)
+    again = restart(path, reg)
 
     def probe(live_rig_ids=None, **kw):
         return [], {"daemon": "down", "ledger": {"owners": 0, "rigIds": []}}
@@ -121,3 +123,35 @@ def test_snapshot_prunes_restored_rigs_only_when_the_daemon_answered(tmp_path, m
 
     monkeypatch.setattr(module, "probe_backends", probe_up)
     assert build_execution_snapshot(registry=again)["resources"] == []  # daemon up, rig unknown: prune
+
+
+def test_apply_never_waits_for_a_slow_disk(tmp_path, monkeypatch):
+    import time as _time
+
+    reg = ExecutionRegistry()
+    reg.enable_persistence(tmp_path / "state.json")
+    reg.flush()
+    real = reg._save_now
+    monkeypatch.setattr(reg, "_save_now", lambda: (_time.sleep(0.3), real()))
+
+    started = _time.monotonic()
+    for _ in range(5):
+        reg.apply(ev(events.RUNNING))
+    assert _time.monotonic() - started < 0.1
+
+
+def test_restart_never_renews_a_stale_row_and_expiry_is_saved(tmp_path):
+    path = tmp_path / "state.json"
+    reg = ExecutionRegistry()
+    reg.enable_persistence(path)
+    reg.apply(ev(events.RUNNING, backend="subprocess", rid="exec-1"))
+    first = restart(path, reg)
+    first_restored = first.resources()[0]["restoredAt"]
+    second = restart(path, first)
+    assert second.resources()[0]["restoredAt"] == first_restored  # not renewed by the restart
+
+    long_ago = (datetime.now(timezone.utc) - timedelta(hours=1)).isoformat()
+    for row in second._resources.values():
+        row["restoredAt"] = long_ago
+    assert second.resources() == []
+    assert restart(path, second).resources() == []  # the expiry was persisted

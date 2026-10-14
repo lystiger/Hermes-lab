@@ -65,6 +65,11 @@ class ExecutionRegistry:
         self._resources = {}
         self._path = None
         self._save_lock = threading.Lock()
+        # Saves run on one background thread: apply() only marks the state dirty, so slow storage
+        # never delays an execution worker, and bursts of events coalesce into one write.
+        self._dirty = threading.Condition(threading.Lock())
+        self._pending_saves = 0
+        self._writer = None
 
     def enable_persistence(self, path=None):
         self._path = Path(path) if path is not None else default_state_path()
@@ -81,11 +86,45 @@ class ExecutionRegistry:
                     continue
                 details = dict(row.get("details") or {})
                 details["restored"] = True
-                row = dict(row, details=details, restoredAt=_now())
+                # Keep the first restore time across restarts, so a stale row keeps ageing toward expiry.
+                row = dict(row, details=details, restoredAt=row.get("restoredAt") or _now())
                 self._resources[(row["backend"], row["kind"], row["id"])] = row
         self._prune_expired()
+        self._writer = threading.Thread(target=self._write_loop, name="hermes-execution-state", daemon=True)
+        self._writer.start()
+        self._save()  # persist the restore times and any expiry
 
     def _save(self):
+        """Schedule a save (non-blocking)."""
+        if self._path is None:
+            return
+        with self._dirty:
+            self._pending_saves += 1
+            self._dirty.notify()
+
+    def _write_loop(self):
+        while True:
+            with self._dirty:
+                while self._pending_saves == 0:
+                    self._dirty.wait()
+                self._pending_saves = 0
+            self._save_now()
+            with self._dirty:
+                self._dirty.notify_all()
+
+    def flush(self, timeout=5.0):
+        """Wait until scheduled saves are written (tests, shutdown)."""
+        if self._path is None or self._writer is None:
+            return
+        deadline = time.monotonic() + timeout
+        with self._dirty:
+            while self._pending_saves and time.monotonic() < deadline:
+                self._dirty.wait(timeout=0.05)
+        # The writer may still be mid-write of the last batch.
+        with self._save_lock:
+            pass
+
+    def _save_now(self):
         if self._path is None:
             return
         # Snapshot and write under one lock, so a slower save can never overwrite a newer state.
@@ -104,11 +143,15 @@ class ExecutionRegistry:
 
     def _prune_expired(self):
         cutoff = datetime.now(timezone.utc) - RESTORED_TTL
+        removed = False
         with self._lock:
             for key, row in list(self._resources.items()):
                 restored_at = row.get("restoredAt")
                 if restored_at and _parse(restored_at) < cutoff:
                     del self._resources[key]
+                    removed = True
+        if removed:
+            self._save()  # an expired row must not come back after the next restart
 
     def prune_restored_rigs(self, live_rig_ids):
         """Drop restored OpenRig rows whose rig the daemon no longer knows."""

@@ -45,6 +45,8 @@ CANCELLED_CODE = "FAILED_OPENRIG_CANCELLED"
 SEAT_IDLE_SECONDS = 120
 # Shared budget for releasing rigs that a crashed Hermes process left in the ledger.
 LEDGER_RECONCILE_SECONDS = 20
+# A launch that never produced a visible rig is not waited on longer than this (seconds).
+PENDING_LAUNCH_MAX_AGE = 3600
 
 
 @dataclass
@@ -546,6 +548,7 @@ class OpenRigBackend(ExecutionBackend):
             r.get("rigId") for r in rigs if isinstance(r, dict) and r.get("rigId")
         }
         self._reconcile_ledger(deadline)
+        self._reconcile_pending_launches(rigs, deadline)
         return match.group(1)
 
     def _reconcile_ledger(self, deadline):
@@ -575,6 +578,29 @@ class OpenRigBackend(ExecutionBackend):
                     )
                 else:
                     self._log("info", "Released OpenRig rig %s left by dead Hermes pid %s", rig_id, owner.pid)
+
+    def _reconcile_pending_launches(self, rigs, deadline):
+        """Release rigs from launches nobody waits for any more (cancelled, lost, or owner died).
+
+        Matched by their unique Hermes name in the `rig ps` listing taken this preflight; released
+        only by the rigId found there. Never fails the current task.
+        """
+        try:
+            names = self.ledger.pending_to_reconcile(time.time(), PENDING_LAUNCH_MAX_AGE)
+        except OSError as exc:
+            self._log("warning", "OpenRig pending launches could not be read: %s", exc)
+            return
+        for name in names:
+            matches = [r.get("rigId") for r in rigs if isinstance(r, dict) and r.get("name") == name]
+            if len(matches) != 1 or not is_rig_id(matches[0]):
+                continue  # not created (yet), or ambiguous: never guess
+            try:
+                self._release(matches[0], min(self._monotonic() + RELEASE_TIMEOUT_SECONDS, deadline))
+            except SprintRunnerError as exc:
+                self._log("warning", "Late OpenRig rig %s (%s) not released, kept for retry: %s", name, matches[0], exc.message)
+                continue
+            self.ledger.clear_pending(name)
+            self._log("info", "Released OpenRig rig %s (%s) from an abandoned launch", name, matches[0])
 
     def _track(self, rig_id):
         """Own `rig_id` for cleanup and persist it before anything relies on it.
@@ -698,6 +724,27 @@ class OpenRigBackend(ExecutionBackend):
         return spec_path
 
     def _launch(self, spec_path, rig_name, deadline):
+        # Record the launch first: if `rig up` finishes after we stop waiting, a later preflight
+        # still finds the rig by its unique name and releases it by id.
+        try:
+            self.ledger.record_pending(rig_name, time.time())
+        except (OSError, ValueError) as exc:
+            raise SprintRunnerError(
+                "FAILED_OPENRIG_UNAVAILABLE", f"could not record pending OpenRig launch {rig_name}: {exc}",
+            ) from exc
+        tracked_before = len(self.owned_rig_ids)
+        try:
+            return self._launch_tracked(spec_path, rig_name, deadline)
+        finally:
+            try:
+                if len(self.owned_rig_ids) > tracked_before:
+                    self.ledger.clear_pending(rig_name)  # its rigId is in the ledger now
+                else:
+                    self.ledger.abandon_pending(rig_name)
+            except OSError as exc:
+                self._log("warning", "OpenRig pending launch %s not updated: %s", rig_name, exc)
+
+    def _launch_tracked(self, spec_path, rig_name, deadline):
         args = ["up", str(spec_path), "--json"]
         try:
             if self._popen is not None and self._cancel_event is not None:

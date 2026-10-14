@@ -466,3 +466,14 @@ sprint-level execution_backend does not reach them. Verifier fallbacks keep the 
   dropped, and the next live event clears the flag. The sprint runner and tests never persist.
 - **Interruptible `rig up`.** It uses the same Popen/cancel path as `rig send`. On cancel it is killed, and orphan
   recovery adopts whatever it already created by exact rigId and releases it.
+
+### D-013 round 2 (Codex BLOCK, 3 x P2, all accepted)
+
+- **Late rigs from cancelled or lost launches.** Before `rig up`, the launch is recorded by its unique Hermes name in
+  `<ledger>/<owner>.pending` (state `launching`). It is cleared when its rigId is tracked, otherwise marked `abandoned`.
+  Every preflight reconciles abandoned launches, and launches whose owner died: a rig with exactly that name in the
+  `rig ps` listing is released by its rigId. A launch still in progress in a live process is never touched. Entries
+  are dropped after 1 h. If the pending record cannot be written, the launch does not start.
+- **Saves are off the execution path.** `apply()` only schedules a save. One background thread writes, coalescing
+  bursts.
+- **Restarts no longer renew stale rows.** `restoredAt` is kept across restarts, and TTL expiry is persisted.

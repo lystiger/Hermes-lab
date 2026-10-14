@@ -37,6 +37,11 @@ _LOCK = threading.Lock()
 # OpenRig rigIds are ULIDs. `rig down` also resolves rig names, so a ledger entry that is
 # not a ULID (for example "kernel") must never be read back as something to release.
 _RIG_ID = re.compile(r"[0-9A-HJKMNP-TV-Z]{26}")
+# Hermes rig names: hermes-<slug>-<8 random hex>. Unique per launch, so a pending launch can be
+# recognised by name; teardown still happens only by the rigId found under that name.
+_RIG_NAME = re.compile(r"hermes-[a-z0-9-]{1,40}-[0-9a-f]{8}")
+PENDING_SUFFIX = ".pending"
+PENDING_STATES = ("launching", "abandoned")
 
 
 def default_ledger_dir():
@@ -192,6 +197,105 @@ class OwnershipLedger:
                     continue
                 stale.append(StaleOwner(path, pid, rig_ids))
         return stale
+
+    # -- pending launches ------------------------------------------------------
+    # `rig up` can finish creating a rig after Hermes stopped waiting (cancel, lost response). The
+    # launch is recorded by its unique name before `rig up` runs and cleared once its rigId is tracked.
+    # If it was abandoned (or its owner died mid-launch), any later preflight that finds a rig with that
+    # exact name adopts its rigId and releases it.
+
+    def _pending_path(self):
+        host, (pid, started) = _host(), self._identity()
+        return self.directory / f"{host}-{pid}-{started or 'unknown'}{PENDING_SUFFIX}"
+
+    def _read_pending(self, path):
+        data = json.loads(path.read_text(encoding="utf-8"))
+        entries = data.get("pending") if isinstance(data, dict) else None
+        if not isinstance(entries, list):
+            raise ValueError(f"{path.name} is malformed")
+        valid = [
+            e for e in entries
+            if isinstance(e, dict) and isinstance(e.get("name"), str) and _RIG_NAME.fullmatch(e["name"])
+            and e.get("state") in PENDING_STATES and isinstance(e.get("at"), (int, float))
+        ]
+        return data, valid
+
+    def _write_pending(self, path, data, entries):
+        if not entries:
+            path.unlink(missing_ok=True)
+            return
+        payload = dict(data, pending=entries)
+        fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.", suffix=".tmp")
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as handle:
+                json.dump(payload, handle, indent=2)
+            os.replace(tmp, path)
+        except BaseException:
+            Path(tmp).unlink(missing_ok=True)
+            raise
+
+    def record_pending(self, rig_name, now):
+        """Record a launch about to start. Raises OSError/ValueError if it cannot be written."""
+        if not isinstance(rig_name, str) or not _RIG_NAME.fullmatch(rig_name):
+            raise ValueError(f"{rig_name!r} is not a Hermes rig name")
+        host, (pid, started) = _host(), self._identity()
+        path = self._pending_path()
+        with self._locked():
+            data, entries = (self._read_pending(path) if path.exists()
+                             else ({"host": host, "pid": pid, "started": started}, []))
+            entries = [e for e in entries if e["name"] != rig_name]
+            entries.append({"name": rig_name, "state": "launching", "at": now})
+            self._write_pending(path, data, entries)
+
+    def _update_pending(self, rig_name, change):
+        with self._locked():
+            for path in sorted(self.directory.glob(f"*{PENDING_SUFFIX}")) if self.directory.is_dir() else []:
+                try:
+                    data, entries = self._read_pending(path)
+                except (OSError, ValueError):
+                    continue
+                updated = change(entries)
+                if updated != entries:
+                    self._write_pending(path, data, updated)
+
+    def clear_pending(self, rig_name):
+        """The launch's rigId is tracked (or released): stop watching its name."""
+        self._update_pending(rig_name, lambda entries: [e for e in entries if e["name"] != rig_name])
+
+    def abandon_pending(self, rig_name):
+        """The launch ended without a tracked rigId: a later preflight may still find and release it."""
+        self._update_pending(rig_name, lambda entries: [
+            dict(e, state="abandoned") if e["name"] == rig_name else e for e in entries
+        ])
+
+    def pending_to_reconcile(self, now, max_age):
+        """Names of launches nobody is waiting for: abandoned ones, or ones whose owner died.
+
+        A launch still in progress in a live process is never returned. Entries older than
+        `max_age` seconds are dropped with a warning (a rig that never appeared is not waited on forever).
+        """
+        names = []
+        with self._locked():
+            for path in sorted(self.directory.glob(f"*{PENDING_SUFFIX}")):
+                try:
+                    data, entries = self._read_pending(path)
+                except (OSError, ValueError) as exc:
+                    logger.warning("Skipping unreadable OpenRig pending file %s: %s", path, exc)
+                    continue
+                if data.get("host") != _host():
+                    continue
+                owner_dead = not owner_alive(data.get("pid") or 0, data.get("started")) if data.get("pid") else True
+                kept = []
+                for entry in entries:
+                    if now - entry["at"] > max_age:
+                        logger.warning("Gave up on OpenRig launch %s: no rig appeared within %ss", entry["name"], max_age)
+                        continue
+                    kept.append(entry)
+                    if entry["state"] == "abandoned" or owner_dead:
+                        names.append(entry["name"])
+                if kept != entries:
+                    self._write_pending(path, data, kept)
+        return names
 
     def summary(self):
         """Read-only view: how many owners hold rigs, and which rigIds they are.

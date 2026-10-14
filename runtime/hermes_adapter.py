@@ -862,6 +862,7 @@ class HermesActorAdapter(ActorAdapter):
                     p_path = (self.target_repo / p_path).resolve()
                 if p_path.exists():
                     base_prompt = p_path.read_text(encoding="utf-8")
+            base_prompt += self._fallback_failure_section(task)
 
             # Gather task observations and prior failure telemetry for continuity
             obs_reg = getattr(self, "observation_registry", None)
@@ -1114,6 +1115,20 @@ class HermesActorAdapter(ActorAdapter):
                 self._event_loop = loop
                 # A drain scheduled on a previous loop may never finish; let this loop start one.
                 self._event_drain_running = False
+
+    @staticmethod
+    def _fallback_failure_section(task: TaskNode) -> str:
+        """For a fallback: why every earlier attempt failed, appended to its (unchanged) instructions."""
+        errors = (task.metadata or {}).get("fallback_errors") or []
+        if not errors:
+            return ""
+        lines = "\n".join(f"- {e.get('task_id')}: {e.get('error')}" for e in errors if isinstance(e, dict))
+        return (
+            "\n\n## Previous attempts failed\n"
+            "This task is a retry. Earlier attempts of the same task failed with:\n"
+            f"{lines}\n"
+            "Do the task above; avoid repeating these failures."
+        )
 
     @staticmethod
     def _prior_observations(task: TaskNode, obs_reg: Any) -> List[Any]:

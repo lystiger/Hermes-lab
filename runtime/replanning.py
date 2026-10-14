@@ -143,18 +143,33 @@ class CallablePlannerAdapter(PlannerAdapter):
         return ReplanResult(mutations=[], explanation=str(res))
 
 
-# Per-attempt task metadata a fallback must not reuse: it gets its own worktree, branch and history.
-_FALLBACK_DROPPED_METADATA = ("worktree_dir", "branch", "observations", "prior_runs", "fallback_for")
+# Per-attempt task metadata new work must not reuse: it gets its own worktree, branch and history.
+_PER_ATTEMPT_METADATA = ("worktree_dir", "branch", "observations", "prior_runs", "fallback_for", "repair_for")
+
+
+def _error_text(error: Any) -> str:
+    if isinstance(error, dict):
+        return str(error.get("message") or error.get("error") or error)[:500]
+    return str(error or "unknown failure")[:500]
+
+
+def _inherited_metadata(task: TaskNode, drop: tuple = ()) -> Dict[str, Any]:
+    """Execution settings (backend, role, prompt, limits, options) new work inherits from `task`."""
+    return {
+        key: value
+        for key, value in (task.metadata or {}).items()
+        if key not in _PER_ATTEMPT_METADATA and key not in drop
+    }
 
 
 def _fallback_metadata(failed_task: TaskNode) -> Dict[str, Any]:
-    """Execution settings a fallback inherits from the task it replaces (backend, role, prompt, limits)."""
-    inherited = {
-        key: value
-        for key, value in (failed_task.metadata or {}).items()
-        if key not in _FALLBACK_DROPPED_METADATA
-    }
+    """A fallback is the same work on the same agent and execution path, plus every earlier failure."""
+    inherited = _inherited_metadata(failed_task)
     inherited["fallback_for"] = failed_task.task_id
+    # Chained fallbacks keep the whole history, so the prompt can explain every earlier failure.
+    inherited["fallback_errors"] = list((failed_task.metadata or {}).get("fallback_errors") or []) + [
+        {"task_id": failed_task.task_id, "error": _error_text(failed_task.error)}
+    ]
     return inherited
 
 
@@ -251,12 +266,27 @@ class ProductionPlannerAdapter(PlannerAdapter):
             if failed_obs:
                 for idx, obs in enumerate(failed_obs, start=1):
                     repair_task_id = f"repair_check_{int(time.time())}_{idx}"
+                    source_task = (
+                        request.current_graph.get_task(obs.task_id)
+                        if getattr(obs, "task_id", None) and request.current_graph is not None
+                        else None
+                    )
+                    repair_meta: Dict[str, Any] = {}
+                    if source_task is not None:
+                        # Same agent and execution path as the task the failure belongs to. The repair has its
+                        # own instructions (so no inherited prompt file) and must be allowed to change files.
+                        repair_meta = _inherited_metadata(source_task, drop=("prompt_file", "expected_handoff"))
+                        repair_meta["role"] = "builder"
+                        repair_meta["repair_for"] = source_task.task_id
+                    repair_meta.update({"observation_ref": obs.id, "error_details": obs.metadata})
                     repair_node = TaskNode(
                         task_id=repair_task_id,
                         job_id=request.job_id,
                         description=f"Fix verification failure: {obs.content[:200]}",
                         required_capabilities=["implementation", "testing.unit"],
-                        metadata={"observation_ref": obs.id, "error_details": obs.metadata},
+                        assigned_actor=source_task.assigned_actor if source_task is not None else None,
+                        parent_task_id=source_task.task_id if source_task is not None else None,
+                        metadata=repair_meta,
                         max_attempts=min(2, self.limits.max_task_attempts),
                     )
                     mutations.append(GraphMutation(mutation_type=GraphMutationType.ADD_TASK, task=repair_node, reason="Repair verification failure"))
@@ -290,7 +320,9 @@ class ProductionPlannerAdapter(PlannerAdapter):
                 fix_node = TaskNode(
                     task_id=fix_task_id,
                     job_id=request.job_id,
-                    description=f"Diagnostic & fallback for failed task '{failed_task.task_id}': {failed_task.error or failed_task.description}",
+                    # The original instructions, not a "diagnostic": success must mean the work was done.
+                    # The failure reaches the prompt through metadata["fallback_errors"].
+                    description=failed_task.description,
                     required_capabilities=failed_task.required_capabilities or ["implementation"],
                     dependencies=failed_task.dependencies,
                     # The fallback is the same work on the same agent and execution path: without these

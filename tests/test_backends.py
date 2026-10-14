@@ -92,6 +92,57 @@ class TestBackendRegistryAndSelection(BackendTestCase):
             self.assertNotIn(operation, source)
 
 
+class TestSprintEndReleasesPooledJob(BackendTestCase):
+    def setUp(self):
+        self.logging_patch = patch.object(
+            HermesSprintRunner, "_setup_logging", return_value=MagicMock()
+        )
+        self.logging_patch.start()
+        self.addCleanup(self.logging_patch.stop)
+
+    def make_failing_runner(self, temporary_dir):
+        runner = HermesSprintRunner(
+            spec_path=Path(__file__).resolve().parent.parent / "sprints" / "lab-s03.json",
+            dry_run=True,
+            skip_agent_exec=True,
+        )
+        runner.summary_file = Path(temporary_dir) / "summary.json"
+        return runner
+
+    def run_failing_sprint(self, runner):
+        # Fail the sprint early so execute() reaches its finally block.
+        with patch.object(runner, "preflight", side_effect=SprintRunnerError("FAILED_TEST", "boom")):
+            try:
+                runner.execute()
+            except SprintRunnerError:
+                pass
+
+    def test_sprint_end_releases_the_sprints_pooled_seats(self):
+        with tempfile.TemporaryDirectory() as temporary_dir:
+            runner = self.make_failing_runner(temporary_dir)
+            backend = MagicMock()
+            runner._backend_cache = {"openrig": backend}
+
+            self.run_failing_sprint(runner)
+
+            backend.cleanup.assert_called_once()
+            backend.release_job.assert_called_once_with(runner.sprint_id)
+
+    def test_a_failed_job_release_is_logged_and_the_run_summary_still_written(self):
+        with tempfile.TemporaryDirectory() as temporary_dir:
+            runner = self.make_failing_runner(temporary_dir)
+            backend = MagicMock()
+            backend.release_job.side_effect = SprintRunnerError("FAILED_OPENRIG_UNAVAILABLE", "daemon down")
+            runner._backend_cache = {"openrig": backend}
+
+            self.run_failing_sprint(runner)
+
+            self.assertTrue(runner.summary_file.exists())
+            runner.logger.error.assert_any_call(
+                "Backend job release failed: [%s] %s", "FAILED_OPENRIG_UNAVAILABLE", "daemon down"
+            )
+
+
 class TestSubprocessBackend(BackendTestCase):
     def test_success_captures_stdout_stderr_and_exit(self):
         with tempfile.TemporaryDirectory() as temporary_dir:

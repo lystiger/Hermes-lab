@@ -21,6 +21,7 @@ Hermes (sprint runner / ReactiveJobEngine → HermesActorAdapter)
 | `name` | Registry key. Callers select backends only by this string. |
 | `execute(request) -> ExecutionResult` | Blocking. Runs one request to completion. This is the only abstract method. |
 | `cleanup(success=False)` | Releases resources owned by **this instance**. The default is a no-op. |
+| `release_job(job)` | Called once by the sprint runner at job end. Releases resources pooled for `job`. Must be safe to repeat. The default is a no-op. |
 
 `ExecutionRequest` carries `agent_name`, `command` (complete argv), `cwd`, `timeout_seconds`,
 `stdout_file`, `stderr_file`, and an open `metadata` mapping (today: `{"phase": ..., "prompt": ...}`;
@@ -152,11 +153,37 @@ authenticated. Hermes runs no setup and changes no global OpenRig or Claude sett
   `Stop` carries that **new** generation, so the old occupant's evidence never counts.
 - **Why not `/clear`.** `/clear` starts a new native Claude session that OpenRig reports as an identity
   `mismatch` with `attention_required`, and hook evidence is lost.
-- **Expiry.** An idle seat is released after 120 s, and every pooled seat is released when the process
-  exits (`atexit`). Hermes has no job-end signal yet, so idle expiry acts as the job boundary.
+- **Job end.** When a sprint finishes, the sprint runner calls `release_job(sprint_id)` on each cached
+  backend, so the job's idle seats are torn down immediately. The call is idempotent: a repeat call, or a
+  call for an unknown job, does nothing. Leased seats are not idle, so they are never touched.
+  `HermesActorAdapter` does **not** call `release_job` after each task. That would tear the pool down
+  after task one. See Known limitations for the in-process `job_launcher` path.
+- **Expiry.** An idle seat is still released after 120 s, as a backstop. Every pooled seat is also released
+  when the process exits (`atexit`).
 - **Measured (OpenRig 0.6.9).** A fresh occupant reaches hook-idle in about 16 s, against about 28 s for
   a new rig. In a live two-task run the end-to-end times were 34 s (new rig) and 32 s (reused): the
   agent's own work time dominates and varies between tasks.
+
+### Ownership ledger and crash recovery
+
+Every `rigId` the backend launches is written to a ledger before anything relies on it. It is removed only
+after `rig down` confirms the release. The ledger lives in `openrig_ledger.py`.
+
+- **Location.** A per-user state dir, not the run dir: after a crash, the next run is a new run dir, and
+  reconciliation must still find the old entry. Resolution order: `HERMES_OPENRIG_LEDGER_DIR`, then
+  `$XDG_STATE_HOME/hermes/openrig-ledger`, then `~/.local/state/hermes/openrig-ledger`.
+- **Layout.** One JSON file per owning process, `<host>-<pid>-<start>.json`, holding `{host, pid, started, rigIds}`.
+  `started` is the process's `/proc` start time. Each process writes only its own file, and writes are atomic.
+- **Reconcile.** Every preflight releases the rigIds of entries whose owner is provably gone on this host:
+  the pid does not exist, the process is a zombie, or the pid was reused (the start time differs). An owner
+  that cannot be inspected counts as alive, so nothing is released on a guess. Entries from other hosts are
+  skipped. The reconcile budget is 20 s, shared across the pass, and never extends the task's own deadline.
+- **Retry.** A failed reconcile release stays in the ledger and does not fail the current task. The next
+  preflight retries it. A corrupt ledger file is logged and kept, never released.
+- **Fail closed.** If the ledger cannot be written, the task fails with `FAILED_OPENRIG_UNAVAILABLE` and the
+  new rig is released.
+- **Exact ids only.** Reconcile releases only rigIds from the ledger, by id. It never matches names, and never
+  touches `kernel`, the user's rigs, adopted sessions or Herdr.
 
 The backend only ever stops rigs whose `rigId` it recorded. A `rig ps` row with a matching session name
 but a different `rigId` fails closed. It never touches `kernel`, the user's rigs, adopted sessions or Herdr.
@@ -188,8 +215,13 @@ them into `TaskExecutionResult.metadata["backend_runtime_metadata"]`.
 
 - Seats are warm-pooled per job, but every task still gets a fresh occupant and pays its startup turn
   (~16 s). There's deliberately no conversation continuity across tasks.
-- If the Hermes process crashes, pooled rigs (`hermes-*`) stay running until they're removed by hand.
-  There's no crash reconciliation yet.
+- **Crash recovery is by ledger, not by discovery.** A crash releases its rigs at the next preflight, but only if
+  the rigId was recorded. A crash **inside** the `rig up` call, before its response is parsed, can leave a rig
+  that is not in the ledger. Nothing on the next run releases it, and a user has to remove it by hand. Its name is
+  `hermes-*`, and that is never used to match it. The ledger is also per-user state: it is not shared across machines.
+- **No job-end hook for the in-process `job_launcher` path.** Sprint runs release their seats at sprint end. The
+  `HermesActorAdapter` path, keyed by `job_id`, has no job-end call yet, so its idle seats are released by the
+  120 s idle timer or at process exit.
 - The granted root is the worktree parent, so a seat can technically reach sibling worktrees of its job.
 - No out-of-band cancel: a cancelled Hermes task stops at its own timeout, then the rig is released.
 - The result file relies on the agent following the protocol. An agent that skips it fails closed.

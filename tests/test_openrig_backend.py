@@ -3,8 +3,10 @@
 import threading
 import asyncio
 import json
+import os
 import re
 import subprocess
+import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -14,7 +16,8 @@ from agents.claude import ClaudeAdapter
 from agents.errors import SprintRunnerError
 from runner.agents.registry import AgentRegistry
 from runner.backends.base import ExecutionRequest
-from runner.backends.openrig_backend import OpenRigBackend, _SeatPool
+from runner.backends.openrig_backend import OpenRigBackend, _Seat, _SeatPool
+from runner.backends.openrig_ledger import OwnershipLedger
 from runner.backends.registry import BackendRegistry, default_backend_registry
 from runtime.execution import AgentRun
 from runtime.hermes_adapter import HermesActorAdapter
@@ -186,7 +189,7 @@ def pool():
     seat_pool.drain()
 
 
-def make_backend(tmp_path, clock, rig, which=lambda name: "/usr/bin/rig", utc_times=(T0,), pool=None, sprint_id="Sprint 07/Proof"):
+def make_backend(tmp_path, clock, rig, which=lambda name: "/usr/bin/rig", utc_times=(T0,), pool=None, sprint_id="Sprint 07/Proof", ledger=None):
     sent_times = iter(utc_times)
     last = utc_times[-1]
     return OpenRigBackend(
@@ -199,6 +202,7 @@ def make_backend(tmp_path, clock, rig, which=lambda name: "/usr/bin/rig", utc_ti
         utcnow=lambda: next(sent_times, last),
         poll_interval=2.0,
         seat_pool=pool if pool is not None else _CURRENT_POOL[0],
+        ledger=ledger,
     )
 
 
@@ -1006,3 +1010,247 @@ def test_drain_reissues_a_teardown_stuck_past_its_wait(tmp_path, clock, pool):
     unblock.set()
     expiry.join(5)
     assert pool.failed_rig_ids() == []
+
+
+# --- job-end release ------------------------------------------------------------
+
+
+def fake_seat(job, rig_id, releases, granted_root):
+    return _Seat(
+        job=job, rig_id=rig_id, rig_name=f"name-{rig_id}", session="s",
+        rig_dir=granted_root / rig_id, granted_root=granted_root,
+        release=releases.append,
+    )
+
+
+def test_release_job_releases_the_jobs_idle_seats_once(pool, tmp_path):
+    released = []
+    pool.put(fake_seat("job-a", "01A", released, tmp_path))
+    pool.put(fake_seat("job-a", "01B", released, tmp_path))
+
+    assert pool.release_job("job-a") == 2
+    assert sorted(released) == ["01A", "01B"]
+    # Second call: nothing left for this job, so nothing is torn down again.
+    assert pool.release_job("job-a") == 0
+    assert sorted(released) == ["01A", "01B"]
+    assert pool.idle_rig_ids() == []
+
+
+def test_release_job_for_an_unknown_job_is_a_noop(pool, tmp_path):
+    released = []
+    pool.put(fake_seat("job-a", "01A", released, tmp_path))
+
+    assert pool.release_job("nobody") == 0
+    assert released == []
+    assert pool.idle_rig_ids("job-a") == ["01A"]
+
+
+def test_release_job_leaves_other_jobs_and_leased_seats_alone(pool, tmp_path):
+    released = []
+    root = tmp_path / "root"
+    pool.put(fake_seat("job-a", "01A", released, root))
+    pool.put(fake_seat("job-b", "01B", released, tmp_path / "other"))
+    leased = pool.acquire("job-a", root / "wt")
+    assert leased is not None
+
+    assert pool.release_job("job-a") == 0
+    assert released == []
+    assert pool.idle_rig_ids("job-b") == ["01B"]
+
+
+def test_release_job_cancels_the_timer_so_a_late_expiry_cannot_release_again(pool, tmp_path):
+    released = []
+    pool.put(fake_seat("job-a", "01A", released, tmp_path))
+    timer = FakeTimer.created[-1]
+
+    pool.release_job("job-a")
+    assert timer.cancelled
+    pool._expire(*timer.args)  # a callback that was already running when the job ended
+
+    assert released == ["01A"]
+
+
+def test_failed_job_release_is_kept_and_retried_by_the_next_release(pool, tmp_path):
+    calls = []
+
+    def flaky(rig_id):
+        calls.append(rig_id)
+        if len(calls) == 1:
+            raise SprintRunnerError("FAILED_OPENRIG_UNAVAILABLE", "daemon hiccup")
+
+    seat = fake_seat("job-a", "01A", [], tmp_path)
+    seat.release = flaky
+    pool.put(seat)
+
+    pool.release_job("job-a")
+    assert pool.failed_rig_ids() == ["01A"]
+
+    assert pool.release_job("job-a") == 1
+    assert calls == ["01A", "01A"]
+    assert pool.failed_rig_ids() == []
+
+
+# --- ownership ledger and crash reconciliation ----------------------------------
+
+
+def ledger_rig_ids(directory):
+    ids = []
+    if directory.is_dir():
+        for path in sorted(directory.glob("*.json")):
+            ids += json.loads(path.read_text(encoding="utf-8"))["rigIds"]
+    return ids
+
+
+def dead_pid():
+    proc = subprocess.Popen([sys.executable, "-c", "pass"])
+    proc.wait()
+    return proc.pid
+
+
+def dead_owner_ledger(directory, rig_id, pid=None):
+    """What a crashed Hermes process leaves behind: its entry, owned by a pid that is gone."""
+    OwnershipLedger(directory, identity=lambda: (pid or dead_pid(), None)).record(rig_id)
+
+
+def test_launched_rig_stays_in_the_ledger_while_pooled_and_leaves_it_on_release(tmp_path, clock, pool):
+    rig = FakeRig(clock)
+    backend, _ = run(tmp_path, clock, rig)
+
+    assert ledger_rig_ids(backend.ledger.directory) == [RIG_ID]  # pooled seats are still ours
+
+    assert backend.release_job("Sprint 07/Proof") == 1
+    assert rig.rigs_down == [RIG_ID]
+    assert ledger_rig_ids(backend.ledger.directory) == []
+    assert list(backend.ledger.directory.glob("*.json")) == []
+
+
+def test_double_release_job_on_the_backend_tears_the_rig_down_once(tmp_path, clock, pool):
+    rig = FakeRig(clock)
+    backend, _ = run(tmp_path, clock, rig)
+
+    backend.release_job("Sprint 07/Proof")
+    assert backend.release_job("Sprint 07/Proof") == 0
+    assert rig.rigs_down == [RIG_ID]
+
+
+def test_ledger_survives_a_crash_and_the_next_backend_reconciles_it(tmp_path, clock, pool):
+    ledger_dir = tmp_path / "ledger"
+    dead = dead_pid()
+    # The task fails (no result file), so its release runs; that release fails too, and the
+    # rig is left running when the process goes away.
+    crashed_rig = FakeRig(clock, result=False)
+    crashed_rig.down_results = [subprocess.CompletedProcess([], 1, "", "daemon hiccup")]
+    crashed = make_backend(tmp_path, clock, crashed_rig, ledger=OwnershipLedger(ledger_dir, identity=lambda: (dead, None)))
+    with pytest.raises(SprintRunnerError) as excinfo:
+        crashed.execute(make_request(tmp_path))
+    assert excinfo.value.code == "FAILED_OPENRIG_PROTOCOL"
+    assert crashed_rig.rigs_down == [RIG_ID]
+    assert ledger_rig_ids(ledger_dir) == [RIG_ID]
+
+    rig = FakeRig(clock)
+    survivor = make_backend(tmp_path, clock, rig, ledger=OwnershipLedger(ledger_dir))
+    calls_before = len(rig.calls)
+    survivor.execute(make_request(tmp_path))
+
+    names = [c[0] for c in rig.calls[calls_before:]]
+    assert names.index("down") < names.index("up")  # reconciled before the new task launched
+    assert rig.calls[calls_before + names.index("down")][1] == RIG_ID
+    assert not list(ledger_dir.glob(f"{dead}-*.json"))
+
+
+def test_live_owner_entries_are_skipped_by_reconcile(tmp_path, clock, pool):
+    ledger_dir = tmp_path / "ledger"
+    OwnershipLedger(ledger_dir).record("01LIVEOWNERRIG")  # this process: alive
+    rig = FakeRig(clock)
+    backend = make_backend(tmp_path, clock, rig, ledger=OwnershipLedger(ledger_dir))
+
+    backend.execute(make_request(tmp_path))
+
+    assert "01LIVEOWNERRIG" not in rig.rigs_down
+    assert "01LIVEOWNERRIG" in ledger_rig_ids(ledger_dir)
+
+
+@pytest.mark.skipif(not Path("/proc/self/stat").exists(), reason="needs /proc start times")
+def test_reused_pid_is_treated_as_a_dead_owner(tmp_path, clock, pool):
+    ledger_dir = tmp_path / "ledger"
+    # Same pid as this live process, but a different process start time: the pid was reused.
+    OwnershipLedger(ledger_dir, identity=lambda: (os.getpid(), "start-of-another-process")).record("01REUSEDPID")
+    rig = FakeRig(clock)
+
+    make_backend(tmp_path, clock, rig, ledger=OwnershipLedger(ledger_dir)).execute(make_request(tmp_path))
+
+    assert rig.rigs_down == ["01REUSEDPID"]
+    assert "01REUSEDPID" not in ledger_rig_ids(ledger_dir)
+
+
+def test_non_ledger_rigs_are_never_released(tmp_path, clock, pool):
+    ledger_dir = tmp_path / "ledger"
+    dead_owner_ledger(ledger_dir, "01STALE")
+    rig = FakeRig(clock)
+    # Kernel and a Hermes-named rig that is not in the ledger: a name match must not free them.
+    rig.listed_rigs = [{"rigId": "01HERMESNAMED", "name": "hermes-sprint-07-deadbeef", "status": "running"}]
+
+    make_backend(tmp_path, clock, rig, ledger=OwnershipLedger(ledger_dir)).execute(make_request(tmp_path))
+
+    assert rig.rigs_down == ["01STALE"]
+
+
+def test_failed_reconcile_release_is_kept_and_retried_by_a_later_run(tmp_path, clock, pool):
+    ledger_dir = tmp_path / "ledger"
+    dead_owner_ledger(ledger_dir, "01STALE")
+    first = FakeRig(clock)
+    first.down_results = [subprocess.CompletedProcess([], 1, "", "daemon hiccup")]
+
+    # The stale release fails, but that must not fail this task.
+    make_backend(tmp_path, clock, first, ledger=OwnershipLedger(ledger_dir)).execute(make_request(tmp_path))
+    assert first.rigs_down == ["01STALE"]
+    assert "01STALE" in ledger_rig_ids(ledger_dir)
+
+    second = FakeRig(clock)
+    make_backend(tmp_path, clock, second, ledger=OwnershipLedger(ledger_dir), sprint_id="Sprint 08").execute(
+        make_request(tmp_path, worktree_name="worktree-2")
+    )
+    assert second.rigs_down == ["01STALE"]
+    assert "01STALE" not in ledger_rig_ids(ledger_dir)
+
+
+def test_ledger_write_failure_fails_closed_and_releases_the_rig(tmp_path, clock, pool):
+    blocked = tmp_path / "not-a-directory"
+    blocked.write_text("x", encoding="utf-8")  # the ledger directory cannot be created under a file
+    rig = FakeRig(clock)
+    backend = make_backend(tmp_path, clock, rig, ledger=OwnershipLedger(blocked))
+
+    with pytest.raises(SprintRunnerError) as excinfo:
+        backend.execute(make_request(tmp_path))
+
+    assert excinfo.value.code == "FAILED_OPENRIG_UNAVAILABLE"
+    assert rig.rigs_down == [RIG_ID]
+
+
+def test_entries_from_another_host_are_never_judged_dead_here(tmp_path, clock, pool):
+    ledger_dir = tmp_path / "ledger"
+    ledger_dir.mkdir()
+    # The pid 999999 means nothing on this machine; the owner lives on another host sharing the state dir.
+    foreign = ledger_dir / "other-machine-999999-unknown.json"
+    foreign.write_text(json.dumps(
+        {"host": "other-machine", "pid": 999999, "started": None, "rigIds": ["01FOREIGN"]}
+    ), encoding="utf-8")
+    rig = FakeRig(clock)
+
+    make_backend(tmp_path, clock, rig, ledger=OwnershipLedger(ledger_dir)).execute(make_request(tmp_path))
+
+    assert rig.rigs_down == []
+    assert foreign.exists()
+
+
+def test_corrupt_ledger_file_is_kept_and_never_released(tmp_path, clock, pool):
+    ledger_dir = tmp_path / "ledger"
+    ledger_dir.mkdir()
+    corrupt = ledger_dir / "999999-unknown.json"
+    corrupt.write_text("{not json", encoding="utf-8")
+    rig = FakeRig(clock)
+
+    make_backend(tmp_path, clock, rig, ledger=OwnershipLedger(ledger_dir)).execute(make_request(tmp_path))
+
+    assert corrupt.read_text(encoding="utf-8") == "{not json"
+    assert rig.rigs_down == []

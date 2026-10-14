@@ -13,6 +13,7 @@ from pathlib import Path
 from agents.errors import SprintRunnerError
 
 from .base import ExecutionBackend, ExecutionResult
+from .openrig_ledger import OwnershipLedger
 
 
 SUPPORTED_VERSION_PREFIX = "0.6."
@@ -25,8 +26,10 @@ RELEASE_TIMEOUT_SECONDS = 60
 ORPHAN_RECOVERY_SECONDS = 20
 ORPHAN_RECOVERY_ATTEMPTS = 3
 SEND_IDLE_WAIT_SECONDS = 30
-# An idle pooled seat is released after this long; there is no job-end signal yet.
+# An idle pooled seat is released after this long. release_job() ends a job sooner.
 SEAT_IDLE_SECONDS = 120
+# Shared budget for releasing rigs that a crashed Hermes process left in the ledger.
+LEDGER_RECONCILE_SECONDS = 20
 
 
 @dataclass
@@ -151,6 +154,29 @@ class _SeatPool:
         for seat in seats:
             self._release(seat)
 
+    def release_job(self, job):
+        """Release every idle seat of `job` now. Returns how many seats were handed to teardown.
+
+        Safe to repeat: a second call, or a call for an unknown job, finds nothing to do.
+        Leased seats are not idle, so they stay with their lease. Failed teardowns of the
+        job are retried here. A seat whose teardown fails stays in the ledger until one succeeds.
+        """
+        with self._lock:
+            seats = self._idle.pop(job, [])
+            for seat in seats:
+                timer, _ = self._timers.pop(seat.rig_id, (None, None))
+                if timer is not None:
+                    timer.cancel()
+            retry = [seat for seat in self._failed.values() if seat.job == job]
+            for seat in retry:
+                del self._failed[seat.rig_id]
+            seats += retry
+            for seat in seats:
+                self._inflight[seat.rig_id] = seat
+        for seat in seats:
+            self._release(seat)
+        return len(seats)
+
     def idle_rig_ids(self, job=None):
         with self._lock:
             groups = [self._idle.get(job, [])] if job is not None else list(self._idle.values())
@@ -194,6 +220,7 @@ class OpenRigBackend(ExecutionBackend):
         sleep=None,
         utcnow=None,
         seat_pool=None,
+        ledger=None,
         **kwargs,
     ):
         self.run_dir = Path(run_dir)
@@ -211,6 +238,7 @@ class OpenRigBackend(ExecutionBackend):
         self.released_rig_ids = []
         self.pooled_rig_ids = []
         self.seat_pool = seat_pool if seat_pool is not None else DEFAULT_SEAT_POOL
+        self.ledger = ledger if ledger is not None else OwnershipLedger()
         self._preexisting_rig_ids = set()
 
     # -- contract -------------------------------------------------------------
@@ -326,6 +354,10 @@ class OpenRigBackend(ExecutionBackend):
             if rig_id not in self.released_rig_ids and rig_id not in self.pooled_rig_ids:
                 self._release(rig_id)
 
+    def release_job(self, job):
+        """Release the job's pooled seats now instead of waiting for the idle timer."""
+        return self.seat_pool.release_job(job)
+
     # -- lifecycle steps ------------------------------------------------------
 
     def preflight(self, deadline):
@@ -351,7 +383,52 @@ class OpenRigBackend(ExecutionBackend):
         self._preexisting_rig_ids = {
             r.get("rigId") for r in rigs if isinstance(r, dict) and r.get("rigId")
         }
+        self._reconcile_ledger(deadline)
         return match.group(1)
+
+    def _reconcile_ledger(self, deadline):
+        """Release rigs that a dead Hermes process launched and never released.
+
+        Only exact rigIds from ledger entries of dead owners are released. A failed release
+        stays in the ledger for the next preflight. It never fails the current task.
+        """
+        budget = min(self._monotonic() + LEDGER_RECONCILE_SECONDS, deadline)
+        try:
+            stale = self.ledger.stale_owners()
+        except OSError as exc:
+            self._log("warning", "OpenRig ledger could not be read: %s", exc)
+            return
+        for owner in stale:
+            for rig_id in owner.rig_ids:
+                if self._remaining(budget) <= 0:
+                    self._log("warning", "OpenRig ledger reconcile budget spent; the rest waits for the next run")
+                    return
+                try:
+                    self._release(rig_id, budget)
+                except SprintRunnerError as exc:
+                    self._log(
+                        "warning",
+                        "Stale OpenRig rig %s (owner pid %s) not released, kept for retry: %s",
+                        rig_id, owner.pid, exc.message,
+                    )
+                else:
+                    self._log("info", "Released OpenRig rig %s left by dead Hermes pid %s", rig_id, owner.pid)
+
+    def _track(self, rig_id):
+        """Own `rig_id` for cleanup and persist it before anything relies on it.
+
+        Raises FAILED_OPENRIG_UNAVAILABLE if the ledger cannot be written. The caller's
+        finally block then releases the rig, so a rig is never launched unrecorded.
+        """
+        if rig_id not in self.owned_rig_ids:
+            self.owned_rig_ids.append(rig_id)
+        try:
+            self.ledger.record(rig_id)
+        except (OSError, ValueError) as exc:
+            raise SprintRunnerError(
+                "FAILED_OPENRIG_UNAVAILABLE",
+                f"could not record OpenRig rig {rig_id} in the ownership ledger: {exc}",
+            ) from exc
 
     def _new_seat(self, runtime, worktree, deadline):
         rig_name = self._rig_name()
@@ -463,7 +540,7 @@ class OpenRigBackend(ExecutionBackend):
         rig_id = payload.get("rigId") if isinstance(payload, dict) else None
         if isinstance(rig_id, str) and rig_id:
             # Track ownership before validating anything else so cleanup can release it.
-            self.owned_rig_ids.append(rig_id)
+            self._track(rig_id)
         if (
             not isinstance(rig_id, str)
             or not rig_id
@@ -520,8 +597,7 @@ class OpenRigBackend(ExecutionBackend):
                 and r.get("rigId") not in self._preexisting_rig_ids
             ]
             if len(matches) == 1 and isinstance(matches[0], str) and matches[0]:
-                if matches[0] not in self.owned_rig_ids:
-                    self.owned_rig_ids.append(matches[0])
+                self._track(matches[0])
                 return
         self._log("error", "Could not confirm whether OpenRig rig %s was created", rig_name)
 
@@ -634,10 +710,12 @@ class OpenRigBackend(ExecutionBackend):
             # Diagnostics only; the result is already proven.
             self._log("warning", "OpenRig transcript capture failed: %s", exc.message)
 
-    def _release(self, rig_id):
+    def _release(self, rig_id, deadline=None):
+        if deadline is None:
+            deadline = self._monotonic() + RELEASE_TIMEOUT_SECONDS
         payload = self._run_json(
             ["down", rig_id, "--delete", "--force", "--json"],
-            self._monotonic() + RELEASE_TIMEOUT_SECONDS,
+            deadline,
             "FAILED_OPENRIG_UNAVAILABLE",
             allow_failure_payload=True,
         )
@@ -655,7 +733,16 @@ class OpenRigBackend(ExecutionBackend):
                 "FAILED_OPENRIG_UNAVAILABLE", f"rig down {rig_id} failed: {_brief(payload)}"
             )
         self.released_rig_ids.append(rig_id)
+        self._forget(rig_id)
         self._log("info", "OpenRig rig %s released", rig_id)
+
+    def _forget(self, rig_id):
+        try:
+            self.ledger.forget(rig_id)
+        except OSError as exc:
+            # The rig is already down. A stale entry is harmless: the next reconcile gets
+            # "No rig found" from rig down, which counts as released, and drops it.
+            self._log("warning", "OpenRig ledger could not drop released rig %s: %s", rig_id, exc)
 
     def _release_quietly(self, rig_id):
         try:

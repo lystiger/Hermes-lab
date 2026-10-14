@@ -2226,6 +2226,15 @@ class HermesSprintRunner:
                         cleanup_error.code,
                         cleanup_error.message,
                     )
+                # The sprint is over, so its pooled seats go now rather than at the idle timer.
+                try:
+                    backend.release_job(self.sprint_id)
+                except SprintRunnerError as release_error:
+                    self.logger.error(
+                        "Backend job release failed: [%s] %s",
+                        release_error.code,
+                        release_error.message,
+                    )
             with open(self.summary_file, "w", encoding="utf-8") as f:
                 json.dump(self.run_summary, f, indent=2)
             self.logger.info(f"Run summary written to {self.summary_file}")

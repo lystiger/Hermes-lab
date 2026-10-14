@@ -14,7 +14,8 @@ import {
   HealthStatus,
   Thread,
   Message,
-  MailboxEntry
+  MailboxEntry,
+  ExecutionSnapshot
 } from '../types';
 import { resolveActorPresentation } from '../actors';
 
@@ -56,6 +57,7 @@ interface BackendTraceEventDTO {
   detail: string;
   dur?: string;
   jobId?: string;
+  taskId?: string;
   metadata?: Record<string, any>;
 }
 
@@ -315,6 +317,7 @@ export class HttpHermesApi implements HermesApi {
         detail: e.detail,
         dur: e.dur || '—',
         jobId: e.jobId,
+        taskId: e.taskId,
         metadata: e.metadata
       };
     });
@@ -358,6 +361,7 @@ export class HttpHermesApi implements HermesApi {
           detail: dto.detail,
           dur: dto.dur || '—',
           jobId: dto.jobId,
+          taskId: dto.taskId,
           metadata: dto.metadata
         };
 
@@ -383,6 +387,48 @@ export class HttpHermesApi implements HermesApi {
           this.activeEventSource = null;
         }
       }
+    };
+  }
+
+  // --------------------------------------------------------------------------
+  // D-009 Execution snapshot (GET /execution). Initial state; events are applied on top.
+  // --------------------------------------------------------------------------
+
+  async getExecutionSnapshot(): Promise<ExecutionSnapshot> {
+    const res = await fetch(`${this.baseUrl}/execution`);
+    if (!res.ok) {
+      throw new Error(`Hermes /execution returned HTTP ${res.status}: ${res.statusText}`);
+    }
+    const data: any = await res.json();
+
+    return {
+      backends: (data.backends || []).map((b: any) => ({
+        name: b.name,
+        available: Boolean(b.available),
+        detail: b.detail ?? ''
+      })),
+      resources: (data.resources || []).map((r: any) => ({
+        backend: r.backend,
+        kind: r.kind,
+        id: r.id,
+        label: r.label,
+        state: r.state,
+        jobId: r.jobId ?? null,
+        taskId: r.taskId ?? null,
+        executionId: r.executionId ?? null,
+        since: r.since,
+        expiresAt: r.expiresAt ?? null,
+        details: r.details ?? {}
+      })),
+      openrig: data.openrig
+        ? {
+            daemon: data.openrig.daemon ?? 'unknown',
+            ledger: {
+              owners: data.openrig.ledger?.owners ?? 0,
+              rigIds: data.openrig.ledger?.rigIds ?? []
+            }
+          }
+        : null
     };
   }
 

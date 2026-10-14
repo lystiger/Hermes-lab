@@ -2,6 +2,7 @@ import React from 'react';
 import { NavLink } from 'react-router-dom';
 import { AnimatedCube } from './AnimatedCube';
 import { useConsoleStore } from '../stores/useConsoleStore';
+import { useExecutionStore } from '../stores/useExecutionStore';
 
 interface NavItem {
   to: string;
@@ -16,11 +17,27 @@ const NAV_ITEMS: NavItem[] = [
   { to: '/agents', label: 'Agents', badge: '3' },
   { to: '/usage', label: 'Usage' },
   { to: '/events', label: 'Events', badge: 'live', badgeColor: '#3FB950' },
+  { to: '/execution', label: 'Execution' },
   { to: '/settings', label: 'Settings' }
 ];
 
 export const Sidebar: React.FC = () => {
   const { clock } = useConsoleStore();
+  const resources = useExecutionStore((s) => s.view.resources);
+  const herdr = useExecutionStore((s) => s.view.backends.find((b) => b.name === 'herdr'));
+  const snapshotStatus = useExecutionStore((s) => s.snapshotStatus);
+
+  // Execution badge: resources currently acquiring or running (live from the D-009 snapshot + events).
+  const activeCount = Object.values(resources).filter((r) => r.state === 'acquiring' || r.state === 'running').length;
+  const navItems = NAV_ITEMS.map((item) =>
+    item.to === '/execution' && activeCount > 0 ? { ...item, badge: String(activeCount), badgeColor: '#3FB950' } : item
+  );
+
+  const herdrStatus = herdr
+    ? herdr.available
+      ? { text: 'Online', color: '#3FB950' }
+      : { text: 'Offline', color: '#F2555A' }
+    : { text: snapshotStatus === 'error' ? 'Unknown' : '—', color: '#8C949F' };
 
   return (
     <aside className="w-52 flex-shrink-0 bg-[#0C0E11] border-r border-[#1F242B] flex flex-col py-4 select-none">
@@ -34,7 +51,7 @@ export const Sidebar: React.FC = () => {
 
       {/* Nav List */}
       <nav className="flex flex-col gap-0.5 mt-1">
-        {NAV_ITEMS.map((item) => (
+        {navItems.map((item) => (
           <NavLink
             key={item.to}
             to={item.to}
@@ -70,11 +87,11 @@ export const Sidebar: React.FC = () => {
             Online
           </span>
         </div>
-        <div className="flex items-center justify-between font-mono-code text-[11px] text-[#8C949F]">
+        <div className="flex items-center justify-between font-mono-code text-[11px] text-[#8C949F]" title={herdr?.detail}>
           <span>Herdr</span>
-          <span className="flex items-center gap-1.5 text-[#3FB950]">
-            <span className="w-1.5 h-1.5 bg-[#3FB950]" />
-            Online
+          <span style={{ color: herdrStatus.color }} className="flex items-center gap-1.5">
+            <span style={{ backgroundColor: herdrStatus.color }} className="w-1.5 h-1.5" />
+            {herdrStatus.text}
           </span>
         </div>
         <div className="flex items-center justify-between font-mono-code text-[11px] text-[#8C949F]">

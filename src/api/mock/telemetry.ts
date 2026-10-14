@@ -82,7 +82,7 @@ export const MOCK_PROJECTIONS: ProjectionItem[] = [
 
 export const MOCK_RUNTIME_SETTINGS: SettingItem[] = [
   { label: 'hermes orchestrator', value: 'running · pid 4188', color: '#3FB950' },
-  { label: 'herdr sandbox', value: 'local container', color: '#E6E9ED' },
+  { label: 'herdr sandbox (mock)', value: 'fixture · not live', color: '#E3A008' },
   { label: 'state store', value: 'redis://localhost:6379', color: '#E6E9ED' },
   { label: 'trace retention', value: '14 days', color: '#E6E9ED' },
   { label: 'reduced motion', value: 'follow system', color: '#8C949F' }

@@ -39,6 +39,9 @@ export const Header: React.FC = () => {
   } else if (pathname === '/events') {
     title = 'Events';
     subtitle = isRealApiMode ? 'live SSE stream' : 'trace stream';
+  } else if (pathname === '/execution') {
+    title = 'Execution';
+    subtitle = 'every backend · snapshot + live events';
   } else if (pathname === '/settings') {
     title = 'Settings';
     subtitle = isRealApiMode ? 'Hermes REST/SSE API' : 'local';

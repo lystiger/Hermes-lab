@@ -869,3 +869,20 @@ def test_snapshot_carries_a_taken_at_cutoff_before_its_resources():
     before = _time.time()
     snap = build_execution_snapshot(registry=ExecutionRegistry(), probe=lambda: ([], None))
     assert before <= snap["takenAt"] <= _time.time()
+
+
+def test_snapshot_keeps_failure_diagnostics_until_the_next_attempt():
+    from runner.backends.execution_registry import ExecutionRegistry
+
+    reg = ExecutionRegistry()
+    reg.apply(ev(events.RUNNING))
+    reg.apply(ev(events.RELEASE_FAILED, errorCode="FAILED_OPENRIG_UNAVAILABLE", error="daemon down"))
+    [row] = reg.resources()
+    assert row["state"] == "failed"
+    assert row["details"]["errorCode"] == "FAILED_OPENRIG_UNAVAILABLE"
+    assert row["details"]["error"] == "daemon down"
+    assert row["details"]["releaseFailed"] is True
+
+    reg.apply(ev(events.RESOURCE_ACQUIRED))
+    [row] = reg.resources()
+    assert not {"errorCode", "error", "releaseFailed"} & set(row["details"])

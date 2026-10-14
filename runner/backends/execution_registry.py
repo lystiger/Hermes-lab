@@ -27,7 +27,7 @@ _STATE_FOR_EVENT = {
     events.RELEASE_FAILED: "failed",
 }
 # Event metadata copied into a resource's `details`. Keys match the D-009 wire names.
-_DETAIL_KEYS = ("reused", "generation", "sessionName", "nodeId", "rigId")
+_DETAIL_KEYS = ("reused", "generation", "sessionName", "nodeId", "rigId", "errorCode", "error")
 
 
 def _now():
@@ -65,9 +65,15 @@ class ExecutionRegistry:
                 entry["jobId"] = event.job_id
             if getattr(event, "task_id", None):
                 entry["taskId"] = event.task_id
+            if event.kind == events.RESOURCE_ACQUIRED:
+                # A new attempt must not inherit the previous failure.
+                for name in ("errorCode", "error", "releaseFailed"):
+                    entry["details"].pop(name, None)
             for name in _DETAIL_KEYS:
                 if name in metadata:
                     entry["details"][name] = metadata[name]
+            if event.kind == events.RELEASE_FAILED:
+                entry["details"]["releaseFailed"] = True
             state = _STATE_FOR_EVENT.get(event.kind)
             if state is not None:
                 if state != entry["state"]:

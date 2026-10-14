@@ -12,6 +12,9 @@ _SESSION_STATE = Path(tempfile.mkdtemp(prefix="hermes-test-state-"))
 os.environ["HERMES_OPENRIG_LEDGER_DIR"] = str(_SESSION_STATE / "openrig-ledger")
 os.environ["OPENRIG_HOME"] = str(_SESSION_STATE / "openrig-home")
 os.environ["HERMES_EXECUTION_STATE"] = str(_SESSION_STATE / "execution-registry.json")
+# Never post test events to a live Hermes API inherited from the developer's shell. Tests that need a
+# control URL (e.g. the cross-process a2a smoke test) start their own server and pass it explicitly.
+os.environ.pop("LYSSTACK_CONTROL_URL", None)
 
 ROOT_DIR = Path(__file__).resolve().parent.parent
 if str(ROOT_DIR) not in sys.path:

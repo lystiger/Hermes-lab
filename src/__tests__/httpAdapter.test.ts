@@ -351,4 +351,25 @@ describe('HttpHermesApi Contract Implementation', () => {
     expect(inbox.length).toBe(1);
     expect(inbox[0].recipientId).toBe("claude");
   });
+
+  it('keeps the execution snapshot takenAt cutoff from the real API', async () => {
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ backends: [], resources: [], openrig: null, takenAt: 1760420000.5 })
+    });
+
+    const snapshot = await api.getExecutionSnapshot();
+
+    expect(global.fetch).toHaveBeenCalledWith('http://localhost:8000/execution');
+    expect(snapshot.takenAt).toBe(1760420000.5);
+  });
+
+  it('omits takenAt when the API does not send one', async () => {
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ backends: [], resources: [], openrig: null })
+    });
+
+    expect((await api.getExecutionSnapshot()).takenAt).toBeUndefined();
+  });
 });

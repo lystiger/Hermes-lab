@@ -428,7 +428,9 @@ export class HttpHermesApi implements HermesApi {
               rigIds: data.openrig.ledger?.rigIds ?? []
             }
           }
-        : null
+        : null,
+      // The cutoff for replayed events; dropping it would disable the reducer's snapshot cutoff.
+      ...(typeof data.takenAt === 'number' ? { takenAt: data.takenAt } : {})
     };
   }
 

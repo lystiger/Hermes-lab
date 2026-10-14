@@ -293,6 +293,14 @@ export function useEventStream() {
         const history = await hermesApi.getTraceEvents(100);
         if (isSubscribed) {
           setInitialEvents(history);
+          // Close the snapshot -> stream gap: execution events that happened after the snapshot but before
+          // the SSE cursor only exist in this history. Replay them oldest first; the store dedupes by id and
+          // holds them behind any snapshot still in flight.
+          const executionStore = useExecutionStore.getState();
+          [...history]
+            .filter((e) => isExecutionEvent(e))
+            .sort((a, b) => a.rawTs - b.rawTs)
+            .forEach((e) => executionStore.applyEvent(e));
           if (history.length > 0) {
             // Find newest event by highest raw timestamp (Item 2)
             const newestEvent = history.reduce((prev, curr) => (curr.rawTs > prev.rawTs ? curr : prev));

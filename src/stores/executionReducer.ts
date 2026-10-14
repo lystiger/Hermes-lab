@@ -68,11 +68,17 @@ function detailsFromMetadata(meta: Partial<ExecutionEventMetadata>): Record<stri
   return out;
 }
 
+// Same transitions as Hermes's ExecutionRegistry (D-010 clarification 6), so a refresh never changes
+// what a resource means: failed/cancelled executions are releasing their resource, and `failed` is
+// reserved for a teardown that failed. `finished` leaves the state unchanged; `released` removes the row.
 const LIFECYCLE_STATE: Partial<Record<ExecutionEventKind, ExecutionResourceState>> = {
   'execution.resource_acquired': 'acquiring',
   'execution.resource_ready': 'ready',
   'execution.running': 'running',
-  'execution.resource_pooled': 'idle'
+  'execution.failed': 'releasing',
+  'execution.cancelled': 'releasing',
+  'execution.resource_pooled': 'idle',
+  'execution.release_failed': 'failed'
 };
 
 /**
@@ -112,33 +118,23 @@ export function reduceExecutionEvent(view: ExecutionView, evt: TraceEvent): Exec
     return { ...base, resources, lastRawTs: nextLastRawTs };
   }
 
-  if (kind === 'execution.failed' || kind === 'execution.release_failed') {
-    if (!current && !meta.resource) return { ...base, lastRawTs: nextLastRawTs };
-    resources[key] = {
-      ...(current ?? buildResource(backend, meta, evt, 'failed')),
-      state: 'failed',
-      since: current?.state === 'failed' ? current.since : evt.ts,
-      expiresAt: null,
-      details: {
-        ...(current?.details ?? {}),
-        ...detailsFromMetadata(meta),
+  const nextState = LIFECYCLE_STATE[kind];
+  if (nextState && (meta.resource || current)) {
+    const next = buildResource(backend, meta, evt, nextState, current);
+    if (kind === 'execution.failed' || kind === 'execution.cancelled' || kind === 'execution.release_failed') {
+      next.details = {
+        ...next.details,
         errorCode: meta.errorCode,
         error: meta.error,
-        ...(kind === 'execution.release_failed' ? { releaseFailed: true } : {})
-      }
-    };
+        ...(kind === 'execution.release_failed' ? { releaseFailed: true } : {}),
+        ...(kind === 'execution.cancelled' ? { cancelled: true } : {})
+      };
+    }
+    resources[key] = next;
     return { ...base, resources, lastRawTs: nextLastRawTs };
   }
 
-  const nextState = LIFECYCLE_STATE[kind];
-  if (nextState && meta.resource) {
-    const nextResource = buildResource(backend, meta, evt, nextState, current);
-    resources[key] = nextResource;
-    return { ...base, resources, lastRawTs: nextLastRawTs };
-  }
-
-  // execution.started / finished / cancelled: no resource state change. Pooling and release are the
-  // events that move the resource out of its job.
+  // execution.started / finished: no resource state change (Hermes keeps the state as is).
   return { ...base, lastRawTs: nextLastRawTs };
 }
 
@@ -149,7 +145,7 @@ function buildResource(
   state: ExecutionResourceState,
   current?: ExecutionResource
 ): ExecutionResource {
-  const resource = meta.resource!;
+  const resource = meta.resource ?? { kind: current!.kind, id: current!.id, label: current!.label };
   const pooled = state === 'idle';
   const stateChanged = !current || current.state !== state;
   const retainedDetails = { ...(current?.details ?? {}) };
@@ -164,8 +160,9 @@ function buildResource(
     id: resource.id,
     label: resource.label,
     state,
-    jobId: pooled ? null : (evt.jobId ?? current?.jobId ?? null),
-    taskId: pooled ? null : (evt.taskId ?? current?.taskId ?? null),
+    // Hermes keeps the last job/task on a pooled seat, so the UI does too.
+    jobId: evt.jobId ?? current?.jobId ?? null,
+    taskId: evt.taskId ?? current?.taskId ?? null,
     executionId: meta.executionId ?? current?.executionId ?? null,
     since: stateChanged ? evt.ts : current!.since,
     expiresAt: pooled ? (meta.expiresAt ?? null) : null,

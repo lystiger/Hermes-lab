@@ -9,6 +9,8 @@ import {
   viewFromSnapshot
 } from '../stores/executionReducer';
 import { useExecutionStore } from '../stores/useExecutionStore';
+import { renderHook, waitFor } from '@testing-library/react';
+import { useEventStream } from '../api/hooks';
 
 const SEAT = { kind: 'seat', id: 'seat-reviewer-2', label: 'reviewer-2' };
 
@@ -52,10 +54,11 @@ describe('execution reducer (D-009 snapshot + events)', () => {
       view,
       evt('e4', 'execution.resource_pooled', 4, { resource: SEAT, expiresAt: '2030-01-01T00:10:00.000Z' }, { jobId: undefined, taskId: undefined })
     );
+    // Like Hermes's registry, a pooled seat keeps the job/task that last held it.
     expect(view.resources[SEAT_KEY]).toMatchObject({
       state: 'idle',
-      jobId: null,
-      taskId: null,
+      jobId: 'job-142',
+      taskId: 'task-142-verify',
       expiresAt: '2030-01-01T00:10:00.000Z'
     });
   });
@@ -94,8 +97,24 @@ describe('execution reducer (D-009 snapshot + events)', () => {
   it('resolves a failure without a resource through its executionId', () => {
     let view = reduceExecutionEvent(EMPTY_EXECUTION_VIEW, evt('e1', 'execution.running', 1, { resource: SEAT }));
     view = reduceExecutionEvent(view, evt('e2', 'execution.failed', 2, { errorCode: 'PROTOCOL', error: 'bad frame' }));
-    expect(view.resources[SEAT_KEY]).toMatchObject({ state: 'failed' });
+    // A backend failure releases the resource; `failed` is reserved for a failed teardown.
+    expect(view.resources[SEAT_KEY]).toMatchObject({ state: 'releasing' });
     expect(view.resources[SEAT_KEY].details.errorCode).toBe('PROTOCOL');
+  });
+
+  it('matches the Hermes registry for cancel and release failure', () => {
+    let view = reduceExecutionEvent(EMPTY_EXECUTION_VIEW, evt('e1', 'execution.running', 1, { resource: SEAT }));
+    view = reduceExecutionEvent(view, evt('e2', 'execution.cancelled', 2, { resource: SEAT }));
+    expect(view.resources[SEAT_KEY].state).toBe('releasing');
+    view = reduceExecutionEvent(view, evt('e3', 'execution.release_failed', 3, { resource: SEAT, errorCode: 'UNAVAILABLE' }));
+    expect(view.resources[SEAT_KEY]).toMatchObject({ state: 'failed' });
+    expect(view.resources[SEAT_KEY].details.releaseFailed).toBe(true);
+  });
+
+  it('a finished execution leaves the resource state unchanged', () => {
+    let view = reduceExecutionEvent(EMPTY_EXECUTION_VIEW, evt('e1', 'execution.running', 1, { resource: SEAT }));
+    view = reduceExecutionEvent(view, evt('e2', 'execution.finished', 2, { resource: SEAT }));
+    expect(view.resources[SEAT_KEY].state).toBe('running');
   });
 
   it('reconnect reset: a fresh snapshot replaces every previously applied event', () => {
@@ -193,5 +212,38 @@ describe('useExecutionStore (snapshot loading, buffering, reconnect)', () => {
     await first;
 
     expect(useExecutionStore.getState().view.backends.map((b) => b.name)).toEqual(['herdr']);
+  });
+});
+
+describe('useEventStream snapshot -> stream handoff', () => {
+  beforeEach(() => {
+    useExecutionStore.setState({
+      view: EMPTY_EXECUTION_VIEW,
+      snapshotStatus: 'idle',
+      snapshotError: null,
+      snapshotLoadedAt: null,
+      latestRequest: 0,
+      buffer: null
+    });
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('applies execution events that exist only in history (after the snapshot, before the SSE cursor)', async () => {
+    vi.spyOn(hermesApi, 'getExecutionSnapshot').mockResolvedValue({ backends: [], resources: [], openrig: null });
+    vi.spyOn(hermesApi, 'getHealth').mockResolvedValue({} as any);
+    vi.spyOn(hermesApi, 'getTraceEvents').mockResolvedValue([
+      evt('h2', 'execution.resource_ready', 2, { resource: SEAT }),
+      evt('h1', 'execution.resource_acquired', 1, { resource: SEAT })
+    ]);
+    vi.spyOn(hermesApi, 'subscribeEvents').mockReturnValue({ unsubscribe: () => {} } as any);
+
+    // Snapshot first (taken before the seat existed), then the stream starts.
+    await useExecutionStore.getState().refreshSnapshot();
+    const { unmount } = renderHook(() => useEventStream());
+    await waitFor(() => expect(useExecutionStore.getState().view.resources[SEAT_KEY]).toMatchObject({ state: 'ready' }));
+    unmount();
   });
 });

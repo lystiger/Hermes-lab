@@ -25,14 +25,14 @@ export const DossierModal: React.FC = () => {
       >
         {/* Top Header */}
         <div className="flex items-center justify-between px-4 py-2.5 bg-lys-surface-0 border-b border-lys-subtle">
-          <div className="font-mono-code text-[12px] flex items-center gap-2">
+          <div className="font-sans text-[12px] flex items-center gap-2">
             <span style={{ color: accentColor }}>[ OPERATIVE DOSSIER ]</span>
             <span className="text-lys-muted">·</span>
             <span className="text-lys-primary font-semibold">{activeDossierAgent.displayName}</span>
           </div>
           <button
             onClick={() => setActiveDossierAgent(null)}
-            className="font-mono-code text-[12px] text-lys-muted hover:text-lys-primary px-2 py-0.5 border border-transparent hover:border-lys-default cursor-pointer transition-colors"
+            className="font-sans text-[12px] text-lys-muted hover:text-lys-primary px-2 py-0.5 border border-transparent hover:border-lys-default cursor-pointer transition-colors"
           >
             ✕ CLOSE
           </button>
@@ -48,7 +48,7 @@ export const DossierModal: React.FC = () => {
         </div>
 
         {/* Footer Meta */}
-        <div className="px-4 py-2 bg-lys-surface-0 border-t border-lys-subtle flex items-center justify-between font-mono-code text-[11px] text-lys-faint">
+        <div className="px-4 py-2 bg-lys-surface-0 border-t border-lys-subtle flex items-center justify-between font-sans text-[11px] text-lys-faint">
           <span>{activeDossierAgent.model} · {activeDossierAgent.provider}</span>
           <span style={{ color: accentColor }}>{activeDossierAgent.role}</span>
         </div>

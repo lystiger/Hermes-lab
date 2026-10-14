@@ -15,7 +15,7 @@ export const FilterPills: React.FC<{
   value: string;
   onChange: (id: string) => void;
 }> = ({ label, options, value, onChange }) => (
-  <div role="group" aria-label={label} className="flex flex-wrap gap-1.5 font-mono-code text-[11px]">
+  <div role="group" aria-label={label} className="flex flex-wrap gap-1.5 font-sans text-[11px]">
     {options.map((o) => {
       const active = o.id === value;
       return (

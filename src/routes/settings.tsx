@@ -1,4 +1,5 @@
 import React from 'react';
+import { PageHeader } from '../components/PageHeader';
 import { useNavigate } from 'react-router-dom';
 import { Link } from 'react-router-dom';
 import { ExecutionBackendStrip } from '../features/execution/ExecutionBackendStrip';
@@ -21,17 +22,18 @@ export const SettingsRoute: React.FC = () => {
   const { view, snapshotStatus } = useExecution();
 
   return (
-    <div className="flex flex-col select-none bg-lys-base">
+    <div className="flex flex-col min-h-full select-none bg-lys-base">
+      <PageHeader title="Settings" subtitle="Runtime endpoints, policy as Hermes reports it, and local presentation" />
       {/* Top Split: Runtime vs Budget/Policy */}
       <div className="flex flex-col lg:flex-row items-stretch border-b border-lys-subtle">
         {/* Left Column: Runtime & Environment */}
         <div className="flex-1 min-w-[340px] border-b lg:border-b-0 lg:border-r border-lys-subtle p-5 bg-lys-base">
-          <div className="font-mono-code text-[11px] tracking-wider text-lys-faint mb-3.5">
+          <div className="font-sans text-[11px] tracking-wider text-lys-faint mb-3.5">
             RUNTIME &amp; ENVIRONMENT
           </div>
           <div className="flex flex-col gap-2.5">
             {settings.runtime.map((s, idx) => (
-              <div key={idx} className="flex justify-between items-baseline font-mono-code text-[12px]">
+              <div key={idx} className="flex justify-between items-baseline font-sans text-[12px]">
                 <span className="text-lys-muted">{s.label}</span>
                 <span style={{ color: s.color || 'var(--lys-text-primary)' }}>{s.value}</span>
               </div>
@@ -40,11 +42,11 @@ export const SettingsRoute: React.FC = () => {
 
           {/* Interactive UI Settings */}
           <div className="mt-6 pt-4 border-t border-lys-subtle">
-            <div className="font-mono-code text-[11px] tracking-wider text-lys-faint mb-3">
+            <div className="font-sans text-[11px] tracking-wider text-lys-faint mb-3">
               CLIENT RENDERING &amp; 3D MOTION
             </div>
             
-            <div className="flex flex-col gap-3 font-mono-code text-[12px]">
+            <div className="flex flex-col gap-3 font-sans text-[12px]">
               <div className="flex items-center justify-between text-lys-muted">
                 <span>Motion</span>
                 <span className="text-lys-primary">{prefersReducedMotion() ? 'reduced (system setting)' : 'full (system setting)'}</span>
@@ -65,7 +67,7 @@ export const SettingsRoute: React.FC = () => {
                 <select
                   value={portraits}
                   onChange={(e) => setPortraits(e.target.value as any)}
-                  className="bg-lys-surface-1 border border-lys-default font-mono-code text-[11px] text-lys-primary px-2 py-0.5 outline-none cursor-pointer"
+                  className="bg-lys-surface-1 border border-lys-default font-sans text-[11px] text-lys-primary px-2 py-0.5 outline-none cursor-pointer"
                 >
                   <option value="both">Both (WebP + Marks)</option>
                   <option value="slots">WebP Avatars Only</option>
@@ -78,12 +80,12 @@ export const SettingsRoute: React.FC = () => {
 
         {/* Right Column: Budget & Policy */}
         <div className="flex-1 min-w-[340px] p-5 bg-lys-base">
-          <div className="font-mono-code text-[11px] tracking-wider text-lys-faint mb-3.5">
+          <div className="font-sans text-[11px] tracking-wider text-lys-faint mb-3.5">
             BUDGET &amp; POLICY
           </div>
           <div className="flex flex-col gap-2.5">
             {settings.policy.map((s, idx) => (
-              <div key={idx} className="flex justify-between items-baseline font-mono-code text-[12px]">
+              <div key={idx} className="flex justify-between items-baseline font-sans text-[12px]">
                 <span className="text-lys-muted">{s.label}</span>
                 <span style={{ color: s.color || 'var(--lys-text-primary)' }}>{s.value}</span>
               </div>
@@ -92,7 +94,7 @@ export const SettingsRoute: React.FC = () => {
 
           {/* Registered Operators Summary */}
           <div className="mt-6 pt-4 border-t border-lys-subtle">
-            <div className="font-mono-code text-[11px] tracking-wider text-lys-faint mb-3">
+            <div className="font-sans text-[11px] tracking-wider text-lys-faint mb-3">
               REGISTERED OPERATORS
             </div>
             <div className="flex flex-col gap-1">
@@ -107,18 +109,18 @@ export const SettingsRoute: React.FC = () => {
                   >
                     <span
                       style={{ borderColor: accentColor, backgroundColor: `color-mix(in srgb, ${accentColor} 13%, transparent)` }}
-                      className="w-3.5 h-3.5 border clip-hex flex items-center justify-center font-mono-code text-[9px]"
+                      className="w-3.5 h-3.5 border clip-hex flex items-center justify-center font-sans text-[9px]"
                     >
                       {ag.displayName[0]}
                     </span>
                     <span className="w-20 text-[13px] text-lys-primary">{ag.displayName}</span>
-                    <span style={{ color: accentColor }} className="w-16 font-mono-code text-[11px] tracking-wider font-semibold">
+                    <span style={{ color: accentColor }} className="w-16 font-sans text-[11px] tracking-wider font-semibold">
                       {ag.phase || 'IDLE'}
                     </span>
-                    <span className="flex-1 min-w-0 font-mono-code text-[11px] text-lys-muted truncate">
+                    <span className="flex-1 min-w-0 font-sans text-[11px] text-lys-muted truncate">
                       {ag.model}
                     </span>
-                    <span className="w-24 text-right font-mono-code text-[11px] text-lys-faint">
+                    <span className="w-24 text-right font-sans text-[11px] text-lys-faint">
                       {ag.capabilities[0] || 'agent'}
                     </span>
                   </div>
@@ -131,15 +133,15 @@ export const SettingsRoute: React.FC = () => {
 
       {/* Execution backends: live from GET /execution (replaces the static Herdr sandbox mock) */}
       <div className="p-5 border-b border-lys-subtle bg-lys-surface-0">
-        <div className="flex items-center justify-between mb-3 font-mono-code text-[11px]">
+        <div className="flex items-center justify-between mb-3 font-sans text-[11px]">
           <span className="tracking-wider text-lys-faint">EXECUTION BACKENDS</span>
           <Link to="/execution" className="text-lys-gold hover:underline">open execution →</Link>
         </div>
         <ExecutionBackendStrip backends={view.backends} openrig={view.openrig} loaded={snapshotStatus === 'ready'} />
       </div>
 
-      <div className="p-5 font-mono-code text-[11px] text-lys-faint leading-relaxed">
-        Configuration is synchronized with <span className="text-lys-muted">~/.lyscontrol/config.toml</span> and <span className="text-lys-muted">~/.lyscontrol/agents.toml</span>. Portraits resolve from <span className="text-lys-muted">public/agents/</span>.
+      <div className="p-5 font-sans text-[11px] text-lys-faint leading-relaxed">
+        Operators come from Hermes (GET /agents). Portraits resolve from <span className="text-lys-muted">public/agents/</span>.
       </div>
     </div>
   );

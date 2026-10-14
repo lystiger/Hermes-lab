@@ -115,11 +115,12 @@ describe('M1 truth sweep: HTTP-mode screens render only real data', () => {
     expect(metricValue('BLOCKED')).toBe('0');
     expect(metricValue('FAILED 24H')).toBe('0');
     // Process total since runtime start, from the observed capacity report; never labelled as today.
-    expect(metricValue('TOKENS · SINCE START')).toBe('0');
-    expect(metricValue('EST. SPEND')).toBe('—');
-    expect(screen.getByText(/counts from the latest 1 jobs/)).toBeInTheDocument();
+    expect(metricValue('TOKENS · SINCE START')).toMatch(/^0/);
+    // Spend and budget are unknown-only, so they are listed on the not-reported line instead of a panel.
+    expect(screen.getByText('estimated spend')).toBeInTheDocument();
+    expect(screen.getByText(/counts from the latest \d+ jobs/)).toBeInTheDocument();
 
-    expect(await screen.findByText(/No provider usage reported by Hermes/)).toBeInTheDocument();
+    expect(await screen.findByText('provider usage')).toBeInTheDocument();
     expectNoFabrication(container);
   });
 
@@ -141,8 +142,8 @@ describe('M1 truth sweep: HTTP-mode screens render only real data', () => {
     installLiveHermes();
     const { container } = renderIn(<QueueRoute />);
 
-    expect(await screen.findByText('No active job. Nothing is executing in the latest jobs from Hermes.')).toBeInTheDocument();
-    expect(screen.getByText(/time estimates: not available/)).toBeInTheDocument();
+    expect((await screen.findAllByText(/in the latest sample/)).length).toBeGreaterThan(0);
+    expect(screen.getByText('time estimates')).toBeInTheDocument();
     expect(container.textContent).not.toContain(LIVE_JOB_ID.slice(0, 8) + ' · build');
     expectNoFabrication(container);
   });
@@ -151,9 +152,9 @@ describe('M1 truth sweep: HTTP-mode screens render only real data', () => {
     installLiveHermes();
     const { container } = renderIn(<UsageRoute />);
 
-    expect(await screen.findByText(/Every total here covers/)).toBeInTheDocument();
-    expect(screen.getByText('2 · RUN BUDGET')).toBeInTheDocument();
-    expect(screen.getByText('not reported by Hermes')).toBeInTheDocument();
+    expect(await screen.findByText(/Every total covers/)).toBeInTheDocument();
+    expect(screen.getByText('run budget')).toBeInTheDocument();
+    expect(screen.getByText(/Not reported by Hermes/)).toBeInTheDocument();
     expectNoFabrication(container);
   });
 
@@ -162,9 +163,9 @@ describe('M1 truth sweep: HTTP-mode screens render only real data', () => {
     const { container } = renderAgent('claude');
 
     expect(await screen.findByRole('heading', { name: 'Claude' })).toBeInTheDocument();
-    expect(screen.getByText('Run history is not loaded. No runs endpoint is wired for agents yet, so this is unknown rather than empty.')).toBeInTheDocument();
-    expect(screen.getByText('Provider quota is not reported by Hermes for this agent.')).toBeInTheDocument();
-    expect(screen.getByText('Activity is not loaded in this build. Live events for this agent appear in Events.')).toBeInTheDocument();
+    expect(screen.getByText('run history')).toBeInTheDocument();
+    expect(screen.getByText('provider quota')).toBeInTheDocument();
+    expect(screen.getByText('activity feed')).toBeInTheDocument();
     expect(screen.getAllByText('—').length).toBeGreaterThan(0);
     expectNoFabrication(container);
   });
@@ -204,7 +205,7 @@ describe('M1 truth sweep: HTTP-mode screens render only real data', () => {
     installLiveHermes();
     renderIn(<EventsRoute />, '/events');
     // With no events, the category pills offer only "All", and the log says so.
-    expect(screen.getByText('No events received yet.')).toBeInTheDocument();
+    expect(screen.getByText(/No events received yet/)).toBeInTheDocument();
   });
 
   it('Sidebar: Herdr is shown as available on PATH, not online, and Hermes status comes from the connection', async () => {
@@ -221,9 +222,9 @@ describe('M1 truth sweep: HTTP-mode screens render only real data', () => {
   it('Operator dispatch is disabled and reports why, instead of claiming a control plane', async () => {
     installLiveHermes();
     renderAgent('claude');
-    const input = await screen.findByPlaceholderText('Operator commands are not available yet');
-    expect(input).toBeDisabled();
-    expect(screen.getByText(/nothing is sent from here/)).toBeInTheDocument();
+    const dispatch = await screen.findByRole('button', { name: /dispatch task/i });
+    expect(dispatch).toBeDisabled();
+    expect(dispatch).toHaveAttribute('title', expect.stringContaining('not available'));
   });
 });
 
@@ -236,7 +237,7 @@ describe('M1 error and retry states', () => {
     installLiveHermes({ failJobs: true });
     const { container } = renderIn(<OverviewRoute />);
 
-    expect(await screen.findByText(/Metrics unavailable: Hermes \/jobs returned HTTP 500/)).toBeInTheDocument();
+    expect(await screen.findByText('Metrics failed')).toBeInTheDocument();
     expect(screen.getAllByRole('alert').some((el) => el.textContent?.includes('Job queue failed'))).toBe(true);
     expect(container.textContent).not.toContain('RUNNING');
   });

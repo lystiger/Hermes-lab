@@ -1,13 +1,24 @@
 import React, { useMemo } from 'react';
-import { ExecutionBackendStrip } from '../features/execution/ExecutionBackendStrip';
 import { ExecutionResourceCard } from '../features/execution/ExecutionResourceCard';
 import { ExecutionTimeline } from '../features/execution/ExecutionTimeline';
-import { executionTimeline, groupByBackend } from '../features/execution/executionFormat';
+import { executionTimeline, groupByBackend, stateStyle } from '../features/execution/executionFormat';
 import { useNow } from '../features/execution/useNow';
 import { useExecution } from '../api/hooks';
 import { useConsoleStore } from '../stores/useConsoleStore';
 import { formatTimeOfDay } from '../features/time/format';
 import { isRealApiMode } from '../api/client';
+import { Card } from '../components/Card';
+import { CopyId } from '../components/CopyId';
+import { EmptyState, ErrorState, LoadingState } from '../components/DataStates';
+import { PageHeader, HeaderCount } from '../components/PageHeader';
+import { NotReported, NotReportedItem } from '../components/NotReported';
+import { HERMES_ART } from '../theme/agentArt';
+
+const NOT_REPORTED: NotReportedItem[] = [
+  { label: 'seat memory', reason: 'The execution snapshot carries no memory or compute figures' },
+  { label: 'seat output', reason: 'Hermes does not stream stdout from seats into this console' },
+  { label: 'seat heartbeat', reason: 'No heartbeat latency is measured by the snapshot' }
+];
 
 export const ExecutionRoute: React.FC = () => {
   const { view, snapshotStatus, snapshotError, snapshotLoadedAt, refresh } = useExecution();
@@ -19,73 +30,112 @@ export const ExecutionRoute: React.FC = () => {
   const groups = useMemo(() => groupByBackend(resources, backendNames), [resources, backendNames]);
   const timeline = useMemo(() => executionTimeline(allEvents), [allEvents]);
   const loaded = snapshotStatus === 'ready';
+  const active = resources.filter((r) => r.state === 'acquiring' || r.state === 'running').length;
+  const available = view.backends.filter((b) => b.available).length;
+
+  const counts: HeaderCount[] = loaded
+    ? [
+        { label: 'DEPLOYED SEATS', value: resources.length },
+        { label: 'ACTIVE', value: active, tone: active ? 'var(--lys-status-success)' : undefined },
+        { label: 'BACKENDS AVAILABLE', value: `${available}/${view.backends.length}`, tone: available === view.backends.length ? undefined : 'var(--lys-status-warning)' }
+      ]
+    : [];
 
   return (
-    <div className="flex flex-col pb-10 select-none bg-lys-base">
+    <div className="flex flex-col min-h-full">
+      <PageHeader
+        title="Execution"
+        subtitle={
+          <span>
+            Backends and deployed seats from the execution snapshot
+            {snapshotLoadedAt && <> · loaded <span className="font-mono-code">{formatTimeOfDay(snapshotLoadedAt)}</span></>}
+          </span>
+        }
+        counts={counts}
+        actions={
+          <button onClick={() => void refresh()} className="text-[12px] px-3 py-1.5 border border-lys-default text-lys-muted hover:text-lys-primary cursor-pointer">
+            refresh
+          </button>
+        }
+      />
+
       {!isRealApiMode && (
-        <div className="px-5 py-2 border-b border-lys-subtle bg-lys-warning/6 font-mono-code text-[11px] text-lys-warning">
+        <div className="px-6 py-2 bg-lys-warning/12 border-b border-lys-warning/25 text-[12px] text-lys-warning">
           MOCK FIXTURES · not live Hermes data. Start the Hermes runtime API to see real execution state.
         </div>
       )}
 
-      {/* Backend status strip */}
-      <section className="p-5 border-b border-lys-subtle bg-lys-surface-0">
-        <div className="flex items-center justify-between gap-3 mb-3 font-mono-code text-[11px]">
-          <span className="tracking-wider text-lys-faint">BACKENDS · SNAPSHOT</span>
-          <span className="flex items-center gap-3 text-lys-faint">
-            {snapshotStatus === 'error' && (
-              <span className="text-lys-danger" title={snapshotError ?? undefined}>
-                snapshot failed · showing last known state
-              </span>
-            )}
-            {snapshotLoadedAt && <span>loaded {formatTimeOfDay(snapshotLoadedAt)}</span>}
-            <button
-              onClick={() => void refresh()}
-              className="text-lys-muted hover:text-lys-primary cursor-pointer border border-lys-subtle hover:border-lys-strong px-2 py-0.5"
-            >
-              ↻ refresh
-            </button>
-          </span>
-        </div>
-        <ExecutionBackendStrip backends={view.backends} openrig={view.openrig} loaded={loaded} />
-      </section>
+      <div className="flex-1 flex flex-col gap-6 p-6">
+        {snapshotStatus === 'error' && (
+          <Card>
+            <ErrorState label="Execution snapshot" error={snapshotError ? new Error(snapshotError) : null} onRetry={() => void refresh()} />
+          </Card>
+        )}
 
-      {/* Live resources grouped by backend */}
-      <section className="p-5 border-b border-lys-subtle">
-        <div className="font-mono-code text-[11px] tracking-wider text-lys-faint mb-3.5">
-          DEPLOYED SEATS · {resources.length} · BY BACKEND
-        </div>
-        {groups.length === 0 ? (
-          <div className="font-mono-code text-[11px] text-lys-faint">
-            {loaded ? 'No live execution resources.' : 'Waiting for the execution snapshot…'}
-          </div>
-        ) : (
-          <div className="flex flex-col gap-5">
-            {groups.map((g) => (
-              <div key={g.backend}>
-                <div className="flex items-center gap-2.5 mb-2 font-mono-code text-[11px]">
-                  <span className="text-lys-primary font-semibold tracking-wider uppercase">{g.backend}</span>
-                  <span className="text-lys-faint">{g.resources.length} resource{g.resources.length === 1 ? '' : 's'}</span>
+        <section aria-label="Backends" className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
+          {!loaded && snapshotStatus !== 'error' && (
+            <Card className="md:col-span-2 xl:col-span-4">
+              <LoadingState label="Waiting for the execution snapshot…" />
+            </Card>
+          )}
+          {view.backends.map((b) => {
+            const tone = b.available ? 'var(--lys-status-success)' : 'var(--lys-status-danger)';
+            return (
+              <Card key={b.name} accent={tone} label={`Backend ${b.name}`}>
+                <div className="p-5 flex flex-col gap-2">
+                  <div className="flex items-center justify-between">
+                    <span className="font-display text-[20px] font-semibold text-lys-primary">{b.name}</span>
+                    <span className="text-[10px] tracking-wider uppercase" style={{ color: tone }}>
+                      {b.available ? 'available' : 'unavailable'}
+                    </span>
+                  </div>
+                  <p className="text-[12px] text-lys-muted break-words">{b.detail || 'no detail reported'}</p>
                 </div>
-                <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3">
+              </Card>
+            );
+          })}
+        </section>
+
+        <section aria-label="Deployed seats" className="flex flex-col gap-4">
+          <div className="text-[11px] tracking-wider uppercase text-lys-faint">Deployed seats · by backend</div>
+          {groups.length === 0 ? (
+            <Card>
+              <EmptyState art={HERMES_ART}>
+                {loaded ? 'No deployed seats. Hermes reports no live execution resources right now.' : 'Waiting for the execution snapshot…'}
+              </EmptyState>
+            </Card>
+          ) : (
+            groups.map((g) => (
+              <div key={g.backend} className="flex flex-col gap-3">
+                <div className="flex items-center gap-3 text-[13px]">
+                  <span className="font-semibold text-lys-primary">{g.backend}</span>
+                  <span className="text-lys-faint">{g.resources.length} seat{g.resources.length === 1 ? '' : 's'}</span>
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
                   {g.resources.map((r, idx) => (
-                    <ExecutionResourceCard key={`${r.backend}|${r.kind}|${r.id}`} resource={r} nowMs={nowMs} seat={idx + 1} />
+                    <Card key={`${r.backend}|${r.kind}|${r.id}`} accent={stateStyle(r.state).color} label={`Seat ${r.id}`}>
+                      <ExecutionResourceCard resource={r} nowMs={nowMs} seat={idx + 1} />
+                    </Card>
                   ))}
                 </div>
               </div>
-            ))}
-          </div>
-        )}
-      </section>
+            ))
+          )}
+        </section>
 
-      {/* Recent execution timeline */}
-      <section className="p-5">
-        <div className="flex items-center justify-between mb-3.5 font-mono-code text-[11px]">
-          <span className="tracking-wider text-lys-faint">RECENT EXECUTION TIMELINE</span>
-          <span className="text-lys-faint">{timeline.length} events</span>
-        </div>
-        <ExecutionTimeline events={timeline} />
-      </section>
+        <Card label="Recent execution timeline">
+          <div className="p-5 flex flex-col gap-3">
+            <div className="flex items-center justify-between text-[11px] tracking-wider uppercase text-lys-faint">
+              <span>Recent execution timeline</span>
+              <span>{timeline.length} events</span>
+            </div>
+            {timeline.length === 0 ? <EmptyState>No execution events recorded yet.</EmptyState> : <ExecutionTimeline events={timeline} />}
+          </div>
+        </Card>
+
+        <NotReported items={NOT_REPORTED} />
+        <span className="sr-only"><CopyId value="" /></span>
+      </div>
     </div>
   );
 };

@@ -13,12 +13,12 @@ export const ExecutionTimeline: React.FC<ExecutionTimelineProps> = ({ events, li
 
   if (rows.length === 0) {
     return (
-      <div className="py-4 font-mono-code text-[11px] text-lys-faint">No execution events recorded yet.</div>
+      <div className="py-4 font-sans text-[11px] text-lys-faint">No execution events recorded yet.</div>
     );
   }
 
   return (
-    <div className="flex flex-col font-mono-code text-[11px]">
+    <div className="flex flex-col font-sans text-[11px]">
       <div className="hidden md:flex items-center gap-4 px-1 py-1.5 border-b border-lys-subtle tracking-wider text-lys-faint">
         <span className="w-24 flex-shrink-0">TIME</span>
         <span className="w-24 flex-shrink-0">BACKEND</span>

@@ -83,7 +83,7 @@ export const JobPipelineGraph: React.FC<JobPipelineGraphProps> = ({ steps }) => 
               {/* Phase Info */}
               <div
                 style={{ color: isDone || isActive || isFailed ? 'var(--lys-text-primary)' : 'var(--lys-text-faint)' }}
-                className="mt-3 font-mono-code text-[12px] tracking-wider font-semibold"
+                className="mt-3 font-sans text-[12px] tracking-wider font-semibold"
               >
                 {p.phase}
               </div>
@@ -95,7 +95,7 @@ export const JobPipelineGraph: React.FC<JobPipelineGraphProps> = ({ steps }) => 
                 {p.agentName || actor?.displayName || '—'}
               </div>
 
-              <div className="mt-0.5 font-mono-code text-[11px] text-lys-faint">
+              <div className="mt-0.5 font-sans text-[11px] text-lys-faint">
                 {STATE_LABEL[p.state]}{p.meta ? ` · ${p.meta}` : ''}
               </div>
             </div>

@@ -18,7 +18,7 @@ component contains a hard-coded hex or `rgba()` colour.
 | Text | `--lys-text-primary` #E6E9ED, `--lys-text-secondary` #B7BEC7, `--lys-text-muted` #8C949F, `--lys-text-faint` #868F9B | §2.1 neutral tiers |
 | Status | `--lys-status-success` #3FB950, `--lys-status-warning` #E3A008, `--lys-status-danger` #F5626A, `--lys-status-info` #58A6FF | §6.4 values; danger lightened (see departures) |
 | Accents | `--lys-accent-gold` #CBA35C, `--lys-accent-gold-hover` #E8CE9B, `--lys-accent-sky` #7FB3D5, `--lys-accent-violet` #A78BFA | §2.1 tiers, §6.3 gold |
-| Agents | `--lys-agent-claude` #D9A05B, `--lys-agent-codex` #4EC9A0, `--lys-agent-gemini` #5B8CFF, `--lys-agent-hermes` #CBA35C | §6.3, one variable per agent |
+| Agents | `--lys-agent-claude` #CCA27D, `--lys-agent-codex` #7A8ECE, `--lys-agent-gemini` #9686E1, `--lys-agent-hermes` #CBA35C | §6.3, one variable per agent |
 | Ink | `--lys-ink` #000000 | overlays and shadows only |
 
 **Per-agent accents.** Each agent has exactly one variable. `src/theme/agents.ts` is the one place that maps
@@ -111,21 +111,21 @@ dashed borders are decorative and carry their value as text. A full non-text aud
 | --lys-accent-violet | #A78BFA | --lys-surface-1 | #12151B | 6.72 | AA pass |
 | --lys-accent-violet | #A78BFA | --lys-surface-2 | #181D25 | 6.22 | AA pass |
 | --lys-accent-violet | #A78BFA | --lys-surface-interactive | #202632 | 5.57 | AA pass |
-| --lys-agent-claude | #D9A05B | --lys-bg-base | #08090B | 8.66 | AA pass |
-| --lys-agent-claude | #D9A05B | --lys-surface-0 | #0C0E12 | 8.40 | AA pass |
-| --lys-agent-claude | #D9A05B | --lys-surface-1 | #12151B | 7.95 | AA pass |
-| --lys-agent-claude | #D9A05B | --lys-surface-2 | #181D25 | 7.35 | AA pass |
-| --lys-agent-claude | #D9A05B | --lys-surface-interactive | #202632 | 6.59 | AA pass |
-| --lys-agent-codex | #4EC9A0 | --lys-bg-base | #08090B | 9.66 | AA pass |
-| --lys-agent-codex | #4EC9A0 | --lys-surface-0 | #0C0E12 | 9.37 | AA pass |
-| --lys-agent-codex | #4EC9A0 | --lys-surface-1 | #12151B | 8.87 | AA pass |
-| --lys-agent-codex | #4EC9A0 | --lys-surface-2 | #181D25 | 8.21 | AA pass |
-| --lys-agent-codex | #4EC9A0 | --lys-surface-interactive | #202632 | 7.36 | AA pass |
-| --lys-agent-gemini | #5B8CFF | --lys-bg-base | #08090B | 6.30 | AA pass |
-| --lys-agent-gemini | #5B8CFF | --lys-surface-0 | #0C0E12 | 6.11 | AA pass |
-| --lys-agent-gemini | #5B8CFF | --lys-surface-1 | #12151B | 5.78 | AA pass |
-| --lys-agent-gemini | #5B8CFF | --lys-surface-2 | #181D25 | 5.35 | AA pass |
-| --lys-agent-gemini | #5B8CFF | --lys-surface-interactive | #202632 | 4.80 | AA pass |
+| --lys-agent-claude | #CCA27D | --lys-bg-base | #08090B | 8.57 | AA pass |
+| --lys-agent-claude | #CCA27D | --lys-surface-0 | #0C0E12 | 8.31 | AA pass |
+| --lys-agent-claude | #CCA27D | --lys-surface-1 | #12151B | 7.86 | AA pass |
+| --lys-agent-claude | #CCA27D | --lys-surface-2 | #181D25 | 7.28 | AA pass |
+| --lys-agent-claude | #CCA27D | --lys-surface-interactive | #202632 | 6.52 | AA pass |
+| --lys-agent-codex | #7A8ECE | --lys-bg-base | #08090B | 6.25 | AA pass |
+| --lys-agent-codex | #7A8ECE | --lys-surface-0 | #0C0E12 | 6.06 | AA pass |
+| --lys-agent-codex | #7A8ECE | --lys-surface-1 | #12151B | 5.73 | AA pass |
+| --lys-agent-codex | #7A8ECE | --lys-surface-2 | #181D25 | 5.31 | AA pass |
+| --lys-agent-codex | #7A8ECE | --lys-surface-interactive | #202632 | 4.76 | AA pass |
+| --lys-agent-gemini | #9686E1 | --lys-bg-base | #08090B | 6.44 | AA pass |
+| --lys-agent-gemini | #9686E1 | --lys-surface-0 | #0C0E12 | 6.25 | AA pass |
+| --lys-agent-gemini | #9686E1 | --lys-surface-1 | #12151B | 5.91 | AA pass |
+| --lys-agent-gemini | #9686E1 | --lys-surface-2 | #181D25 | 5.47 | AA pass |
+| --lys-agent-gemini | #9686E1 | --lys-surface-interactive | #202632 | 4.91 | AA pass |
 | --lys-agent-hermes | #CBA35C | --lys-bg-base | #08090B | 8.47 | AA pass |
 | --lys-agent-hermes | #CBA35C | --lys-surface-0 | #0C0E12 | 8.22 | AA pass |
 | --lys-agent-hermes | #CBA35C | --lys-surface-1 | #12151B | 7.78 | AA pass |

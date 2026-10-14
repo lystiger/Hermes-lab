@@ -24,7 +24,7 @@ export const Badge: React.FC<BadgeProps> = ({
         borderColor: `color-mix(in srgb, ${color} 27%, transparent)`,
         backgroundColor: `color-mix(in srgb, ${color} 7%, transparent)`
       }}
-      className={`inline-flex items-center gap-1.5 px-1.5 py-0.5 border font-mono-code text-[11px] uppercase tracking-wider ${className}`}
+      className={`inline-flex items-center gap-1.5 px-1.5 py-0.5 border font-sans text-[11px] uppercase tracking-wider ${className}`}
     >
       {dot && (
         <span

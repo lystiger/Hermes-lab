@@ -103,7 +103,7 @@ export const OperationalThreadView: React.FC<OperationalThreadViewProps> = ({
   return (
     <div className="flex flex-col bg-lys-surface-0 border border-lys-subtle p-4 select-none">
       {/* Header */}
-      <div className="flex items-center justify-between flex-wrap gap-2 font-mono-code text-[11px] text-lys-faint mb-3 pb-2 border-b border-lys-subtle">
+      <div className="flex items-center justify-between flex-wrap gap-2 font-sans text-[11px] text-lys-faint mb-3 pb-2 border-b border-lys-subtle">
         <div className="flex items-center gap-2">
           <span className="tracking-wider text-lys-primary font-semibold">
             OPERATIONAL THREAD &amp; HANDOFFS
@@ -136,13 +136,13 @@ export const OperationalThreadView: React.FC<OperationalThreadViewProps> = ({
       {/* Messages Feed */}
       <div className="flex flex-col gap-3 min-h-[140px] max-h-[380px] overflow-y-auto pr-1">
         {loadingMessages && filteredMessages.length === 0 ? (
-          <div className="py-6 text-center font-mono-code text-[11px] text-lys-faint">
+          <div className="py-6 text-center font-sans text-[11px] text-lys-faint">
             Loading operational messages...
           </div>
         ) : fetchError && messages.length === 0 ? (
           <ErrorState label="Operational messages" error={fetchError} onRetry={refetch} />
         ) : filteredMessages.length === 0 ? (
-          <div className="py-6 text-center font-mono-code text-[11px] text-lys-faint">
+          <div className="py-6 text-center font-sans text-[11px] text-lys-faint">
             No operational messages or phase handoffs recorded for this job yet.
           </div>
         ) : (
@@ -173,7 +173,7 @@ export const OperationalThreadView: React.FC<OperationalThreadViewProps> = ({
                 }`}
               >
                 {/* Meta Header */}
-                <div className="flex items-center justify-between flex-wrap gap-1 font-mono-code text-[11px]">
+                <div className="flex items-center justify-between flex-wrap gap-1 font-sans text-[11px]">
                   <div className="flex items-center flex-wrap gap-1.5">
                     {/* Avatar / Sigil */}
                     {senderPres.avatarUrl ? (
@@ -294,7 +294,7 @@ export const OperationalThreadView: React.FC<OperationalThreadViewProps> = ({
                 </div>
 
                 {/* Message Operational Body */}
-                <p className="text-[12px] text-lys-primary font-mono-code leading-relaxed whitespace-pre-wrap">
+                <p className="text-[12px] text-lys-primary font-sans leading-relaxed whitespace-pre-wrap">
                   {msg.text}
                 </p>
 
@@ -306,7 +306,7 @@ export const OperationalThreadView: React.FC<OperationalThreadViewProps> = ({
                         key={art.id || idx}
                         type="button"
                         onClick={() => setSelectedArtifact(art)}
-                        className="flex items-center gap-1 px-2 py-0.5 bg-lys-surface-1 hover:bg-lys-surface-2 border border-lys-default hover:border-lys-gold text-lys-muted hover:text-lys-primary font-mono-code text-[10.5px] transition-colors cursor-pointer"
+                        className="flex items-center gap-1 px-2 py-0.5 bg-lys-surface-1 hover:bg-lys-surface-2 border border-lys-default hover:border-lys-gold text-lys-muted hover:text-lys-primary font-sans text-[10.5px] transition-colors cursor-pointer"
                       >
                         <span className="text-lys-gold">{getArtifactIcon(art.type)}</span>
                         <span>{art.label || art.type}</span>
@@ -328,11 +328,11 @@ export const OperationalThreadView: React.FC<OperationalThreadViewProps> = ({
         <form onSubmit={handleSendOperatorMessage} className="mt-3 pt-3 border-t border-lys-subtle flex flex-col gap-2">
           <div className="flex items-center justify-between flex-wrap gap-2">
             <div className="flex items-center gap-2">
-              <span className="font-mono-code text-[10px] text-lys-faint">OPERATOR DISPATCH:</span>
+              <span className="font-sans text-[10px] text-lys-faint">OPERATOR DISPATCH:</span>
               <select
                 value={targetRecipient}
                 onChange={(e) => setTargetRecipient(e.target.value)}
-                className="bg-lys-surface-1 border border-lys-default font-mono-code text-[10.5px] text-lys-primary px-2 py-0.5 outline-none cursor-pointer"
+                className="bg-lys-surface-1 border border-lys-default font-sans text-[10.5px] text-lys-primary px-2 py-0.5 outline-none cursor-pointer"
               >
                 <option value="hermes">Hermes Runtime</option>
                 <option value="hermes_runner">Hermes Runner</option>
@@ -345,7 +345,7 @@ export const OperationalThreadView: React.FC<OperationalThreadViewProps> = ({
             </div>
 
             {replyToMessageId && (
-              <div className="flex items-center gap-1 text-[10px] font-mono-code text-lys-gold">
+              <div className="flex items-center gap-1 text-[10px] font-sans text-lys-gold">
                 <span>Replying to {replyTarget?.id}{replyTarget?.text ? ` · "${replyTarget.text.slice(0, 40)}"` : ''}</span>
                 <button
                   type="button"
@@ -364,7 +364,7 @@ export const OperationalThreadView: React.FC<OperationalThreadViewProps> = ({
               value={operatorText}
               onChange={(e) => setOperatorText(e.target.value)}
               placeholder="Send operational guidance into job thread..."
-              className="flex-1 bg-lys-surface-1 border border-lys-default focus:border-lys-gold font-mono-code text-[11px] text-lys-primary px-3 py-1 outline-none transition-colors"
+              className="flex-1 bg-lys-surface-1 border border-lys-default focus:border-lys-gold font-sans text-[11px] text-lys-primary px-3 py-1 outline-none transition-colors"
             />
             <CyberButton
               type="submit"
@@ -378,7 +378,7 @@ export const OperationalThreadView: React.FC<OperationalThreadViewProps> = ({
         </form>
         )}
         {sendError && (
-          <div role="alert" className="mt-2 font-mono-code text-[11px] text-lys-danger">
+          <div role="alert" className="mt-2 font-sans text-[11px] text-lys-danger">
             Message not sent: {sendError}. Your text is kept.
           </div>
         )}
@@ -391,7 +391,7 @@ export const OperationalThreadView: React.FC<OperationalThreadViewProps> = ({
           onClick={() => setSelectedArtifact(null)}
         >
           <div
-            className="bg-lys-surface-0 border border-lys-gold max-w-md w-full p-4 font-mono-code select-none shadow-2xl"
+            className="bg-lys-surface-0 border border-lys-gold max-w-md w-full p-4 font-sans select-none shadow-2xl"
             onClick={(e) => e.stopPropagation()}
           >
             <div className="flex items-center justify-between pb-2 mb-3 border-b border-lys-subtle">

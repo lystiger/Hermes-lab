@@ -20,10 +20,10 @@ export const Layout: React.FC = () => {
       <Sidebar />
 
       {/* Main Content Area */}
-      <main className="flex-1 min-w-0 flex flex-col overflow-hidden bg-lys-base">
+      <main className="flex-1 min-w-0 flex flex-col overflow-hidden bg-lys-surface-0">
         {/* Persistent while mock fixtures are in use (VITE_LYSCONTROL_MOCK=1); never shown against live data. */}
         {isMockMode && (
-          <div role="status" className="px-5 py-1.5 border-b border-lys-subtle bg-lys-warning/12 font-mono-code text-[11px] tracking-wider text-lys-warning">
+          <div role="status" className="px-5 py-1.5 border-b border-lys-subtle bg-lys-warning/12 font-sans text-[11px] tracking-wider text-lys-warning">
             MOCK DATA · fixtures, not live Hermes data
           </div>
         )}

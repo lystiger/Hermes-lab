@@ -1,140 +1,89 @@
 import React from 'react';
-import { MissionBoard } from '../features/jobs/MissionBoard';
 import { useConsoleStore } from '../stores/useConsoleStore';
-import { useJobs, usePipeline, useAgents } from '../api/hooks';
+import { useJobs, usePipeline, useRecoverableJobs, useTelemetry } from '../api/hooks';
 import { resolveActorPresentation } from '../api/actors';
+import { useAgents } from '../api/hooks';
 import { EmptyState, ErrorState, Freshness, LoadingState, StaleNotice } from '../components/DataStates';
-import { useRecoverableJobs } from '../api/hooks';
+import { Card } from '../components/Card';
+import { CopyId } from '../components/CopyId';
+import { PageHeader, HeaderCount } from '../components/PageHeader';
+import { NotReported, NotReportedItem } from '../components/NotReported';
+import { MissionBoard } from '../features/jobs/MissionBoard';
+
+const NOT_REPORTED: NotReportedItem[] = [
+  { label: 'time estimates', reason: 'Hermes exposes no estimator for queued or running work' },
+  { label: 'concurrency policy', reason: 'Hermes does not report a concurrency policy or repository capacity' }
+];
 
 export const QueueRoute: React.FC = () => {
   const { setActiveModalJobId } = useConsoleStore();
-  const { jobs, loading: jobsLoading, error: jobsError, updatedAt: jobsUpdatedAt, refetch: refetchJobs } = useJobs();
-  const { pipeline, loading: pipelineLoading, error: pipelineError, updatedAt: pipelineUpdatedAt, refetch: refetchPipeline } = usePipeline();
+  const { jobs, loading: jobsLoading, error: jobsError, stale, updatedAt: jobsUpdatedAt, refetch: refetchJobs } = useJobs();
+  const { pipeline, error: pipelineError, refetch: refetchPipeline } = usePipeline();
+  const { telemetry } = useTelemetry();
   const { agents } = useAgents();
 
-  const getStateColor = (state: string) => {
-    switch (state) {
-      case 'COMPLETED': return 'var(--lys-text-faint)';
-      case 'RUNNING': return 'var(--lys-status-success)';
-      case 'QUEUED': return 'var(--lys-text-muted)';
-      case 'CLAIMED': return 'var(--lys-accent-gold)';
-      case 'BLOCKED': return 'var(--lys-status-warning)';
-      case 'FAILED': return 'var(--lys-status-danger)';
-      default: return 'var(--lys-text-faint)';
-    }
-  };
+  const counts: HeaderCount[] = telemetry
+    ? [
+        { label: 'RUNNING', value: telemetry.runningJobsCount, tone: 'var(--lys-status-success)' },
+        { label: 'BLOCKED', value: telemetry.blockedJobsCount, tone: 'var(--lys-status-warning)' },
+        { label: 'QUEUED', value: telemetry.queuedJobsCount },
+        { label: 'FAILED 24H', value: telemetry.failed24hCount ?? '—', tone: telemetry.failed24hCount ? 'var(--lys-status-danger)' : undefined }
+      ]
+    : [];
 
   return (
-    <div className="flex flex-col pb-10 select-none bg-lys-base">
-      {/* Execution Order Pipeline Section */}
-      <div className="p-5 border-b border-lys-subtle bg-lys-surface-0">
-        <div className="flex items-center gap-3.5 mb-3 font-mono-code text-[11px]">
-          <span className="tracking-wider text-lys-faint">EXECUTION ORDER</span>
-          <span className="text-lys-muted">phases of the active job, in the order Hermes reports them</span>
-          <Freshness at={pipelineUpdatedAt} />
-        </div>
-
-        {pipelineLoading && pipeline.length === 0 && <LoadingState label="Loading execution order…" />}
-        {pipelineError && pipeline.length === 0 && (
-          <ErrorState label="Execution order" error={pipelineError} onRetry={refetchPipeline} />
-        )}
-        {!pipelineLoading && !pipelineError && pipeline.length === 0 && (
-          <EmptyState>No active job. Nothing is executing in the latest jobs from Hermes.</EmptyState>
-        )}
-
-        <div className="flex flex-col max-w-5xl">
-          {pipeline.map((p, idx) => {
-            const isRunning = p.state === 'RUNNING';
-            const isBlocked = p.state === 'BLOCKED';
-            const actor = p.agentId ? resolveActorPresentation(p.agentId, agents) : null;
-            const agentCol = actor?.accentColor || 'var(--lys-text-muted)';
-            const stateCol = getStateColor(p.state);
-            const agentName = p.agentName || actor?.displayName || '—';
-
-            return (
-              <div key={p.id || idx}>
-                <div
-                  onClick={() => p.jobId && setActiveModalJobId(p.jobId)}
-                  style={{
-                    borderColor: isRunning ? 'color-mix(in srgb, var(--lys-agent-claude) 45%, transparent)' : isBlocked ? 'color-mix(in srgb, var(--lys-status-warning) 30%, transparent)' : 'var(--lys-border-subtle)',
-                    backgroundColor: isRunning ? 'color-mix(in srgb, var(--lys-agent-claude) 6%, transparent)' : isBlocked ? 'color-mix(in srgb, var(--lys-status-warning) 4%, transparent)' : 'var(--lys-surface-0)'
-                  }}
-                  className="flex items-center gap-3.5 px-3 py-2 border cursor-pointer hover:border-lys-strong transition-colors"
-                >
-                  <span className="w-12 flex-shrink-0 font-mono-code text-[12px] text-lys-muted">
-                    {p.id}
-                  </span>
-                  <span
-                    style={{ color: isRunning ? 'var(--lys-text-primary)' : p.state === 'COMPLETED' ? 'var(--lys-text-muted)' : 'var(--lys-text-faint)' }}
-                    className="w-16 flex-shrink-0 font-mono-code text-[11px] tracking-wider font-semibold"
-                  >
-                    {p.phase}
-                  </span>
-                  <span
-                    style={{ color: agentCol }}
-                    className="w-24 flex-shrink-0 flex items-center gap-1.5 text-[12px]"
-                  >
-                    <span
-                      style={{ borderColor: agentCol }}
-                      className="w-3.5 h-3.5 border flex items-center justify-center font-mono-code text-[10px] clip-hex"
-                    >
-                      {agentName[0]}
-                    </span>
-                    {agentName}
-                  </span>
-                  <span className="flex-1 min-w-0 text-[12px] text-lys-secondary truncate font-sans">
-                    {p.task}
-                  </span>
-                  <span className="w-24 flex-shrink-0 text-right font-mono-code text-[11px] text-lys-faint">
-                    {p.meta}
-                  </span>
-                  <span
-                    style={{ color: stateCol }}
-                    className="w-24 flex-shrink-0 flex items-center justify-end gap-1.5 font-mono-code text-[11px] tracking-wider font-semibold"
-                  >
-                    <span
-                      style={{ backgroundColor: stateCol }}
-                      className={`w-1.5 h-1.5 rounded-[1px]`}
-                    />
-                    {p.state}
-                  </span>
-                </div>
-
-                {/* Connector Line */}
-                {idx < pipeline.length - 1 && (
-                  <div
-                    style={{
-                      backgroundColor: p.state === 'COMPLETED' ? 'color-mix(in srgb, var(--lys-status-success) 40%, transparent)' : 'var(--lys-border-subtle)'
-                    }}
-                    className="h-3 w-[1px] ml-5"
-                  />
-                )}
-              </div>
-            );
-          })}
-        </div>
-      </div>
-
-      {/* Mission board: jobs grouped by their real status */}
-      <MissionBoard
-        jobs={jobs}
-        loading={jobsLoading}
-        error={jobsError}
-        updatedAt={jobsUpdatedAt}
-        onRetry={refetchJobs}
-        onOpen={(id) => setActiveModalJobId(id)}
+    <div className="flex flex-col min-h-full">
+      <PageHeader
+        title="Queue"
+        subtitle={`Mission board · grouped by the status Hermes reports · ${jobs.length} jobs in the latest sample`}
+        counts={counts}
       />
-      {jobsError && jobs.length > 0 && (
-        <div className="px-5 pt-3.5">
-          <StaleNotice label="Job queue" error={jobsError} onRetry={refetchJobs} />
-        </div>
-      )}
 
-      {/* Recoverable jobs: read-only discovery from GET /jobs/recoverable. Resume and cancel are not offered here. */}
-      <RecoverableJobs onSelect={(id) => setActiveModalJobId(id)} />
+      <div className="flex-1 flex flex-col gap-6 p-6">
+        {pipeline.length > 0 && (
+          <Card accent="var(--lys-accent-gold)" label="Execution order">
+            <div className="p-5 flex flex-col gap-2">
+              <div className="flex items-center justify-between">
+                <span className="text-[11px] tracking-wider uppercase text-lys-faint">Execution order · active job</span>
+              </div>
+              {Boolean(pipelineError) && <StaleNotice label="Execution order" error={pipelineError} onRetry={refetchPipeline} />}
+              <ol className="flex flex-col gap-1.5">
+                {pipeline.map((p, idx) => {
+                  const actor = p.agentId ? resolveActorPresentation(p.agentId, agents) : null;
+                  return (
+                    <li key={p.id || idx}>
+                      <button
+                        type="button"
+                        onClick={() => p.jobId && setActiveModalJobId(p.jobId)}
+                        className="w-full flex flex-wrap items-center gap-3 px-3 py-2 bg-lys-surface-2 hover:bg-lys-surface-interactive text-left text-[13px] cursor-pointer"
+                      >
+                        <span className="w-6 text-lys-faint text-[11px]">{String(idx + 1).padStart(2, '0')}</span>
+                        <span className="w-28 text-lys-primary font-semibold">{p.phase}</span>
+                        <span className="text-lys-muted">{p.agentName || actor?.displayName || '—'}</span>
+                        <span className="ml-auto text-[10px] tracking-wider uppercase text-lys-secondary">{p.state}</span>
+                      </button>
+                    </li>
+                  );
+                })}
+              </ol>
+            </div>
+          </Card>
+        )}
 
-      <div className="px-5 pt-3.5 font-mono-code text-[11px] text-lys-faint">
-        time estimates: not available (Hermes exposes no estimator) · concurrency policy: not reported by Hermes
+        {jobsLoading && jobs.length === 0 && <LoadingState label="Loading jobs…" />}
+        <MissionBoard
+          jobs={jobs}
+          loading={jobsLoading}
+          error={jobsError}
+          stale={stale && Boolean(jobsError)}
+          updatedAt={jobsUpdatedAt}
+          onRetry={refetchJobs}
+          onOpen={(id) => setActiveModalJobId(id)}
+        />
+
+        <RecoverableJobs onSelect={(id) => setActiveModalJobId(id)} />
+
+        <NotReported items={NOT_REPORTED} />
       </div>
     </div>
   );
@@ -143,34 +92,27 @@ export const QueueRoute: React.FC = () => {
 const RecoverableJobs: React.FC<{ onSelect: (jobId: string) => void }> = ({ onSelect }) => {
   const { jobs, loading, error, updatedAt, refetch } = useRecoverableJobs();
   return (
-    <div className="p-5 border-t border-lys-subtle">
-      <div className="flex items-center justify-between mb-2.5 font-mono-code text-[11px]">
-        <span className="tracking-wider text-lys-faint">RECOVERABLE · {jobs.length} · read-only</span>
-        <Freshness at={updatedAt} />
+    <Card label="Recoverable jobs">
+      <div className="p-5 flex flex-col gap-3">
+        <div className="flex items-center justify-between">
+          <span className="text-[11px] tracking-wider uppercase text-lys-faint">Recoverable · {jobs.length} · read-only</span>
+          <Freshness at={updatedAt} />
+        </div>
+        {loading && jobs.length === 0 && <LoadingState label="Loading recoverable jobs…" />}
+        {error && <ErrorState label="Recoverable jobs" error={error} onRetry={refetch} />}
+        {!loading && !error && jobs.length === 0 && <EmptyState>No unfinished jobs are recoverable from the event ledger.</EmptyState>}
+        <div className="flex flex-col gap-1.5">
+          {jobs.map((j) => (
+            <button key={j.id} type="button" onClick={() => onSelect(j.id)} className="flex flex-wrap justify-between gap-2 p-2.5 bg-lys-surface-2 hover:bg-lys-surface-interactive text-left text-[12px] cursor-pointer">
+              <CopyId value={j.id} className="text-lys-faint" />
+              <span className="text-lys-primary">{j.title}</span>
+              <span className="text-lys-muted">{j.status}</span>
+            </button>
+          ))}
+        </div>
+        <p className="text-[11px] text-lys-faint">Resume and cancel are not available from this console.</p>
       </div>
-      {loading && jobs.length === 0 && <LoadingState label="Loading recoverable jobs…" />}
-      {error && <ErrorState label="Recoverable jobs" error={error} onRetry={refetch} />}
-      {!loading && !error && jobs.length === 0 && (
-        <EmptyState>No unfinished jobs are recoverable from the event ledger.</EmptyState>
-      )}
-      <div className="flex flex-col gap-1.5">
-        {jobs.map((j) => (
-          <button
-            key={j.id}
-            type="button"
-            onClick={() => onSelect(j.id)}
-            className="flex flex-wrap justify-between gap-2 p-2.5 bg-lys-surface-1 border border-lys-subtle text-left font-mono-code text-[11px] hover:border-lys-strong cursor-pointer"
-          >
-            <span className="text-lys-primary">{j.id}</span>
-            <span className="text-lys-secondary font-sans">{j.title}</span>
-            <span className="text-lys-muted">{j.status}</span>
-          </button>
-        ))}
-      </div>
-      <p className="mt-2 font-mono-code text-[11px] text-lys-faint">
-        Resume and cancel are not available from this console.
-      </p>
-    </div>
+    </Card>
   );
 };
 

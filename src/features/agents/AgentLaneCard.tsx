@@ -53,7 +53,7 @@ export const AgentLaneCard: React.FC<AgentLaneCardProps> = ({
           <div className="flex-1 min-w-0">
             <div className="flex items-center justify-between gap-2">
               <span className="text-[14px] font-semibold text-lys-primary">{agent.displayName}</span>
-              <span className="font-mono-code text-[11px] text-lys-faint truncate max-w-[100px]">{agent.model}</span>
+              <span className="font-sans text-[11px] text-lys-faint truncate max-w-[100px]">{agent.model}</span>
             </div>
 
             <div className="flex items-center gap-2 mt-1.5">
@@ -63,12 +63,12 @@ export const AgentLaneCard: React.FC<AgentLaneCardProps> = ({
               />
               <span
                 style={{ color: isRunning ? 'var(--lys-status-success)' : 'var(--lys-text-muted)' }}
-                className="font-mono-code text-[11px] uppercase tracking-wider"
+                className="font-sans text-[11px] uppercase tracking-wider"
               >
                 {agent.status}
               </span>
               {agent.phase && (
-                <span className="font-mono-code text-[11px] tracking-wider text-lys-muted border-l border-lys-default pl-2">
+                <span className="font-sans text-[11px] tracking-wider text-lys-muted border-l border-lys-default pl-2">
                   {agent.phase}
                 </span>
               )}
@@ -78,7 +78,7 @@ export const AgentLaneCard: React.FC<AgentLaneCardProps> = ({
               {agent.currentTask || agent.role}
             </p>
 
-            <div className="mt-2.5 flex flex-wrap items-center gap-x-3.5 gap-y-1 font-mono-code text-[11px] text-lys-muted">
+            <div className="mt-2.5 flex flex-wrap items-center gap-x-3.5 gap-y-1 font-sans text-[11px] text-lys-muted">
               <span>{isRunning ? 'active runtime' : 'idle'}</span>
               <span>{agent.sessionTokens ?? UNKNOWN} tokens</span>
               <span style={{ color: accentColor }}>{agent.activeTool || 'tool: —'}</span>
@@ -97,7 +97,7 @@ export const AgentLaneCard: React.FC<AgentLaneCardProps> = ({
                   />
                 )}
               </div>
-              <span className="font-mono-code text-[11px] text-lys-faint">
+              <span className="font-sans text-[11px] text-lys-faint">
                 ctx {contextPct}
               </span>
             </div>
@@ -131,14 +131,14 @@ export const AgentLaneCard: React.FC<AgentLaneCardProps> = ({
                 color: accentColor,
                 borderColor: `color-mix(in srgb, ${accentColor} 27%, transparent)`
               }}
-              className="font-mono-code text-[11px] tracking-wider border px-1.5 py-0.5"
+              className="font-sans text-[11px] tracking-wider border px-1.5 py-0.5"
             >
               {agent.phase}
             </span>
           )}
           <span
             style={{ color: isRunning ? 'var(--lys-status-success)' : 'var(--lys-text-muted)' }}
-            className="flex items-center gap-1.5 font-mono-code text-[11px] tracking-wider"
+            className="flex items-center gap-1.5 font-sans text-[11px] tracking-wider"
           >
             <span
               style={{ backgroundColor: isRunning ? 'var(--lys-status-success)' : 'var(--lys-text-muted)' }}
@@ -148,7 +148,7 @@ export const AgentLaneCard: React.FC<AgentLaneCardProps> = ({
           </span>
         </div>
 
-        <div className="mt-1 font-mono-code text-[11px] text-lys-faint">
+        <div className="mt-1 font-sans text-[11px] text-lys-faint">
           {agent.model} · {agent.provider}
         </div>
 
@@ -158,7 +158,7 @@ export const AgentLaneCard: React.FC<AgentLaneCardProps> = ({
           onMouseLeave={() => setShowCtxPopup(false)}
           className="relative mt-3 cursor-help"
         >
-          <div className="flex items-center justify-between font-mono-code text-[11px] text-lys-muted">
+          <div className="flex items-center justify-between font-sans text-[11px] text-lys-muted">
             <span className="tracking-wider">CONTEXT WINDOW</span>
             <span className="text-lys-primary">{contextUsed} / {contextMax} ({contextPct})</span>
           </div>
@@ -173,7 +173,7 @@ export const AgentLaneCard: React.FC<AgentLaneCardProps> = ({
           </div>
 
           {showCtxPopup && (
-            <div className="absolute left-0 top-full mt-2 z-30 w-64 p-3 bg-lys-surface-1 border border-lys-default shadow-2xl font-mono-code text-[11px] text-lys-secondary leading-relaxed">
+            <div className="absolute left-0 top-full mt-2 z-30 w-64 p-3 bg-lys-surface-1 border border-lys-default shadow-2xl font-sans text-[11px] text-lys-secondary leading-relaxed">
               <div className="font-semibold text-lys-primary pb-1 border-b border-lys-default mb-1.5">Context Window Allocation</div>
               <div>• Used: {contextUsed} ({contextPct})</div>
               <div>• Total Cap: {contextMax}</div>
@@ -191,20 +191,20 @@ export const AgentLaneCard: React.FC<AgentLaneCardProps> = ({
         {/* Bottom Quick Stats */}
         <div className="grid grid-cols-4 gap-2 pt-3 border-t border-lys-subtle">
           <div>
-            <div className="text-[11px] text-lys-faint tracking-wider font-mono-code">QUEUE</div>
-            <div className="font-mono-code text-[13px] text-lys-primary mt-0.5">{agent.queueDepth ?? UNKNOWN}</div>
+            <div className="text-[11px] text-lys-faint tracking-wider font-sans">QUEUE</div>
+            <div className="font-sans text-[13px] text-lys-primary mt-0.5">{agent.queueDepth ?? UNKNOWN}</div>
           </div>
           <div>
-            <div className="text-[11px] text-lys-faint tracking-wider font-mono-code">SESSION</div>
-            <div className="font-mono-code text-[13px] text-lys-primary mt-0.5">{agent.sessionTokens ?? UNKNOWN}</div>
+            <div className="text-[11px] text-lys-faint tracking-wider font-sans">SESSION</div>
+            <div className="font-sans text-[13px] text-lys-primary mt-0.5">{agent.sessionTokens ?? UNKNOWN}</div>
           </div>
           <div>
-            <div className="text-[11px] text-lys-faint tracking-wider font-mono-code">STATUS</div>
-            <div className="font-mono-code text-[13px] text-lys-success mt-0.5">{agent.status}</div>
+            <div className="text-[11px] text-lys-faint tracking-wider font-sans">STATUS</div>
+            <div className="font-sans text-[13px] text-lys-success mt-0.5">{agent.status}</div>
           </div>
           <div>
-            <div className="text-[11px] text-lys-faint tracking-wider font-mono-code">ROLE</div>
-            <div className="font-mono-code text-[13px] text-lys-muted mt-0.5 truncate">{agent.capabilities[0] || 'agent'}</div>
+            <div className="text-[11px] text-lys-faint tracking-wider font-sans">ROLE</div>
+            <div className="font-sans text-[13px] text-lys-muted mt-0.5 truncate">{agent.capabilities[0] || 'agent'}</div>
           </div>
         </div>
       </div>

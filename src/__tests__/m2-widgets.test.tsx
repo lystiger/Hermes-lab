@@ -197,7 +197,7 @@ describe('M2 recoverable jobs and thread errors', () => {
     renderIn(<QueueRoute />);
 
     expect((await screen.findAllByText(LIVE_JOB_ID)).length).toBeGreaterThan(0);
-    expect(screen.getByText(/RECOVERABLE · 1 · read-only/)).toBeInTheDocument();
+    expect(screen.getByText(/Recoverable · 1 · read-only/)).toBeInTheDocument();
     // Exact action names only: the queue's "Cancelled" status filter is not an action.
     expect(screen.queryByRole('button', { name: /^(resume|cancel)( job)?$/i })).not.toBeInTheDocument();
     expect(screen.getByText('Resume and cancel are not available from this console.')).toBeInTheDocument();

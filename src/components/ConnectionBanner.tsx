@@ -20,7 +20,7 @@ export const ConnectionBanner: React.FC = () => {
   return (
     <div
       role="alert"
-      className="px-5 py-2.5 border-b border-lys-danger/50 bg-lys-danger/12 font-mono-code text-[12px] text-lys-danger flex flex-wrap items-center gap-x-4 gap-y-1"
+      className="px-5 py-2.5 border-b border-lys-danger/50 bg-lys-danger/12 font-sans text-[12px] text-lys-danger flex flex-wrap items-center gap-x-4 gap-y-1"
     >
       <span className="font-semibold tracking-wider">CAN&apos;T REACH HERMES</span>
       <span className="text-lys-primary break-all">API {conn.url}</span>

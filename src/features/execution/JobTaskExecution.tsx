@@ -30,9 +30,9 @@ export const JobTaskExecution: React.FC<JobTaskExecutionProps> = ({ events }) =>
 
   return (
     <div>
-      <div className="font-mono-code text-[11px] tracking-wider text-lys-faint mb-2.5">TASK EXECUTION · BACKENDS</div>
+      <div className="font-sans text-[11px] tracking-wider text-lys-faint mb-2.5">TASK EXECUTION · BACKENDS</div>
       {rows.length === 0 ? (
-        <div className="py-2 font-mono-code text-[11px] text-lys-faint">No backend execution recorded for this job yet.</div>
+        <div className="py-2 font-sans text-[11px] text-lys-faint">No backend execution recorded for this job yet.</div>
       ) : (
         <div className="flex flex-col gap-1.5">
           {rows.map(([taskId, evt]) => {
@@ -56,7 +56,7 @@ export const JobTaskExecution: React.FC<JobTaskExecutionProps> = ({ events }) =>
                 to="/execution"
                 onClick={() => setActiveModalJobId(null)}
                 data-testid="job-task-execution"
-                className="flex flex-wrap items-center gap-2 px-2.5 py-2 bg-lys-surface-0 border border-lys-subtle hover:border-lys-strong font-mono-code text-[11px] text-lys-muted transition-colors"
+                className="flex flex-wrap items-center gap-2 px-2.5 py-2 bg-lys-surface-0 border border-lys-subtle hover:border-lys-strong font-sans text-[11px] text-lys-muted transition-colors"
               >
                 <span className="text-lys-faint">{taskId}</span>
                 <Badge label={backend} color="var(--lys-accent-sky)" />

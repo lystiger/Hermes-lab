@@ -14,7 +14,7 @@ export const CyberButton: React.FC<CyberButtonProps> = ({
   className = '',
   ...props
 }) => {
-  const baseClasses = "inline-flex items-center justify-center font-mono-code transition-all duration-150 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed select-none";
+  const baseClasses = "inline-flex items-center justify-center font-sans transition-all duration-150 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed select-none";
   
   const sizeClasses = {
     sm: 'text-[11px] px-2 py-0.5',

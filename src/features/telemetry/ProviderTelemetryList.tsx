@@ -31,7 +31,7 @@ const ProviderRow: React.FC<{ provider: ProviderTelemetry; compact: boolean }> =
   );
 
   return (
-    <div className={`p-3 bg-lys-surface-1 border border-lys-subtle font-mono-code text-[11px] ${compact ? '' : 'mb-3'}`}>
+    <div className={`p-3 bg-lys-surface-1 border border-lys-subtle font-sans text-[11px] ${compact ? '' : 'mb-3'}`}>
       <div className="flex items-center justify-between">
         <span className="text-[12px] text-lys-primary font-semibold">{provider.providerId}</span>
         <span className="text-lys-muted tracking-wider">{provider.status}</span>
@@ -75,13 +75,13 @@ export const ProviderTelemetryList: React.FC<{ compact?: boolean }> = ({ compact
 
   return (
     <div className={compact ? 'p-3.5 select-none' : 'p-5 select-none'}>
-      <div className="font-mono-code text-[11px] tracking-wider text-lys-faint mb-1">
+      <div className="font-sans text-[11px] tracking-wider text-lys-faint mb-1">
         {compact ? 'PROVIDER USAGE' : '3 · PROVIDER USAGE'}
       </div>
-      <div className="font-mono-code text-[11px] text-lys-faint mb-3">{CAPACITY_WINDOW_LABEL}</div>
+      <div className="font-sans text-[11px] text-lys-faint mb-3">{CAPACITY_WINDOW_LABEL}</div>
 
       {error && (
-        <div role="alert" className="mb-2 font-mono-code text-[11px] text-lys-warning">
+        <div role="alert" className="mb-2 font-sans text-[11px] text-lys-warning">
           refresh failed, showing last loaded data: {error.message}
         </div>
       )}
@@ -93,7 +93,7 @@ export const ProviderTelemetryList: React.FC<{ compact?: boolean }> = ({ compact
       )}
 
       {!compact && (
-        <div className="mt-2 font-mono-code text-[11px] text-lys-faint">
+        <div className="mt-2 font-sans text-[11px] text-lys-faint">
           {capacity.summary ? (
             <span>
               {capacity.summary.totalProviders ?? UNKNOWN} providers · {capacity.summary.totalRequests ?? UNKNOWN} requests ·{' '}

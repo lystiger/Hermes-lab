@@ -75,7 +75,7 @@ describe('Agent UI & Portrait Fallbacks', () => {
     expect(screen.getByText('CUSTOM')).toBeInTheDocument();
   });
 
-  it('renders [ VIEW DOSSIER ] trigger on Agent Detail when characterCardUrl is present', async () => {
+  it('renders view character sheet trigger on Agent Detail when characterCardUrl is present', async () => {
     render(
       <MemoryRouter initialEntries={['/agents/claude']}>
         <Routes>
@@ -86,10 +86,10 @@ describe('Agent UI & Portrait Fallbacks', () => {
 
     // The name appears in the roster and as the dossier heading; the heading is the dossier.
     expect(await screen.findByRole('heading', { name: 'Claude' })).toBeInTheDocument();
-    expect(screen.getByText('[ VIEW DOSSIER ]')).toBeInTheDocument();
+    expect(screen.getByText('view character sheet')).toBeInTheDocument();
   });
 
-  it('renders Agent Detail without [ VIEW DOSSIER ] when characterCardUrl is not present', async () => {
+  it('renders Agent Detail without view character sheet when characterCardUrl is not present', async () => {
     render(
       <MemoryRouter initialEntries={['/agents/unknown-subagent']}>
         <Routes>
@@ -99,6 +99,6 @@ describe('Agent UI & Portrait Fallbacks', () => {
     );
 
     expect(await screen.findByText('Unknown-subagent')).toBeInTheDocument();
-    expect(screen.queryByText('[ VIEW DOSSIER ]')).not.toBeInTheDocument();
+    expect(screen.queryByText('view character sheet')).not.toBeInTheDocument();
   });
 });

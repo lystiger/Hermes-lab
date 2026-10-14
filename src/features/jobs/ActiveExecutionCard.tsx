@@ -1,114 +1,93 @@
 import React from 'react';
-import { AmbientGyro } from '../../components/AmbientGyro';
 import { JobPipelineGraph } from './JobPipelineGraph';
-import { useConsoleStore } from '../../stores/useConsoleStore';
 import { useJob, useJobs } from '../../api/hooks';
 import { ACTIVE_JOB_STATUSES } from '../../api/adapters/httpAdapter';
 import { ErrorState, LoadingState, StaleNotice, UnknownValue } from '../../components/DataStates';
-import { JobTokens } from './JobRealData';
+import { Card } from '../../components/Card';
+import { CopyId } from '../../components/CopyId';
+import { HERMES_ART } from '../../theme/agentArt';
 import { useNow } from '../execution/useNow';
 import { formatElapsed } from './jobTiming';
+import { JobTokens } from './JobRealData';
 
 interface ActiveExecutionCardProps {
   onOpenJob?: (jobId: string) => void;
 }
 
-/** The job that is active right now, taken from the real job list. Nothing is shown when none is active. */
+/** The job that is active right now, from the real job list. With none active, the card says so and stays short. */
 export const ActiveExecutionCard: React.FC<ActiveExecutionCardProps> = ({ onOpenJob }) => {
-  const { ambient3d } = useConsoleStore();
   const { jobs, loading, error, stale, refetch } = useJobs();
   const activeJob = jobs.find((j) => ACTIVE_JOB_STATUSES.includes(j.status));
   const { job: detail } = useJob(activeJob?.id ?? null);
   const nowMs = useNow(1000);
 
   if (loading && jobs.length === 0) {
-    return <LoadingState label="Loading active execution…" />;
+    return <Card><LoadingState label="Loading active execution…" /></Card>;
   }
 
   if (error && jobs.length === 0) {
-    return <ErrorState label="Active execution" error={error} onRetry={refetch} />;
+    return <Card><ErrorState label="Active execution" error={error} onRetry={refetch} /></Card>;
   }
-
-  // Last good job list, marked stale while the latest refresh fails (M5 F2).
-  const staleNotice = stale ? <StaleNotice label="Active execution" error={error} onRetry={refetch} /> : null;
 
   if (!activeJob) {
     return (
-      <div className="p-5 border-b border-lys-subtle bg-lys-base select-none">
-        <div className="font-mono-code text-[11px] text-lys-faint tracking-wider mb-2">ACTIVE EXECUTION</div>
-        <div className="text-[18px] font-semibold text-lys-muted">No active execution</div>
-        <p className="mt-1 font-mono-code text-[11px] text-lys-faint">
-          None of the latest {jobs.length} jobs is in RUNNING, PLANNING, PREPARING, VERIFYING or REPAIRING state.
-        </p>
-      </div>
+      <Card label="Active execution">
+        <div className="p-5 flex items-center justify-between gap-6">
+          <div className="min-w-0">
+            <div className="text-[11px] tracking-wider uppercase text-lys-faint">Active execution</div>
+            <div className="mt-1 font-display text-[22px] font-semibold text-lys-muted">No active execution</div>
+            <p className="mt-1 text-[12px] text-lys-faint">
+              None of the latest {jobs.length} jobs is in RUNNING, PLANNING, PREPARING, VERIFYING or REPAIRING state.
+            </p>
+          </div>
+          <img src={HERMES_ART} alt="" aria-hidden="true" className="h-16 w-auto opacity-60 shrink-0" />
+        </div>
+      </Card>
     );
   }
 
-  const branch = activeJob.branch;
-
   return (
-    <>
-    {staleNotice && <div className="px-5 pt-3">{staleNotice}</div>}
-    <div className="relative p-5 pb-6 border-b border-lys-subtle overflow-hidden select-none bg-lys-base">
-      {ambient3d && <AmbientGyro enabled={ambient3d} size={150} />}
-
-      {/* Header Status */}
-      <div className="flex items-center gap-2.5 mb-2">
-        <span className="font-mono-code text-[11px] text-lys-faint tracking-wider">
-          ACTIVE EXECUTION
-        </span>
-        <span className="flex items-center gap-1.5 font-mono-code text-[11px] text-lys-success border border-lys-success/35 px-1.5 py-0.5 bg-lys-success/5">
-          {activeJob.status}
-        </span>
-      </div>
-
-      {/* Main Title / Clickable Target */}
-      <button
-        type="button"
-        onClick={() => onOpenJob?.(activeJob.id)}
-        className="flex items-baseline flex-wrap gap-x-3 gap-y-0.5 text-left cursor-pointer hover:opacity-80 transition-opacity"
-      >
-        <span className="font-mono-code text-[26px] text-lys-faint">{activeJob.id}</span>
-        <span className="text-[22px] font-semibold tracking-tight text-lys-primary">{activeJob.title}</span>
-      </button>
-
-      {/* Metadata Bar */}
-      <div className="flex items-center flex-wrap gap-x-3.5 gap-y-1 mt-2 font-mono-code text-[11px] text-lys-muted">
-        <span>{activeJob.repository}</span>
-        {branch && (
-          <>
-            <span className="text-lys-default">·</span>
-            <span className="text-lys-gold">{branch}</span>
-          </>
-        )}
-        <span className="text-lys-default">·</span>
-        <span>elapsed <span className="text-lys-primary">{formatElapsed(activeJob.startedAt, activeJob.completedAt, nowMs)}</span></span>
-        <span className="text-lys-default">·</span>
-        <span>tokens <JobTokens jobId={activeJob.id} /></span>
-      </div>
-
-      {/* Pipeline Graph of this job */}
-      <div className="mt-6">
-        <JobPipelineGraph steps={detail?.executionGraph ?? []} />
-      </div>
-
-      {/* Completion footer: no estimator exists in the Hermes API */}
-      <div className="mt-5 flex flex-wrap gap-6 pt-3.5 border-t border-lys-subtle font-mono-code text-[11px]">
-        <span className="text-lys-faint">ESTIMATED COMPLETION</span>
-        <span className="text-lys-muted">
-          <UnknownValue reason="Hermes exposes no estimator for phase or job completion" className="text-lys-muted" />
-        </span>
-        {onOpenJob && (
+    <Card accent="var(--lys-accent-gold)" label="Active execution">
+      <div className="p-5 flex flex-col gap-4">
+        {stale && <StaleNotice label="Active execution" error={error} onRetry={refetch} />}
+        <div className="flex flex-wrap items-center gap-3">
+          <span className="text-[11px] tracking-wider uppercase text-lys-faint">Active execution</span>
+          <span className="text-[10px] tracking-wider uppercase text-lys-success border border-lys-success/35 px-1.5 py-0.5">{activeJob.status}</span>
+        </div>
+        <div className="flex flex-col gap-1">
+          <CopyId value={activeJob.id} className="text-lys-faint text-[11px]" />
           <button
             type="button"
-            onClick={() => onOpenJob(activeJob.id)}
-            className="text-lys-gold hover:underline cursor-pointer"
+            onClick={() => onOpenJob?.(activeJob.id)}
+            className="text-left font-display text-[24px] font-semibold text-lys-primary hover:underline cursor-pointer"
           >
-            open job →
+            {activeJob.title}
           </button>
-        )}
+        </div>
+        <div className="flex flex-wrap gap-x-5 gap-y-1 text-[12px] text-lys-muted">
+          <span>{activeJob.repository}</span>
+          {activeJob.branch && <span className="text-lys-gold">{activeJob.branch}</span>}
+          <span>
+            elapsed <span className="text-lys-primary lys-metric">{formatElapsed(activeJob.startedAt, activeJob.completedAt, nowMs)}</span>
+          </span>
+          <span>tokens <JobTokens jobId={activeJob.id} /></span>
+        </div>
+        <div>
+          <JobPipelineGraph steps={detail?.executionGraph ?? []} />
+        </div>
+        <div className="flex flex-wrap items-center gap-4 pt-3 border-t border-lys-subtle text-[12px] text-lys-muted">
+          <span>
+            estimated completion{' '}
+            <UnknownValue reason="Hermes exposes no estimator for phase or job completion" className="text-lys-muted" />
+          </span>
+          {onOpenJob && (
+            <button type="button" onClick={() => onOpenJob(activeJob.id)} className="text-lys-gold hover:underline cursor-pointer">
+              open job →
+            </button>
+          )}
+        </div>
       </div>
-    </div>
-    </>
+    </Card>
   );
 };
+

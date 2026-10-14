@@ -89,7 +89,7 @@ export const Sidebar: React.FC = () => {
             {item.badge && (
               <span
                 style={{ color: item.badgeColor || 'var(--lys-text-faint)' }}
-                className="font-mono-code text-[11px]"
+                className="font-sans text-[11px]"
               >
                 {item.badge}
               </span>
@@ -102,21 +102,21 @@ export const Sidebar: React.FC = () => {
 
       {/* Daemon & Health Monitor */}
       <div className="border-t border-lys-subtle mx-0 px-4 pt-3 flex flex-col gap-1.5">
-        <div className="flex items-center justify-between font-mono-code text-[11px] text-lys-muted" title="Connection to the Hermes runtime API">
+        <div className="flex items-center justify-between font-sans text-[11px] text-lys-muted" title="Connection to the Hermes runtime API">
           <span>Hermes</span>
           <span style={{ color: hermesStatus.color }} className="flex items-center gap-1.5">
             <span style={{ backgroundColor: hermesStatus.color }} className="w-1.5 h-1.5" />
             {hermesStatus.text}
           </span>
         </div>
-        <div className="flex items-center justify-between font-mono-code text-[11px] text-lys-muted" title={herdr?.detail}>
+        <div className="flex items-center justify-between font-sans text-[11px] text-lys-muted" title={herdr?.detail}>
           <span>Herdr</span>
           <span style={{ color: herdrStatus.color }} className="flex items-center gap-1.5">
             <span style={{ backgroundColor: herdrStatus.color }} className="w-1.5 h-1.5" />
             {herdrStatus.text}
           </span>
         </div>
-        <div className="flex items-center justify-between font-mono-code text-[11px] text-lys-faint pt-1">
+        <div className="flex items-center justify-between font-sans text-[11px] text-lys-faint pt-1">
           <span>v0.1.0</span>
           <span>{clock}</span>
         </div>

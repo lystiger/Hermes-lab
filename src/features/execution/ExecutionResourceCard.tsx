@@ -29,7 +29,7 @@ export const ExecutionResourceCard: React.FC<ExecutionResourceCardProps> = ({ re
         borderColor: failed ? 'color-mix(in srgb, var(--lys-status-danger) 55%, transparent)' : 'var(--lys-border-subtle)',
         backgroundColor: failed ? 'color-mix(in srgb, var(--lys-status-danger) 7%, transparent)' : 'var(--lys-surface-1)'
       }}
-      className="p-3 border font-mono-code text-[11px] flex flex-col gap-2 min-w-0"
+      className="p-3 border font-sans text-[11px] flex flex-col gap-2 min-w-0"
     >
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0">

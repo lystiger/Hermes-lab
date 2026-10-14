@@ -5,7 +5,7 @@ export const ToolCallItem: React.FC<{ event: TraceEvent }> = ({ event }) => {
   const agColor = event.source.accentColor || 'var(--lys-text-muted)';
 
   return (
-    <div className="flex items-center gap-3.5 py-1.5 px-2.5 bg-lys-surface-1 border-b border-lys-subtle font-mono-code text-[11px] hover:bg-lys-surface-1 transition-colors">
+    <div className="flex items-center gap-3.5 py-1.5 px-2.5 bg-lys-surface-1 border-b border-lys-subtle font-sans text-[11px] hover:bg-lys-surface-1 transition-colors">
       <span className="w-20 text-lys-faint">{event.ts}</span>
       <span style={{ color: agColor }} className="w-16 font-semibold">
         {event.source.displayName}

@@ -9,15 +9,15 @@ export const AgentContextMeter: React.FC<{ agent: AgentDetail }> = ({ agent }) =
 
   return (
     <div className="flex-1 min-w-[260px]">
-      <div className="text-[11px] tracking-wider text-lys-faint mb-2 font-mono-code">
+      <div className="text-[11px] tracking-wider text-lys-faint mb-2 font-sans">
         CONTEXT WINDOW
       </div>
       
       <div className="flex items-baseline gap-2">
-        <span className="font-mono-code text-[20px] text-lys-primary">
+        <span className="font-sans text-[20px] text-lys-primary">
           {agent.contextUsed || UNKNOWN}
         </span>
-        <span className="font-mono-code text-[12px] text-lys-faint">
+        <span className="font-sans text-[12px] text-lys-faint">
           / {agent.contextMax || UNKNOWN}
         </span>
       </div>
@@ -41,10 +41,10 @@ export const AgentContextMeter: React.FC<{ agent: AgentDetail }> = ({ agent }) =
         />
       </div>
 
-      <p className="mt-2.5 font-mono-code text-[11px] text-lys-faint">
+      <p className="mt-2.5 font-sans text-[11px] text-lys-faint">
         Hermes reports agent identity and status only. Token and context figures appear once they are exposed.
       </p>
-      <div className="mt-2.5 flex flex-col gap-1 font-mono-code text-[11px]">
+      <div className="mt-2.5 flex flex-col gap-1 font-sans text-[11px]">
         <div className="flex justify-between text-lys-muted">
           <span>input</span>
           <span className="text-lys-primary">{agent.input || UNKNOWN}</span>

@@ -24,7 +24,7 @@ export const AgentWorkspace: React.FC<{ selectedId?: string }> = ({ selectedId }
   }, [effectiveId, setSelectedAgentId]);
 
   return (
-    <div className="flex flex-col md:flex-row min-h-0 bg-lys-base">
+    <div className="flex flex-col lg:flex-row min-h-full bg-lys-base">
       <AgentRoster
         agents={roster.agents}
         selectedId={effectiveId}
@@ -33,11 +33,12 @@ export const AgentWorkspace: React.FC<{ selectedId?: string }> = ({ selectedId }
         onSelect={(id) => navigate(`/agents/${id}`)}
         loading={roster.loading}
         error={roster.error}
+        stale={roster.stale}
         updatedAt={roster.updatedAt}
         onRetry={roster.refetch}
       />
 
-      <div className="flex-1 min-w-0">
+      <div className="flex-1 min-w-0 flex flex-col">
         {!effectiveId && !roster.loading && !roster.error && (
           <EmptyState>Select an agent once Hermes reports one.</EmptyState>
         )}

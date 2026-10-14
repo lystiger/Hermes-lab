@@ -54,7 +54,7 @@ export const QueueTable: React.FC<QueueTableProps> = ({
               <button
                 key={f}
                 onClick={() => setQFilter(f)}
-                className={`font-mono-code text-[11px] px-2.5 py-1 border transition-colors cursor-pointer ${
+                className={`font-sans text-[11px] px-2.5 py-1 border transition-colors cursor-pointer ${
                   isActive
                     ? 'text-lys-primary bg-lys-surface-interactive border-lys-strong'
                     : 'text-lys-muted bg-transparent border-lys-subtle hover:border-lys-strong'
@@ -68,7 +68,7 @@ export const QueueTable: React.FC<QueueTableProps> = ({
       )}
 
       {/* Table Header */}
-      <div className="flex items-center gap-3.5 px-5 py-2.5 border-b border-lys-subtle font-mono-code text-[11px] tracking-wider text-lys-faint bg-lys-surface-0">
+      <div className="flex items-center gap-3.5 px-5 py-2.5 border-b border-lys-subtle font-sans text-[11px] tracking-wider text-lys-faint bg-lys-surface-0">
         <span className="w-8 flex-shrink-0">P</span>
         <span className="w-12 flex-shrink-0">JOB</span>
         <span className="flex-1 min-w-[220px]">TASK</span>
@@ -98,13 +98,13 @@ export const QueueTable: React.FC<QueueTableProps> = ({
               {/* Priority */}
               <span
                 style={{ color: prioColor }}
-                className="w-8 flex-shrink-0 font-mono-code text-[11px] font-semibold"
+                className="w-8 flex-shrink-0 font-sans text-[11px] font-semibold"
               >
                 {q.priority}
               </span>
 
               {/* ID */}
-              <span className="w-12 flex-shrink-0 font-mono-code text-[12px] text-lys-muted">
+              <span className="w-12 flex-shrink-0 font-sans text-[12px] text-lys-muted">
                 {q.id}
               </span>
 
@@ -114,7 +114,7 @@ export const QueueTable: React.FC<QueueTableProps> = ({
               </span>
 
               {/* Repo */}
-              <span className="w-36 flex-shrink-0 hidden md:block font-mono-code text-[11px] text-lys-muted truncate">
+              <span className="w-36 flex-shrink-0 hidden md:block font-sans text-[11px] text-lys-muted truncate">
                 {q.repository}
               </span>
 
@@ -131,13 +131,13 @@ export const QueueTable: React.FC<QueueTableProps> = ({
                           color: agColor,
                           backgroundColor: `color-mix(in srgb, ${agColor} 9%, transparent)`
                         }}
-                        className="w-4 h-4 flex items-center justify-center font-mono-code text-[10px] clip-hex"
+                        className="w-4 h-4 flex items-center justify-center font-sans text-[10px] clip-hex"
                         title={actor.displayName}
                       >
                         {actor.displayName ? actor.displayName[0] : agId[0].toUpperCase()}
                       </div>
                       {i < q.assignedAgentIds.length - 1 && (
-                        <span className="font-mono-code text-[11px] text-lys-faint">→</span>
+                        <span className="font-sans text-[11px] text-lys-faint">→</span>
                       )}
                     </React.Fragment>
                   );
@@ -145,19 +145,19 @@ export const QueueTable: React.FC<QueueTableProps> = ({
               </div>
 
               {/* Tokens */}
-              <span className="w-24 flex-shrink-0 text-right font-mono-code text-[11px] text-lys-muted">
+              <span className="w-24 flex-shrink-0 text-right font-sans text-[11px] text-lys-muted">
                 {q.estimatedTokens || '—'}
               </span>
 
               {/* Time */}
-              <span className="w-20 flex-shrink-0 text-right hidden sm:block font-mono-code text-[11px] text-lys-muted">
+              <span className="w-20 flex-shrink-0 text-right hidden sm:block font-sans text-[11px] text-lys-muted">
                 {q.estimatedTime || '—'}
               </span>
 
               {/* Status */}
               <span
                 style={{ color: statusColor }}
-                className="w-24 flex-shrink-0 text-right font-mono-code text-[11px] tracking-wider font-semibold"
+                className="w-24 flex-shrink-0 text-right font-sans text-[11px] tracking-wider font-semibold"
               >
                 {q.status}
               </span>

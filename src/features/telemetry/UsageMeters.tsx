@@ -26,7 +26,7 @@ export const Meter: React.FC<{
 
   return (
     <div className="flex flex-col gap-1.5 min-w-0">
-      <div className="lys-metric flex items-baseline justify-between gap-2 font-mono-code text-[11px]">
+      <div className="lys-metric flex items-baseline justify-between gap-2 font-sans text-[11px]">
         <span className="text-lys-muted tracking-wider">{label}</span>
         <span className="text-lys-primary">
           {known ? (
@@ -47,7 +47,7 @@ export const Meter: React.FC<{
       ) : (
         <div className="h-2 bg-lys-surface-1 border border-dashed border-lys-subtle" aria-hidden="true" />
       )}
-      <div className="flex flex-wrap justify-between gap-2 font-mono-code text-[10px] text-lys-faint">
+      <div className="flex flex-wrap justify-between gap-2 font-sans text-[10px] text-lys-faint">
         <span>{window}</span>
         {note && <span>{note}</span>}
       </div>
@@ -62,7 +62,7 @@ export const ProviderMeters: React.FC<{ provider: ProviderTelemetry }> = ({ prov
   const successes = provider.successCount;
   return (
     <section aria-label={`Meters for ${provider.providerId}`} className="p-4 bg-lys-surface-1 border border-lys-subtle flex flex-col gap-4">
-      <div className="flex flex-wrap items-center justify-between gap-2 font-mono-code text-[11px]">
+      <div className="flex flex-wrap items-center justify-between gap-2 font-sans text-[11px]">
         <span className="text-[13px] text-lys-primary font-semibold">{provider.providerId}</span>
         <span className="text-lys-muted">status {provider.status}</span>
         <span style={{ color: src.color }}>{src.text}</span>
@@ -106,7 +106,7 @@ export const ProviderMeters: React.FC<{ provider: ProviderTelemetry }> = ({ prov
         />
       </div>
       {provider.throttlingCount > 0 && (
-        <div className="font-mono-code text-[11px] text-lys-warning">
+        <div className="font-sans text-[11px] text-lys-warning">
           {provider.throttlingCount} throttling event(s) · {PROCESS_WINDOW}
         </div>
       )}

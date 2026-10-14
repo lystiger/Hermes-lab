@@ -19,6 +19,7 @@ describe('Agent Detail Route with Dynamic & Unknown Agents', () => {
 
     // Kimi should dynamically load and render via mock adapter fallback
     expect(await screen.findByText('Kimi')).toBeInTheDocument();
-    expect(screen.getByText(/Dynamic Provider/i)).toBeInTheDocument();
+    // The provider appears in the roster presence card and the dossier.
+    expect(screen.getAllByText(/Dynamic Provider/i).length).toBeGreaterThan(0);
   });
 });

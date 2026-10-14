@@ -69,38 +69,25 @@ export const Header: React.FC = () => {
   const notMeasured = 'Not reported by the Hermes API';
 
   return (
-    <header className="h-[46px] flex-shrink-0 flex items-center justify-between px-5 border-b border-lys-subtle bg-lys-surface-0 select-none">
-      <div className="flex items-center gap-3">
-        {crumb && (
-          <button
-            onClick={() => navigate(backPath)}
-            className="font-mono-code text-[11px] text-lys-faint hover:text-lys-primary cursor-pointer transition-colors"
-          >
+    <header className="h-[44px] flex-shrink-0 flex items-center justify-between px-5 border-b border-lys-subtle bg-lys-base select-none">
+      <div className="flex items-center gap-3 min-w-0">
+        {crumb ? (
+          <button onClick={() => navigate(backPath)} className="text-[12px] text-lys-faint hover:text-lys-primary cursor-pointer transition-colors">
             ← {crumb}
           </button>
+        ) : (
+          <span className="text-[12px] text-lys-faint truncate">{subtitle}</span>
         )}
-        <h1 className="text-[14px] font-semibold tracking-wide text-lys-primary">
-          {title}
-        </h1>
-        <span className="font-mono-code text-[11px] text-lys-faint">
-          {subtitle}
-        </span>
+        {crumb && <span className="text-[12px] text-lys-muted truncate">{title}</span>}
       </div>
 
-      <div className="flex items-center gap-4 font-mono-code text-[11px] text-lys-muted">
-        <span title={isRealApiMode ? notMeasured : undefined}>queue eta <span className={isRealApiMode ? 'text-lys-muted' : 'text-lys-primary'}>{isRealApiMode ? '—' : '~37 min'}</span></span>
-        <span className="text-lys-default">|</span>
-        <span title={isRealApiMode ? notMeasured : undefined}>budget <span className={isRealApiMode ? 'text-lys-muted' : 'text-lys-warning'}>{isRealApiMode ? '—' : '58%'}</span></span>
-        <span className="text-lys-default">|</span>
+      <div className="flex items-center gap-4 text-[12px] text-lys-muted">
         <span
           style={{ color: statusColor }}
           className="flex items-center gap-1.5"
-          title={backendHealth ? `${backendHealth.service} v${backendHealth.version} (${backendHealth.uptimeSeconds}s uptime)` : 'Connection State'}
+          title={backendHealth ? `${backendHealth.service} v${backendHealth.version} (${backendHealth.uptimeSeconds}s uptime)` : notMeasured}
         >
-          <span
-            style={{ backgroundColor: statusColor }}
-            className={`w-1.5 h-1.5 rounded-[1px]`}
-          />
+          <span style={{ backgroundColor: statusColor }} className="w-1.5 h-1.5 rounded-full" />
           {statusLabel}
         </span>
       </div>

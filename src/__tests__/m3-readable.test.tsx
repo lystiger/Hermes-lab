@@ -164,8 +164,8 @@ describe('M3 agents: roster and dossier with only real fields', () => {
     );
 
     const dossier = await screen.findByRole('article', { name: 'Dossier for Claude' });
-    expect(within(dossier).getByText('Anthropic')).toBeInTheDocument();
-    expect(within(dossier).getByText('claude-opus')).toBeInTheDocument();
+    expect(within(dossier).getAllByText('Anthropic').length).toBeGreaterThan(0);
+    expect(within(dossier).getAllByText('claude-opus').length).toBeGreaterThan(0);
     expect(within(dossier).getByText('plan')).toBeInTheDocument();
     // Hermes reports no current task or tool, so those read as unknown with a reason.
     expect(within(dossier).getAllByTitle('Hermes reports no current task for this agent').length).toBeGreaterThan(0);

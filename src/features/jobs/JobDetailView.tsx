@@ -33,7 +33,7 @@ export const JobDetailView: React.FC<JobDetailViewProps> = ({ jobId = '' }) => {
 
   if (!job) {
     return (
-      <div className="w-full p-12 bg-lys-base font-mono-code text-[12px] text-lys-muted flex items-center justify-center">
+      <div className="w-full p-12 bg-lys-base font-sans text-[12px] text-lys-muted flex items-center justify-center">
         <span>Job '{jobId}' not found or not loaded.</span>
       </div>
     );
@@ -81,7 +81,7 @@ export const JobDetailView: React.FC<JobDetailViewProps> = ({ jobId = '' }) => {
               borderColor: `color-mix(in srgb, ${statusCol} 33%, transparent)`,
               backgroundColor: `color-mix(in srgb, ${statusCol} 8%, transparent)`
             }}
-            className="flex items-center gap-1.5 font-mono-code text-[11px] tracking-wider border px-2 py-0.5"
+            className="flex items-center gap-1.5 font-sans text-[11px] tracking-wider border px-2 py-0.5"
           >
             {job.status === 'RUNNING' && (
               <span style={{ backgroundColor: statusCol }} className="w-1 h-1 rounded-[1px]" />
@@ -90,7 +90,7 @@ export const JobDetailView: React.FC<JobDetailViewProps> = ({ jobId = '' }) => {
           </span>
         </div>
 
-        <div className="mt-2.5 flex items-center flex-wrap gap-x-4 gap-y-1 font-mono-code text-[11px] text-lys-muted">
+        <div className="mt-2.5 flex items-center flex-wrap gap-x-4 gap-y-1 font-sans text-[11px] text-lys-muted">
           <span>{job.repository}</span>
           {job.branch && <span className="text-lys-gold">{job.branch}</span>}
           <span className="text-lys-default">·</span>
@@ -109,7 +109,7 @@ export const JobDetailView: React.FC<JobDetailViewProps> = ({ jobId = '' }) => {
       <div className="flex flex-col lg:flex-row items-stretch">
         {/* Left Column: Generic Execution Graph */}
         <div className="w-full lg:w-80 flex-shrink-0 border-r border-b lg:border-b-0 border-lys-subtle p-5 bg-lys-base">
-          <div className="font-mono-code text-[11px] tracking-wider text-lys-faint mb-4">
+          <div className="font-sans text-[11px] tracking-wider text-lys-faint mb-4">
             EXECUTION GRAPH · {job.phases?.length || job.executionGraph?.length || 0} PHASES
           </div>
 
@@ -140,7 +140,7 @@ export const JobDetailView: React.FC<JobDetailViewProps> = ({ jobId = '' }) => {
                           backgroundColor: isDone ? 'color-mix(in srgb, var(--lys-status-success) 14%, transparent)' : isFailed ? 'color-mix(in srgb, var(--lys-status-danger) 14%, transparent)' : 'transparent',
                           color: isDone ? 'var(--lys-status-success)' : isFailed ? 'var(--lys-status-danger)' : isActive ? col : 'var(--lys-text-faint)'
                         }}
-                        className="w-4.5 h-4.5 flex-shrink-0 flex items-center justify-center font-mono-code text-[11px] clip-hex"
+                        className="w-4.5 h-4.5 flex-shrink-0 flex items-center justify-center font-sans text-[11px] clip-hex"
                       >
                         {isDone ? '✓' : isFailed ? '✕' : isActive ? '●' : '○'}
                       </div>
@@ -148,19 +148,19 @@ export const JobDetailView: React.FC<JobDetailViewProps> = ({ jobId = '' }) => {
                       <div className="flex-1 min-w-0">
                         <div
                           style={{ color: isDone || isActive ? 'var(--lys-text-primary)' : 'var(--lys-text-faint)' }}
-                          className="font-mono-code text-[11px] tracking-wider font-semibold"
+                          className="font-sans text-[11px] tracking-wider font-semibold"
                         >
                           {p.name}
                         </div>
                         <div style={{ color: col }} className="text-[12px] mt-0.5">
                           {p.agentName || actor?.displayName || p.agentId || '—'}
                         </div>
-                        <div className="font-mono-code text-[10.5px] text-lys-faint mt-0.5">
+                        <div className="font-sans text-[10.5px] text-lys-faint mt-0.5">
                           {p.role} {p.commitSha ? `· ${p.commitSha.slice(0, 7)}` : ''}
                         </div>
                       </div>
 
-                      <div className="font-mono-code text-[11px] text-lys-faint text-right">
+                      <div className="font-sans text-[11px] text-lys-faint text-right">
                         {p.durationMs ? `${(p.durationMs / 1000).toFixed(1)}s` : p.status.toLowerCase()}
                       </div>
                     </div>
@@ -181,10 +181,10 @@ export const JobDetailView: React.FC<JobDetailViewProps> = ({ jobId = '' }) => {
           {/* Artifact References */}
           {job.artifacts && job.artifacts.length > 0 && (
             <div className="mt-5 pt-3.5 border-t border-lys-subtle">
-              <div className="font-mono-code text-[11px] tracking-wider text-lys-faint mb-2.5">
+              <div className="font-sans text-[11px] tracking-wider text-lys-faint mb-2.5">
                 ARTIFACT REFERENCES
               </div>
-              <div className="flex flex-col gap-1.5 font-mono-code text-[11px]">
+              <div className="flex flex-col gap-1.5 font-sans text-[11px]">
                 {job.artifacts.map((art, idx) => (
                   <div key={art.id || idx} className="flex justify-between text-lys-muted">
                     <span className="text-lys-gold">{art.label}</span>
@@ -215,7 +215,7 @@ export const JobDetailView: React.FC<JobDetailViewProps> = ({ jobId = '' }) => {
           {/* Job trace: durable history merged with the live buffer */}
           <div className="pb-8">
             <div className="flex items-center justify-between mb-2.5">
-              <span className="font-mono-code text-[11px] tracking-wider text-lys-faint">
+              <span className="font-sans text-[11px] tracking-wider text-lys-faint">
                 RUNTIME EVENTS &amp; TRACES · {job.id}
               </span>
               <Freshness at={durable.updatedAt} />
@@ -230,7 +230,7 @@ export const JobDetailView: React.FC<JobDetailViewProps> = ({ jobId = '' }) => {
               {traceRows.slice(0, 50).map(({ event: e, origin }) => (
                 <div
                   key={e.id}
-                  className="flex items-center gap-3.5 py-1 font-mono-code text-[11px] border-b border-lys-subtle"
+                  className="flex items-center gap-3.5 py-1 font-sans text-[11px] border-b border-lys-subtle"
                 >
                   <span className="w-24 text-lys-faint">{e.ts}</span>
                   <span

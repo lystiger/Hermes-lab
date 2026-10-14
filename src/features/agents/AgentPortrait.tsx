@@ -69,7 +69,7 @@ export const AgentPortrait: React.FC<AgentPortraitProps> = ({
                   color: accentColor,
                   animation: 'none'
                 }}
-                className="font-mono-code text-[8px] leading-[10px] whitespace-pre"
+                className="font-sans text-[8px] leading-[10px] whitespace-pre"
               >
                 {crawlCode + crawlCode}
               </div>
@@ -100,7 +100,7 @@ export const AgentPortrait: React.FC<AgentPortraitProps> = ({
                   >
                     <span
                       style={{ color: accentColor }}
-                      className="font-mono-code font-bold text-[18px] opacity-80"
+                      className="font-sans font-bold text-[18px] opacity-80"
                     >
                       {initial}
                     </span>
@@ -120,7 +120,7 @@ export const AgentPortrait: React.FC<AgentPortraitProps> = ({
                 {code && (
                   <span
                     style={{ color: accentColor }}
-                    className="font-mono-code text-[9px] tracking-wider mt-1 opacity-70"
+                    className="font-sans text-[9px] tracking-wider mt-1 opacity-70"
                   >
                     {code}
                   </span>
@@ -137,7 +137,7 @@ export const AgentPortrait: React.FC<AgentPortraitProps> = ({
               borderTopColor: `color-mix(in srgb, ${accentColor} 20%, transparent)`,
               backgroundColor: isRunning ? `color-mix(in srgb, ${accentColor} 8%, transparent)` : 'color-mix(in srgb, var(--lys-text-primary) 2%, transparent)'
             }}
-            className="flex-shrink-0 border-t px-1.5 py-0.5 flex items-center justify-between font-mono-code text-[10px] tracking-wider"
+            className="flex-shrink-0 border-t px-1.5 py-0.5 flex items-center justify-between font-sans text-[10px] tracking-wider"
           >
             <span style={{ color: accentColor }}>{phase}</span>
             <span className="text-lys-faint">{initial}</span>

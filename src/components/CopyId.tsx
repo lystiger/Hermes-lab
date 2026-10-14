@@ -26,7 +26,7 @@ export const CopyId: React.FC<{ value: string; className?: string }> = ({ value,
         type="button"
         onClick={copy}
         aria-label={`Copy ${value}`}
-        className="font-mono-code text-[10px] text-lys-faint hover:text-lys-primary border border-lys-subtle hover:border-lys-strong px-1 cursor-pointer shrink-0"
+        className="font-sans text-[10px] text-lys-faint hover:text-lys-primary border border-lys-subtle hover:border-lys-strong px-1 cursor-pointer shrink-0"
       >
         {state === 'copied' ? 'copied' : state === 'failed' ? 'no clipboard' : 'copy'}
       </button>

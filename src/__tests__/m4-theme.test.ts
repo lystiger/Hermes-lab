@@ -42,9 +42,9 @@ const EXPECTED: Record<string, string> = {
   '--lys-accent-gold-hover': '#E8CE9B',
   '--lys-accent-sky': '#7FB3D5',
   '--lys-accent-violet': '#A78BFA',
-  '--lys-agent-claude': '#D9A05B',
-  '--lys-agent-codex': '#4EC9A0',
-  '--lys-agent-gemini': '#5B8CFF',
+  '--lys-agent-claude': '#CCA27D',
+  '--lys-agent-codex': '#7A8ECE',
+  '--lys-agent-gemini': '#9686E1',
   '--lys-agent-hermes': '#CBA35C',
   '--lys-ink': '#000000'
 };

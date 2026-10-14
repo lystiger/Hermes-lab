@@ -6,7 +6,7 @@ import { JobDetail } from '../../api/types';
 import { describeRecord, explainFailure, verificationResultLines } from './jobEvents';
 import { formatTimeOfDay } from '../time/format';
 
-const SECTION = 'font-mono-code text-[11px] tracking-wider text-lys-faint mb-2.5';
+const SECTION = 'font-sans text-[11px] tracking-wider text-lys-faint mb-2.5';
 
 const Section: React.FC<{ title: string; updatedAt?: number | null; children: React.ReactNode }> = ({
   title,
@@ -27,7 +27,7 @@ export const JobFailure: React.FC<{ job: JobDetail }> = ({ job }) => {
   const explanation = explainFailure(job);
   if (!explanation) return null;
   return (
-    <div role="alert" className="mb-5 p-3 border border-lys-danger/35 bg-lys-danger/5 font-mono-code text-[11px]">
+    <div role="alert" className="mb-5 p-3 border border-lys-danger/35 bg-lys-danger/5 font-sans text-[11px]">
       <div className="text-lys-danger font-semibold">{explanation.headline}</div>
       <ul className="mt-1.5 flex flex-col gap-1 text-lys-primary break-words">
         {explanation.lines.map((line, i) => (
@@ -84,7 +84,7 @@ export const JobTasks: React.FC<{ jobId: string }> = ({ jobId }) => {
       {loading && tasks.length === 0 && <LoadingState label="Loading tasks…" />}
       <ResourceError label="Tasks" error={error} hasData={stale || tasks.length > 0} updatedAt={updatedAt} onRetry={refetch} />
       {!loading && !error && tasks.length === 0 && <EmptyState>Hermes recorded no tasks for this job.</EmptyState>}
-      <div className="flex flex-col gap-1.5 font-mono-code text-[11px]">
+      <div className="flex flex-col gap-1.5 font-sans text-[11px]">
         {tasks.map((t) => (
           <div key={t.taskId} className="p-2 bg-lys-surface-1 border border-lys-subtle">
             <div className="flex justify-between gap-3">
@@ -114,7 +114,7 @@ export const JobRuns: React.FC<{ jobId: string }> = ({ jobId }) => {
       {loading && runs.length === 0 && <LoadingState label="Loading runs…" />}
       <ResourceError label="Runs" error={error} hasData={stale || runs.length > 0} updatedAt={updatedAt} onRetry={refetch} />
       {!loading && !error && runs.length === 0 && <EmptyState>Hermes recorded no runs for this job.</EmptyState>}
-      <div className="flex flex-col gap-1.5 font-mono-code text-[11px]">
+      <div className="flex flex-col gap-1.5 font-sans text-[11px]">
         {runs.map((r) => (
           <div key={r.runId} className="p-2 bg-lys-surface-1 border border-lys-subtle flex flex-wrap justify-between gap-2">
             <span className="text-lys-primary">{r.runId}</span>
@@ -140,7 +140,7 @@ export const JobObservations: React.FC<{ jobId: string }> = ({ jobId }) => {
       {!loading && !error && observations.length === 0 && (
         <EmptyState>Hermes recorded no observations for this job.</EmptyState>
       )}
-      <div className="flex flex-col gap-1.5 font-mono-code text-[11px]">
+      <div className="flex flex-col gap-1.5 font-sans text-[11px]">
         {observations.map((o) => (
           <div key={o.observationId} className="p-2 bg-lys-surface-1 border border-lys-subtle">
             <div className="text-lys-muted">
@@ -165,7 +165,7 @@ export const JobDiagnostics: React.FC<{ job: JobDetail }> = ({ job }) => {
   const history = job.retryHistory;
   return (
     <Section title="DIAGNOSTICS">
-      <div className="flex flex-col gap-3 font-mono-code text-[11px]">
+      <div className="flex flex-col gap-3 font-sans text-[11px]">
         <div className="p-2 bg-lys-surface-1 border border-lys-subtle">
           <div className="text-lys-muted tracking-wider mb-1">VERIFICATION</div>
           {v === null || v === undefined ? (

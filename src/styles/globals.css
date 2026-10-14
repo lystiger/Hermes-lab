@@ -69,12 +69,17 @@
   --lys-accent-sky: #7FB3D5;
   --lys-accent-violet: #A78BFA;
   /* Per-agent accents: one variable each, resolved in src/theme/agents.ts. The lead replaces these values. */
-  --lys-agent-claude: #D9A05B;
-  --lys-agent-codex: #4EC9A0;
-  --lys-agent-gemini: #5B8CFF;
+  --lys-agent-claude: #CCA27D;
+  --lys-agent-codex: #7A8ECE;
+  --lys-agent-gemini: #9686E1;
   --lys-agent-hermes: #CBA35C;
   /* Ink for overlays and shadows */
   --lys-ink: #000000;
+  /* Derived dim tints of the agent accents (for fills and glows; text uses the solid values). */
+  --lys-agent-claude-dim: color-mix(in srgb, var(--lys-agent-claude) 18%, transparent);
+  --lys-agent-codex-dim: color-mix(in srgb, var(--lys-agent-codex) 18%, transparent);
+  --lys-agent-gemini-dim: color-mix(in srgb, var(--lys-agent-gemini) 18%, transparent);
+  --lys-agent-hermes-dim: color-mix(in srgb, var(--lys-agent-hermes) 18%, transparent);
 
   /* Typography (OFL fonts, bundled with @fontsource) */
   --lys-font-display: "Outfit", "Space Grotesk", system-ui, sans-serif;
@@ -254,4 +259,13 @@
     transition-duration: 0.01ms !important;
     scroll-behavior: auto !important;
   }
+}
+
+/* Card system (research §2.3, §6): chamfered corners, layered surface, hairline border. */
+.lys-card-outer {
+  clip-path: polygon(0 0, calc(100% - 12px) 0, 100% 12px, 100% 100%, 12px 100%, 0 calc(100% - 12px));
+}
+
+.lys-card-inner {
+  clip-path: polygon(0 0, calc(100% - 11px) 0, 100% 11px, 100% 100%, 11px 100%, 0 calc(100% - 11px));
 }

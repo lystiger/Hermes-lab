@@ -3,6 +3,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
+from .events import ExecutionTrace
+
 
 @dataclass(frozen=True)
 class ExecutionRequest:
@@ -27,10 +29,17 @@ class ExecutionResult:
 
 class ExecutionBackend(ABC):
     name = ""
+    # D-009 sink, passed as the `event_sink=` constructor kwarg. None means no-op.
+    # Subclasses assign it in __init__; the class default covers subclasses that don't.
+    event_sink = None
 
     @abstractmethod
     def execute(self, request: ExecutionRequest) -> ExecutionResult:
         """Host a worker process and return its captured result."""
+
+    def trace(self, job_id=None, *, cancel_codes=()):
+        """Start a D-009 lifecycle trace for one execute() call, bound to this backend's sink."""
+        return ExecutionTrace(self.name, self.event_sink, job_id, cancel_codes=cancel_codes)
 
     def cleanup(self, success=False):
         """Release only runtime resources owned by this backend instance."""

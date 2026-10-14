@@ -353,3 +353,71 @@ Phase A (Hermes) and Phase B (LysControl) are built in parallel against this con
   openrig: { daemon: "up"|"down"|"unknown", ledger: { owners: int, rigIds: [str] } } | null }
 ```
 The snapshot is the initial state. Events after it are applied on top. In-process state only; it never calls `rig` mutating commands.
+
+## D-010: Phase A of D-009, Hermes emits execution visibility for every backend (2026-10-14)
+
+Built against the D-009 contract, unchanged in shape. The clarifications below fill cases the contract did not
+spell out. Human review is requested for them.
+
+### What was built
+
+- **Sink.** `ExecutionBackend` takes an optional `event_sink` constructor kwarg (default: no-op). `runner/backends/events.py`
+  holds the event kinds, `execution_metadata()` (D-009 camelCase keys), `send_execution_event()` (never raises) and
+  `ExecutionTrace`, which gives each execution a stable `executionId`, carries bound context, and emits terminal events once.
+- **Adapter wiring.** `HermesActorAdapter(event_bridge=)` passes its sink to every backend it creates. The sink updates an
+  in-process registry at once, then queues the event for one drain coroutine on the loop captured in `execute_task`.
+  The drain calls `RuntimeEventBridge.persist_and_publish(source_kind="runtime", source_id=<backend>)` in order.
+  Workers never wait on the store. A store error drops only that event. `job_launcher` passes the bridge in all three
+  adapter constructions, including the resume path (`engine.event_bridge`).
+- **Per backend.** Subprocess, Herdr and OpenRig emit the full lifecycle. OpenRig adds `acquired` (`reused`, `rigId`,
+  `sessionName`, `generation`), `ready` (`generation`, `nodeId`), `pooled` (`expiresAt`), `released` and `release_failed`.
+  Pool-timer expiry, `release_job()` and `drain()` emit through the seat (`_Seat.event`), so they keep the context of the
+  last execution that held the seat. Ledger reconcile and cleanup retries release under their own `release:<rigId>` stream.
+- **Registry and snapshot.** `runner/backends/execution_registry.py` holds `ExecutionRegistry` (keyed by
+  `(backend, kind, id)`, thread-safe) and `build_execution_snapshot()`. `GET /execution` in `main.py` returns the snapshot.
+  The snapshot runs only `rig ps --json` (daemon up or down), never a mutating command. `openrig.ledger` comes from the new
+  `OwnershipLedger.summary()`, which takes no lock, creates no directory and deletes nothing. `stale_owners()` is not used.
+
+### Contract clarifications (the human decides whether to keep them)
+
+1. **Subprocess `resource.id` = `executionId`, not a pid.** `subprocess.run` does not expose the child's pid. Tracking the pid
+   would mean switching to `Popen`, which changes how the process is spawned. The label is the agent name.
+2. **Herdr `resource_released` = the pane is freed.** It fires when the worker command finishes. The pane stays in the
+   workspace when `keep_workspace` is set. The registry drops the row.
+3. **Orphan releases get `executionId = "release:<rigId>"`.** This covers ledger reconcile and `cleanup()` retries of a rig
+   that no task holds.
+4. **`task_id` is not set.** Backends do not know the runtime task. Events carry `job_id` and `executionId`. Adding `taskId`
+   needs the adapter to pass the task down through the request.
+5. **Failures precede releases.** Within one execution the terminal event (`failed`/`cancelled`) is recorded before its
+   `resource_released`, so the stream reads in causal order.
+6. **Resource states in the snapshot.** `acquiring` after `acquired`, `ready`, `running`, `releasing` after `failed` or
+   `cancelled`, `idle` after `pooled`, `failed` after `release_failed`. `released` removes the row. `finished` leaves the state unchanged.
+7. **`openrig` is `null` when `rig` is not on PATH.** A backend's `available` is true only when the daemon is up.
+
+### Scope and limits
+
+- **The sprint runner (`run-hermes-sprint.py`) emits nothing.** It builds backends without an adapter or bridge. Its runs are
+  not visible on `/execution`. Wiring it would mean giving the sprint runner a sink, which is a separate step.
+- Events are persisted only while the adapter's loop runs. The `atexit` drain of the default seat pool reaches the registry
+  but not the store.
+- The registry is per process. After a restart, only the OpenRig ledger summary shows rigs left behind.
+
+### Verification
+
+- Full suite **518 passed / 5 skipped** (baseline 485 / 5, plus 33 new in `tests/test_execution_events.py`). `compileall runner runtime` OK.
+- New tests cover: event order per backend (subprocess success, nonzero exit, timeout, missing executable; herdr success,
+  command failure, failure before a pane; openrig success, reuse, failed send, cancel before lease, pool expiry, `release_job`,
+  `drain`, failed release then retry, end to end through the adapter into the bridge); the D-009 metadata contract (known kinds,
+  allowed keys only); sink safety (sink errors never fail a task, a slow store never blocks a worker, a failing store drops
+  only its event, concurrent emits from 8 threads persist in per-thread order); registry transitions; snapshot shape; the
+  snapshot's read-only guarantee (only `rig ps --json`, no ledger directory created); the `/execution` route.
+- **Mutation checks**, each caught by a test, then reverted: failure emitted after release (order test fails); blocking
+  sink (never-blocks test fails); sink errors escaping (sink-errors test fails).
+- **Live, read-only:** `build_execution_snapshot()` against the real daemon returned `daemon: up`, parsed correctly, and an empty
+  ledger. No `rig` state-changing command ran, the `kernel` rig was not touched, and `/api/down` was not called.
+  No live OpenRig task was run, since that needs a state-changing `rig up`.
+
+### Follow-ups
+
+- Decide whether the sprint runner should get a sink (scope item above).
+- Add `taskId` (clarification 4) if LysControl needs to group by task.

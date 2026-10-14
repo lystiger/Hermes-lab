@@ -15,6 +15,7 @@ Provides:
 """
 
 import asyncio
+from collections import deque
 from datetime import datetime, timezone
 import json
 import logging
@@ -177,6 +178,7 @@ class HermesActorAdapter(ActorAdapter):
         base_ref: str = "main",
         target_branch: str = "sprint/integration",
         observation_registry: Any = None,
+        event_bridge: Any = None,
     ):
         self.control_root = Path.cwd().resolve()
         self.target_repo = Path(target_repo).resolve() if target_repo else self.control_root
@@ -188,11 +190,17 @@ class HermesActorAdapter(ActorAdapter):
         self.backend_registry = backend_registry
         self.tool_registry = tool_registry or default_tool_registry
         self.observation_registry = observation_registry
+        self.event_bridge = event_bridge
         self.spec = spec or {}
         self.job_id = job_id or f"job_{int(time.time())}"
         # Backend names used per job, so release_job() can end that job's pooled resources.
         self._job_backends: Dict[str, set] = {}
         self._job_backends_lock = threading.Lock()
+        # D-009 execution events: worker threads queue them; one drain on the loop persists them in order.
+        self._event_lock = threading.Lock()
+        self._pending_execution_events = deque()
+        self._event_drain_running = False
+        self._event_loop = None
         self.thread_id = self.job_id
         self.base_ref = base_ref
         self.target_branch = target_branch
@@ -773,6 +781,7 @@ class HermesActorAdapter(ActorAdapter):
 
         # 3. Real Agent CLI / Backend Execution (blocking; dispatched off the event loop)
         cancel_event = threading.Event()
+        self._bind_event_loop(asyncio.get_running_loop())
         try:
             return await asyncio.to_thread(
                 self._execute_real_agent, task, run, actor_id, role, ctx, cancel_event,
@@ -830,6 +839,7 @@ class HermesActorAdapter(ActorAdapter):
                 sprint_id=task.job_id,
                 logger=logger,
                 cancel_event=cancel_event,
+                event_sink=self._on_execution_event,
             )
             with self._job_backends_lock:
                 self._job_backends.setdefault(task.job_id, set()).add(backend_name)
@@ -1114,6 +1124,62 @@ class HermesActorAdapter(ActorAdapter):
                 except Exception as cleanup_exc:
                     logger.error("Backend cleanup failed for task %s: %s", task.task_id, cleanup_exc)
 
+
+    def _bind_event_loop(self, loop: asyncio.AbstractEventLoop) -> None:
+        with self._event_lock:
+            if self._event_loop is not loop:
+                self._event_loop = loop
+                # A drain scheduled on a previous loop may never finish; let this loop start one.
+                self._event_drain_running = False
+
+    def _on_execution_event(self, event: Any) -> None:
+        """D-009 sink for backends. Runs on worker and timer threads: it never blocks and never raises.
+
+        The in-process registry is updated at once. Persistence is queued for the loop, so a slow
+        store never holds a worker, and a store error only drops that event (it fails no task).
+        """
+        try:
+            from runner.backends.execution_registry import default_execution_registry
+
+            default_execution_registry.apply(event)
+            if self.event_bridge is None:
+                return
+            with self._event_lock:
+                loop = self._event_loop
+                if loop is None or loop.is_closed():
+                    return
+                self._pending_execution_events.append(event)
+                if self._event_drain_running:
+                    return
+                self._event_drain_running = True
+            try:
+                asyncio.run_coroutine_threadsafe(self._drain_execution_events(), loop)
+            except RuntimeError:
+                with self._event_lock:
+                    self._event_drain_running = False
+                logger.warning("Execution events not persisted: the event loop stopped", exc_info=True)
+        except Exception:  # noqa: BLE001 - observability must never fail an execution
+            logger.warning("Execution event %s was dropped", getattr(event, "kind", "?"), exc_info=True)
+
+    async def _drain_execution_events(self) -> None:
+        """Persist queued execution events one at a time, in the order the backends emitted them."""
+        while True:
+            with self._event_lock:
+                if not self._pending_execution_events:
+                    self._event_drain_running = False
+                    return
+                event = self._pending_execution_events.popleft()
+            try:
+                await self.event_bridge.persist_and_publish(
+                    source_id=event.metadata.get("backend"),
+                    source_kind="runtime",
+                    kind=event.kind,
+                    detail=event.detail,
+                    job_id=event.job_id,
+                    metadata=dict(event.metadata),
+                )
+            except Exception:  # noqa: BLE001 - one lost event must not stall the rest
+                logger.warning("Execution event %s was not persisted", event.kind, exc_info=True)
 
     def release_job(self, job_id: str) -> None:
         """Release backend resources pooled for `job_id` (for OpenRig: its warm seats). Safe to repeat."""

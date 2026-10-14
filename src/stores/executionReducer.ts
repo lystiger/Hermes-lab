@@ -22,6 +22,8 @@ export interface ExecutionView {
   appliedEventIds: string[];
   /** Newest rawTs applied per resource key; older events for that resource are stale and dropped. */
   lastRawTs: Record<string, number>;
+  /** The snapshot's takenAt: events at or before it are already in the snapshot and are ignored. */
+  snapshotTakenAt: number | null;
 }
 
 export const EMPTY_EXECUTION_VIEW: ExecutionView = {
@@ -29,7 +31,8 @@ export const EMPTY_EXECUTION_VIEW: ExecutionView = {
   resources: {},
   openrig: null,
   appliedEventIds: [],
-  lastRawTs: {}
+  lastRawTs: {},
+  snapshotTakenAt: null
 };
 
 export function resourceKey(backend: string, kind: string, id: string): string {
@@ -50,7 +53,8 @@ export function viewFromSnapshot(snapshot: ExecutionSnapshot): ExecutionView {
     resources,
     openrig: snapshot.openrig,
     appliedEventIds: [],
-    lastRawTs: {}
+    lastRawTs: {},
+    snapshotTakenAt: typeof snapshot.takenAt === 'number' ? snapshot.takenAt : null
   };
 }
 
@@ -104,6 +108,10 @@ export function reduceExecutionEvent(view: ExecutionView, evt: TraceEvent): Exec
     : meta.executionId
       ? findKeyByExecution(view.resources, meta.executionId)
       : undefined;
+
+  // Replayed history can be older than the snapshot; with best-effort persistence a missing
+  // release event would otherwise resurrect a resource the snapshot shows as gone.
+  if (view.snapshotTakenAt !== null && evt.rawTs <= view.snapshotTakenAt) return base;
 
   if (!key) return base;
   const lastRawTs = view.lastRawTs[key];

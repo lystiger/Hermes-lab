@@ -215,6 +215,17 @@ describe('useExecutionStore (snapshot loading, buffering, reconnect)', () => {
   });
 });
 
+describe('snapshot cutoff', () => {
+  it('history older than the snapshot never resurrects a resource the snapshot shows as gone', () => {
+    let view = viewFromSnapshot({ backends: [], resources: [], openrig: null, takenAt: 10 });
+    // Its resource_released event was lost (best-effort persistence); only older history remains.
+    view = reduceExecutionEvent(view, evt('old', 'execution.running', 5, { resource: SEAT }));
+    expect(view.resources[SEAT_KEY]).toBeUndefined();
+    view = reduceExecutionEvent(view, evt('new', 'execution.resource_acquired', 11, { resource: SEAT }));
+    expect(view.resources[SEAT_KEY]).toMatchObject({ state: 'acquiring' });
+  });
+});
+
 describe('useEventStream snapshot -> stream handoff', () => {
   beforeEach(() => {
     useExecutionStore.setState({

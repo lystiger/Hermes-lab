@@ -577,4 +577,6 @@ export interface ExecutionSnapshot {
   backends: ExecutionBackendStatus[];
   resources: ExecutionResource[];
   openrig: OpenRigExecutionStatus | null;
+  /** Epoch seconds (same clock as event rawTs). Events at or before it are already reflected. */
+  takenAt?: number;
 }

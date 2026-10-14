@@ -1,8 +1,9 @@
 import React from 'react';
 import { useNavigate } from 'react-router-dom';
-import { SandboxStatus } from '../features/tools/SandboxStatus';
+import { Link } from 'react-router-dom';
+import { ExecutionBackendStrip } from '../features/execution/ExecutionBackendStrip';
 import { useConsoleStore } from '../stores/useConsoleStore';
-import { useAgents, useSettings } from '../api/hooks';
+import { useAgents, useExecution, useSettings } from '../api/hooks';
 
 export const SettingsRoute: React.FC = () => {
   const navigate = useNavigate();
@@ -17,6 +18,7 @@ export const SettingsRoute: React.FC = () => {
 
   const { agents } = useAgents();
   const { settings } = useSettings();
+  const { view, snapshotStatus } = useExecution();
 
   return (
     <div className="flex flex-col select-none bg-[#0A0B0D]">
@@ -132,9 +134,13 @@ export const SettingsRoute: React.FC = () => {
         </div>
       </div>
 
-      {/* Herdr Container Runtime Sandbox Status */}
+      {/* Execution backends: live from GET /execution (replaces the static Herdr sandbox mock) */}
       <div className="p-5 border-b border-[#1F242B] bg-[#0C0E11]">
-        <SandboxStatus />
+        <div className="flex items-center justify-between mb-3 font-mono-code text-[11px]">
+          <span className="tracking-wider text-[#5C646E]">EXECUTION BACKENDS</span>
+          <Link to="/execution" className="text-[#CBA35C] hover:underline">open execution →</Link>
+        </div>
+        <ExecutionBackendStrip backends={view.backends} openrig={view.openrig} loaded={snapshotStatus === 'ready'} />
       </div>
 
       <div className="p-5 font-mono-code text-[11px] text-[#5C646E] leading-relaxed">

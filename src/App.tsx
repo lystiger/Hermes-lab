@@ -7,6 +7,7 @@ import AgentsListRoute from './routes/agents/index';
 import AgentDetailRoute from './routes/agents/$agentId';
 import UsageRoute from './routes/usage';
 import EventsRoute from './routes/events';
+import ExecutionRoute from './routes/execution';
 import SettingsRoute from './routes/settings';
 
 export const App: React.FC = () => {
@@ -19,6 +20,7 @@ export const App: React.FC = () => {
         <Route path="agents/:agentId" element={<AgentDetailRoute />} />
         <Route path="usage" element={<UsageRoute />} />
         <Route path="events" element={<EventsRoute />} />
+        <Route path="execution" element={<ExecutionRoute />} />
         <Route path="settings" element={<SettingsRoute />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Route>

@@ -13,7 +13,8 @@ import {
   HealthStatus,
   Thread,
   Message,
-  MailboxEntry
+  MailboxEntry,
+  ExecutionSnapshot
 } from './types';
 
 export interface EventSubscription {
@@ -31,6 +32,7 @@ export interface HermesApi {
   getProviderQuotas(): Promise<ProviderQuota[]>;
   getProjections(): Promise<ProjectionItem[]>;
   getSettings(): Promise<{ runtime: SettingItem[]; policy: SettingItem[] }>;
+  getExecutionSnapshot(): Promise<ExecutionSnapshot>;
   getTraceEvents(limit?: number, after?: string): Promise<TraceEvent[]>;
   subscribeEvents(
     handler: (event: TraceEvent) => void,

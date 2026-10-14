@@ -56,6 +56,13 @@
 - **REST/SSE API Adapter**: `VITE_LYSSTACK_API_URL` is retained as an intentional compatibility configuration key and points to Hermes. If unavailable, LysControl shows a `disconnected` state rather than hiding failures behind mocks.
 - **Connection Indicator**: Header connection indicator reflects live network state (`connected`, `connecting`, `disconnected`, `mock mode`).
 
+### 🟣 EXECUTION PAGE (D-009, Phase B: frontend built against the contract)
+- **Execution route (`/execution`)**: backend status strip (subprocess, herdr, openrig daemon and ledger), live resource cards grouped by backend (state, job/task, reused badge, generation, pooled-seat expiry countdown, failed resources highlighted in red), and a recent `execution.*` timeline.
+- **Snapshot + events**: loads `GET /execution` (`getExecutionSnapshot`) on start and again after an SSE reconnect. `execution.*` events from the existing stream are applied on top. Events received while a snapshot is in flight are buffered and replayed. Duplicate event ids are ignored and stale per-resource events (older `rawTs`) are dropped.
+- **Job detail**: each task's backend and resource badge (grouped by `taskId` from execution events), linking to the Execution page.
+- **Settings / Sidebar**: the static "Herdr sandbox" panel is removed. The Sidebar Herdr status and the Settings backend list now come from the execution snapshot.
+- **Status**: frontend complete and covered by mock-backed tests. Real data depends on Hermes Phase A (`GET /execution` and the `execution.*` event kinds). Until that lands, mock mode shows fixtures with a "MOCK FIXTURES" banner.
+
 ### 🟡 SIMULATED TEMPORARILY (Transitioning in Phase 4)
 - **Jobs & Queue Lifecycle**: Job details, execution graph mutations, and retry triggers.
 - **Provider Quotas & Burn Telemetry**: Quota meters and projection estimations.
@@ -101,7 +108,7 @@ Open `http://localhost:3000` (or Vite's output port) to access the console.
 # Frontend checks (LysControl)
 npm run typecheck  # TypeScript compiler validation (0 errors)
 npm run lint       # ESLint flat config inspection (0 errors)
-npm run test       # Vitest unit & architectural isolation suite (6 suites, 19 tests)
+npm run test       # Vitest unit & architectural isolation suite (14 suites, 62 tests)
 npm run build      # Vite production bundle build
 
 # Backend checks (hermes-lab)
@@ -121,19 +128,20 @@ LysControl/
 │   │   ├── types.ts               # Domain models (AgentSummary, TraceEvent, HealthStatus)
 │   │   ├── actors.ts              # Domain actor presentation resolver (registry -> system -> fallback)
 │   │   ├── client.ts              # Pluggable API client factory (HTTP vs Mock adapter)
-│   │   ├── hooks.ts               # React hooks (useHealth, useAgents, useEventStream, useJobs)
+│   │   ├── hooks.ts               # React hooks (useHealth, useAgents, useEventStream, useJobs, useExecution)
 │   │   ├── adapters/
 │   │   │   ├── httpAdapter.ts     # Hermes REST + SSE adapter (legacy class name)
 │   │   │   └── mockAdapter.ts     # Standalone offline mock adapter
-│   │   └── mock/                  # Pure mock fixtures (isolated behind mockAdapter)
+│   │   └── mock/                  # Pure mock fixtures (isolated behind mockAdapter; execution.ts for D-009)
 │   ├── components/                # Layout, Sidebar, Header, JobModal, DossierModal
 │   ├── features/
 │   │   ├── agents/                # Agent portraits, meters, activity, metrics grids
 │   │   ├── jobs/                  # Execution graph, queue tables, active execution cards
 │   │   ├── messaging/             # Command dispatcher & tactical messaging
+│   │   ├── execution/             # D-009 Execution page: backend strip, resource cards, timeline, job task badges
 │   │   └── telemetry/             # Top metrics, quota lists, risk alerts
-│   ├── routes/                    # Overview, Queue, Agents, AgentDetail, Usage, Events, Settings
-│   ├── stores/                    # Zustand UI store (useConsoleStore)
+│   ├── routes/                    # Overview, Queue, Agents, AgentDetail, Usage, Events, Execution, Settings
+│   ├── stores/                    # Zustand UI store (useConsoleStore), execution store + pure reducer (useExecutionStore, executionReducer)
 │   └── styles/                    # Cybernetic theme CSS
 ├── public/agents/                 # Web-optimized WebP avatar crops & character cards
 └── design-reference/              # Reference cards & prototype snapshots

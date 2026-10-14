@@ -19,6 +19,19 @@ export const SYSTEM_ACTORS: Record<string, ActorRef> = {
     displayName: 'Herdr',
     accentColor: '#8C949F'
   },
+  // D-009 execution backends (source_kind="runtime", source_id=<backend>)
+  openrig: {
+    id: 'openrig',
+    kind: 'runtime',
+    displayName: 'OpenRig',
+    accentColor: '#7FB3D5'
+  },
+  subprocess: {
+    id: 'subprocess',
+    kind: 'runtime',
+    displayName: 'Subprocess',
+    accentColor: '#8C949F'
+  },
   // Legacy actor ID retained for events/messages created before the runtime was renamed.
   lysstack: {
     id: 'hermes',

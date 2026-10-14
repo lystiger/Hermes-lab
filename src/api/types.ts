@@ -338,6 +338,7 @@ export interface TraceEvent {
   detail: string;
   dur: string;
   jobId?: string;
+  taskId?: string;
   metadata?: Record<string, any>;
 }
 
@@ -497,4 +498,85 @@ export interface SubagentProfile {
   depth?: number;
   ephemeral?: boolean;
   metadata?: Record<string, any>;
+}
+
+// D-009 Execution visibility (Hermes -> LysControl). Source of truth: Hermes-lab .agent/DECISIONS.md, D-009.
+export type ExecutionBackendName = string; // 'subprocess' | 'herdr' | 'openrig' | open string
+
+export type ExecutionResourceKind = 'seat' | 'pane' | 'process' | string;
+
+export type ExecutionResourceState = 'acquiring' | 'ready' | 'running' | 'idle' | 'releasing' | 'failed';
+
+export type ExecutionEventKind =
+  | 'execution.started'
+  | 'execution.resource_acquired'
+  | 'execution.resource_ready'
+  | 'execution.running'
+  | 'execution.finished'
+  | 'execution.failed'
+  | 'execution.cancelled'
+  | 'execution.resource_pooled'
+  | 'execution.resource_released'
+  | 'execution.release_failed';
+
+export interface ExecutionResourceRef {
+  kind: ExecutionResourceKind;
+  id: string;
+  label: string;
+}
+
+/** `metadata` of an `execution.*` TraceEvent. Every field is optional except backend and executionId. */
+export interface ExecutionEventMetadata {
+  backend: ExecutionBackendName;
+  executionId: string;
+  resource?: ExecutionResourceRef;
+  reused?: boolean;
+  generation?: string;
+  rigId?: string;
+  sessionName?: string;
+  nodeId?: string;
+  expiresAt?: string;
+  errorCode?: string;
+  error?: string;
+  durationMs?: number;
+}
+
+export interface ExecutionBackendStatus {
+  name: ExecutionBackendName;
+  available: boolean;
+  detail: string;
+}
+
+export interface ExecutionResource {
+  backend: ExecutionBackendName;
+  kind: ExecutionResourceKind;
+  id: string;
+  label: string;
+  state: ExecutionResourceState;
+  jobId?: string | null;
+  taskId?: string | null;
+  executionId?: string | null;
+  since: string;
+  expiresAt: string | null;
+  /** Free-form per-backend details (reused, generation, rigId, errorCode, error, ...). */
+  details: Record<string, any>;
+}
+
+export interface OpenRigLedger {
+  owners: number;
+  rigIds: string[];
+}
+
+export interface OpenRigExecutionStatus {
+  daemon: 'up' | 'down' | 'unknown';
+  ledger: OpenRigLedger;
+}
+
+/** GET /execution. Initial state; `execution.*` events are applied on top of it. */
+export interface ExecutionSnapshot {
+  backends: ExecutionBackendStatus[];
+  resources: ExecutionResource[];
+  openrig: OpenRigExecutionStatus | null;
+  /** Epoch seconds (same clock as event rawTs). Events at or before it are already reflected. */
+  takenAt?: number;
 }

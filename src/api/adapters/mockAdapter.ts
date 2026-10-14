@@ -13,7 +13,8 @@ import {
   OverviewTelemetry,
   Thread,
   Message,
-  MailboxEntry
+  MailboxEntry,
+  ExecutionSnapshot
 } from '../types';
 import { MOCK_AGENTS, createDynamicMockAgent } from '../mock/agents';
 import { MOCK_JOBS, MOCK_PIPELINE, MOCK_ACTIVE_JOB_DETAIL } from '../mock/jobs';
@@ -25,6 +26,11 @@ import {
   MOCK_POLICY_SETTINGS
 } from '../mock/telemetry';
 import { RAW_SEED_EVENTS, RAW_POOL_EVENTS } from '../mock/events';
+import {
+  createMockExecutionHistory,
+  createMockExecutionScript,
+  createMockExecutionSnapshot
+} from '../mock/execution';
 import { resolveActorPresentation } from '../actors';
 
 function fmtTs(sec: number): string {
@@ -42,6 +48,7 @@ export class MockHermesApi implements HermesApi {
   private pipeline: PipelineStep[] = [...MOCK_PIPELINE];
   private simTick = 0;
   private lastSimTs = 10 * 3600 + 42 * 60 + 47.4;
+  private execSeq = 0;
   async getHealth() {
     return {
       status: 'ok',
@@ -133,11 +140,15 @@ export class MockHermesApi implements HermesApi {
     };
   }
 
+  async getExecutionSnapshot(): Promise<ExecutionSnapshot> {
+    return createMockExecutionSnapshot();
+  }
+
   async getTraceEvents(limit = 20): Promise<TraceEvent[]> {
     const baseTs = 10 * 3600 + 42 * 60 + 16;
     const agentList = Object.values(this.agents);
 
-    return RAW_SEED_EVENTS.slice(0, limit).map((e, idx) => ({
+    const seeds = RAW_SEED_EVENTS.slice(0, limit).map((e, idx) => ({
       id: `seed-${idx}`,
       ts: fmtTs(baseTs + e.t),
       rawTs: baseTs + e.t,
@@ -147,6 +158,8 @@ export class MockHermesApi implements HermesApi {
       dur: e.dur || '—',
       jobId: '#142'
     })).reverse();
+
+    return [...seeds, ...createMockExecutionHistory(fmtTs)];
   }
 
   subscribeEvents(
@@ -155,6 +168,17 @@ export class MockHermesApi implements HermesApi {
     _initialCursor?: string
   ): EventSubscription {
     const agentList = Object.values(this.agents);
+
+    // Scripted execution lifecycles (subprocess) on a slower cadence than the agent pool.
+    let execQueue: TraceEvent[] = [];
+    const execTimer = setInterval(() => {
+      if (execQueue.length === 0) {
+        this.execSeq += 1;
+        execQueue = createMockExecutionScript(this.execSeq, this.lastSimTs, fmtTs);
+      }
+      const next = execQueue.shift();
+      if (next) handler(next);
+    }, 4000);
 
     const timer = setInterval(() => {
       this.simTick += 1;
@@ -179,6 +203,7 @@ export class MockHermesApi implements HermesApi {
     return {
       unsubscribe: () => {
         clearInterval(timer);
+        clearInterval(execTimer);
       }
     };
   }

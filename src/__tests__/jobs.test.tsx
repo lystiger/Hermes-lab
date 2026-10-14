@@ -1,5 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
 import { render, screen } from '@testing-library/react';
+import { MemoryRouter } from 'react-router-dom';
 import { QueueTable } from '../features/jobs/QueueTable';
 import { JobDetailView } from '../features/jobs/JobDetailView';
 import { Job, JobDetail } from '../api/types';
@@ -63,7 +64,11 @@ describe('Job Queue & Arbitrary Agent Reference', () => {
       refetch: vi.fn()
     });
 
-    render(<JobDetailView jobId="run_custom_sprint_99" />);
+    render(
+      <MemoryRouter>
+        <JobDetailView jobId="run_custom_sprint_99" />
+      </MemoryRouter>
+    );
 
     expect(await screen.findByText('run_custom_sprint_99')).toBeInTheDocument();
     expect(screen.getByText('Custom Multi-Step Sprint')).toBeInTheDocument();

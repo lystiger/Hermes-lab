@@ -3,6 +3,7 @@ import { useConsoleStore } from '../../stores/useConsoleStore';
 import { useJob, useAgents } from '../../api/hooks';
 import { resolveActorPresentation } from '../../api/actors';
 import { OperationalThreadView } from '../messaging/OperationalThreadView';
+import { JobTaskExecution } from '../execution/JobTaskExecution';
 
 interface JobDetailViewProps {
   jobId?: string;
@@ -183,6 +184,9 @@ export const JobDetailView: React.FC<JobDetailViewProps> = ({ jobId = '' }) => {
             jobId={job.id}
             assignedAgentIds={job.assignedAgentIds}
           />
+
+          {/* Backend execution per task (D-009) */}
+          <JobTaskExecution events={jobEvents} />
 
           {/* Execution Trace */}
           <div className="pb-8">

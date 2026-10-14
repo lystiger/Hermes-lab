@@ -21,6 +21,8 @@ import {
 } from './types';
 import { resolveActorPresentation } from './actors';
 import { useConsoleStore } from '../stores/useConsoleStore';
+import { useExecutionStore } from '../stores/useExecutionStore';
+import { isExecutionEvent } from '../stores/executionReducer';
 
 export function useHealth() {
   const [health, setHealth] = useState<HealthStatus | null>(null);
@@ -268,6 +270,8 @@ export function useEventStream() {
   useEffect(() => {
     let isSubscribed = true;
     let eventSub: EventSubscription | null = null;
+    // Set when the SSE connection errors; the next delivered event proves it is back, so state is resynced.
+    let streamDropped = false;
 
     async function initStream() {
       // 1. Initial Health Check
@@ -289,6 +293,14 @@ export function useEventStream() {
         const history = await hermesApi.getTraceEvents(100);
         if (isSubscribed) {
           setInitialEvents(history);
+          // Close the snapshot -> stream gap: execution events that happened after the snapshot but before
+          // the SSE cursor only exist in this history. Replay them oldest first; the store dedupes by id and
+          // holds them behind any snapshot still in flight.
+          const executionStore = useExecutionStore.getState();
+          [...history]
+            .filter((e) => isExecutionEvent(e))
+            .sort((a, b) => a.rawTs - b.rawTs)
+            .forEach((e) => executionStore.applyEvent(e));
           if (history.length > 0) {
             // Find newest event by highest raw timestamp (Item 2)
             const newestEvent = history.reduce((prev, curr) => (curr.rawTs > prev.rawTs ? curr : prev));
@@ -308,9 +320,18 @@ export function useEventStream() {
             if (isSubscribed) {
               addTraceEvent(evt);
               setConnectionStatus('CONNECTED');
+              if (streamDropped) {
+                // Events were missed while disconnected: reset execution state to a fresh snapshot.
+                streamDropped = false;
+                void useExecutionStore.getState().refreshSnapshot();
+              }
+              if (isExecutionEvent(evt)) {
+                useExecutionStore.getState().applyEvent(evt);
+              }
             }
           },
           () => {
+            streamDropped = true;
             if (isSubscribed && isRealApiMode) {
               setConnectionStatus('DISCONNECTED');
             }
@@ -329,6 +350,23 @@ export function useEventStream() {
       }
     };
   }, [addTraceEvent, setInitialEvents, setConnectionStatus, setBackendHealth]);
+}
+
+/** Loads the D-009 execution snapshot once on mount. Live `execution.*` events are applied by useEventStream. */
+export function useExecutionSnapshotLoader() {
+  useEffect(() => {
+    void useExecutionStore.getState().refreshSnapshot();
+  }, []);
+}
+
+/** Execution view (snapshot + events) and load status for components. */
+export function useExecution() {
+  const view = useExecutionStore((s) => s.view);
+  const snapshotStatus = useExecutionStore((s) => s.snapshotStatus);
+  const snapshotError = useExecutionStore((s) => s.snapshotError);
+  const snapshotLoadedAt = useExecutionStore((s) => s.snapshotLoadedAt);
+  const refresh = useExecutionStore((s) => s.refreshSnapshot);
+  return { view, snapshotStatus, snapshotError, snapshotLoadedAt, refresh };
 }
 
 export function useActorPresentation(actorIdentifier: string): ActorRef {

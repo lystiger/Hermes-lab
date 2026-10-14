@@ -4,11 +4,13 @@ import { Sidebar } from './Sidebar';
 import { Header } from './Header';
 import { JobModal } from './JobModal';
 import { DossierModal } from './DossierModal';
-import { useEventStream } from '../api/hooks';
+import { useEventStream, useExecutionSnapshotLoader } from '../api/hooks';
 
 export const Layout: React.FC = () => {
   // Mount the Hermes event stream subscription.
   useEventStream();
+  // Initial D-009 execution snapshot (live events are applied by the stream).
+  useExecutionSnapshotLoader();
 
   return (
     <div className="flex h-screen min-h-screen bg-[#0A0B0D] text-[#E6E9ED] text-[13px] overflow-hidden">

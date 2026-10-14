@@ -16,6 +16,7 @@ Provides:
 
 import asyncio
 from collections import deque
+import dataclasses
 from datetime import datetime, timezone
 import json
 import logging
@@ -839,7 +840,7 @@ class HermesActorAdapter(ActorAdapter):
                 sprint_id=task.job_id,
                 logger=logger,
                 cancel_event=cancel_event,
-                event_sink=self._on_execution_event,
+                event_sink=self._task_event_sink(task, run, actor_id),
             )
             with self._job_backends_lock:
                 self._job_backends.setdefault(task.job_id, set()).add(backend_name)
@@ -1132,6 +1133,22 @@ class HermesActorAdapter(ActorAdapter):
                 # A drain scheduled on a previous loop may never finish; let this loop start one.
                 self._event_drain_running = False
 
+    def _task_event_sink(self, task: TaskNode, run: AgentRun, actor_id: str):
+        """A sink for one task's backend that stamps the runtime ids backends cannot know."""
+        def sink(event: Any) -> None:
+            try:
+                event = dataclasses.replace(
+                    event,
+                    task_id=event.task_id or task.task_id,
+                    run_id=event.run_id or run.run_id,
+                    actor_id=event.actor_id or actor_id,
+                )
+            except Exception:  # noqa: BLE001 - never fail an execution over observability
+                pass
+            self._on_execution_event(event)
+
+        return sink
+
     def _on_execution_event(self, event: Any) -> None:
         """D-009 sink for backends. Runs on worker and timer threads: it never blocks and never raises.
 
@@ -1176,6 +1193,9 @@ class HermesActorAdapter(ActorAdapter):
                     kind=event.kind,
                     detail=event.detail,
                     job_id=event.job_id,
+                    task_id=getattr(event, "task_id", None),
+                    run_id=getattr(event, "run_id", None),
+                    actor_id=getattr(event, "actor_id", None),
                     metadata=dict(event.metadata),
                 )
             except Exception:  # noqa: BLE001 - one lost event must not stall the rest

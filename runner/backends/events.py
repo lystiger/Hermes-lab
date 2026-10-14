@@ -51,6 +51,10 @@ class ExecutionEvent:
     job_id: Optional[str]
     detail: str
     metadata: Mapping[str, Any]
+    # Runtime context the backend does not know; the adapter binds it per task (D-009 task_id etc.).
+    task_id: Optional[str] = None
+    run_id: Optional[str] = None
+    actor_id: Optional[str] = None
 
 
 ExecutionEventSink = Callable[[ExecutionEvent], None]

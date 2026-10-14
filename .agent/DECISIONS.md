@@ -386,8 +386,9 @@ spell out. Human review is requested for them.
    workspace when `keep_workspace` is set. The registry drops the row.
 3. **Orphan releases get `executionId = "release:<rigId>"`.** This covers ledger reconcile and `cleanup()` retries of a rig
    that no task holds.
-4. **`task_id` is not set.** Backends do not know the runtime task. Events carry `job_id` and `executionId`. Adding `taskId`
-   needs the adapter to pass the task down through the request.
+4. **`task_id` is set by the adapter (reviewer fix).** Backends do not know the runtime task, so `HermesActorAdapter` gives
+   each task's backend a sink that stamps `task_id`, `run_id` and `actor_id` on its events and registry rows. A pooled seat's
+   later events (expiry, release) keep the ids of the last task that held it.
 5. **Failures precede releases.** Within one execution the terminal event (`failed`/`cancelled`) is recorded before its
    `resource_released`, so the stream reads in causal order.
 6. **Resource states in the snapshot.** `acquiring` after `acquired`, `ready`, `running`, `releasing` after `failed` or

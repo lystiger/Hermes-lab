@@ -630,6 +630,12 @@ def test_openrig_task_through_the_runtime_is_persisted_in_order(tmp_path, clock,
     assert {p["source_id"] for p in bridge.persisted} == {"openrig"}
     assert {p["job_id"] for p in bridge.persisted} == {job_id}
     assert all(p["metadata"]["backend"] == "openrig" for p in bridge.persisted)
+    # Backends do not know the runtime task; the adapter stamps it so the UI can link task -> resource.
+    assert {p["task_id"] for p in bridge.persisted} == {"T1"}
+    assert {p["run_id"] for p in bridge.persisted} == {"r1"}
+    assert {p["actor_id"] for p in bridge.persisted} == {"claude"}
+    from runner.backends.execution_registry import default_execution_registry
+    assert any(row["taskId"] == "T1" for row in default_execution_registry.resources())
 
 
 # --- registry and snapshot ---------------------------------------------------------

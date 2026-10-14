@@ -62,6 +62,8 @@ class ExecutionRegistry:
             entry["executionId"] = metadata.get("executionId")
             if event.job_id:
                 entry["jobId"] = event.job_id
+            if getattr(event, "task_id", None):
+                entry["taskId"] = event.task_id
             for name in _DETAIL_KEYS:
                 if name in metadata:
                     entry["details"][name] = metadata[name]

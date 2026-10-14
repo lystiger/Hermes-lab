@@ -1,9 +1,12 @@
+import atexit
 import json
 import re
 import secrets
 import shutil
 import subprocess
+import threading
 import time
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -22,14 +25,158 @@ RELEASE_TIMEOUT_SECONDS = 60
 ORPHAN_RECOVERY_SECONDS = 20
 ORPHAN_RECOVERY_ATTEMPTS = 3
 SEND_IDLE_WAIT_SECONDS = 30
+# An idle pooled seat is released after this long; there is no job-end signal yet.
+SEAT_IDLE_SECONDS = 120
+
+
+@dataclass
+class _Seat:
+    """One Hermes-owned single-seat rig, reusable within one job."""
+
+    job: str
+    rig_id: str
+    rig_name: str
+    session: str
+    rig_dir: Path
+    granted_root: Path
+    release: object  # callable(rig_id) bound to the backend that created the rig
+    generation: str = None  # occupant generation of the last task; a reuse must differ
+
+    @property
+    def seat_dir(self):
+        return self.rig_dir / "seat"
+
+
+class _SeatPool:
+    """Idle seats keyed by job. A seat is held by at most one task at a time.
+
+    Once a seat leaves the pool for teardown (expiry or drain) the pool owns that
+    teardown: a failed release is kept for drain() to retry, and drain() waits for
+    teardowns already running on timer threads, then re-issues any still stuck.
+    """
+
+    def __init__(self, idle_seconds=SEAT_IDLE_SECONDS, timer_factory=threading.Timer):
+        self.idle_seconds = idle_seconds
+        self._timer_factory = timer_factory
+        self._lock = threading.Lock()
+        self._settled = threading.Condition(self._lock)
+        self._idle = {}
+        self._timers = {}  # rig_id -> (timer, token); the token fences stale callbacks
+        self._failed = {}  # rig_id -> seat whose teardown raised; retried by drain()
+        self._inflight = {}  # rig_id -> seat whose teardown is running right now
+
+    def acquire(self, job, worktree):
+        worktree = Path(worktree).resolve()
+        with self._lock:
+            seats = self._idle.get(job, [])
+            for seat in seats:
+                if seat.granted_root == worktree or seat.granted_root in worktree.parents:
+                    seats.remove(seat)
+                    timer, _ = self._timers.pop(seat.rig_id, (None, None))
+                    if timer is not None:
+                        timer.cancel()
+                    return seat
+        return None
+
+    def put(self, seat):
+        token = object()
+        timer = self._timer_factory(self.idle_seconds, self._expire, (seat.rig_id, token))
+        timer.daemon = True
+        with self._lock:
+            self._idle.setdefault(seat.job, []).append(seat)
+            self._timers[seat.rig_id] = (timer, token)
+        try:
+            timer.start()
+        except BaseException:
+            # Without an expiry timer the seat must not stay leasable; the caller
+            # still owns it and tears it down.
+            with self._lock:
+                if self._timers.get(seat.rig_id, (None, None))[1] is token:
+                    del self._timers[seat.rig_id]
+                group = self._idle.get(seat.job, [])
+                if seat in group:
+                    group.remove(seat)
+            raise
+
+    def _expire(self, rig_id, token):
+        with self._lock:
+            # A callback that already entered when its timer was cancelled must not
+            # remove the seat from a later idle period.
+            if self._timers.get(rig_id, (None, None))[1] is not token:
+                return
+            del self._timers[rig_id]
+            seat = next(
+                (s for group in self._idle.values() for s in group if s.rig_id == rig_id), None
+            )
+            if seat is None:
+                return
+            self._idle[seat.job].remove(seat)
+            self._inflight[rig_id] = seat
+        self._release(seat)
+
+    def _release(self, seat):
+        """Tear one seat down; caller has already recorded it in _inflight."""
+        try:
+            seat.release(seat.rig_id)
+            failed = False
+        except Exception:  # noqa: BLE001 - logged by the releasing backend; kept for retry
+            failed = True
+        with self._lock:
+            self._inflight.pop(seat.rig_id, None)
+            if failed:
+                self._failed[seat.rig_id] = seat
+            else:
+                self._failed.pop(seat.rig_id, None)
+            self._settled.notify_all()
+
+    def drain(self, wait_seconds=RELEASE_TIMEOUT_SECONDS):
+        """Release every idle seat and retry failed teardowns (process exit, tests)."""
+        with self._lock:
+            # Let teardowns already running on timer threads finish first.
+            settled = self._settled.wait_for(lambda: not self._inflight, timeout=wait_seconds)
+            seats = [seat for group in self._idle.values() for seat in group]
+            seats += list(self._failed.values())
+            if not settled:
+                # A timer thread is stuck; exit would kill it mid-teardown. Re-issue
+                # the teardown here (rig down by id is idempotent: "No rig found" is success).
+                seats += [s for s in self._inflight.values() if s not in seats]
+            timers = [timer for timer, _ in self._timers.values()]
+            self._idle.clear()
+            self._timers.clear()
+            self._failed.clear()
+            for seat in seats:
+                self._inflight[seat.rig_id] = seat
+        for timer in timers:
+            timer.cancel()
+        for seat in seats:
+            self._release(seat)
+
+    def idle_rig_ids(self, job=None):
+        with self._lock:
+            groups = [self._idle.get(job, [])] if job is not None else list(self._idle.values())
+            return [seat.rig_id for group in groups for seat in group]
+
+    def failed_rig_ids(self):
+        with self._lock:
+            return list(self._failed)
+
+    def inflight_rig_ids(self):
+        with self._lock:
+            return list(self._inflight)
+
+
+DEFAULT_SEAT_POOL = _SeatPool()
+atexit.register(DEFAULT_SEAT_POOL.drain)
 
 
 class OpenRigBackend(ExecutionBackend):
-    """Run one task in an ephemeral, Hermes-owned single-seat OpenRig rig.
+    """Run one task on a Hermes-owned single-seat OpenRig rig.
 
     OpenRig owns the seat lifecycle; Hermes owns everything else. Each execute()
-    launches its own rig, proves completion from runtime-hook evidence plus a
-    nonce-bound result file, and tears the rig down by its exact rigId.
+    leases a warm seat of the same job (giving it a fresh occupant) or launches a
+    new rig, proves completion from runtime-hook evidence plus a nonce-bound result
+    file, and returns the seat to the per-job pool. Any failure tears the rig down
+    by its exact rigId.
     """
 
     name = "openrig"
@@ -46,6 +193,7 @@ class OpenRigBackend(ExecutionBackend):
         monotonic=None,
         sleep=None,
         utcnow=None,
+        seat_pool=None,
         **kwargs,
     ):
         self.run_dir = Path(run_dir)
@@ -61,6 +209,8 @@ class OpenRigBackend(ExecutionBackend):
         self.openrig_dir = self.run_dir / "openrig"
         self.owned_rig_ids = []
         self.released_rig_ids = []
+        self.pooled_rig_ids = []
+        self.seat_pool = seat_pool if seat_pool is not None else DEFAULT_SEAT_POOL
         self._preexisting_rig_ids = set()
 
     # -- contract -------------------------------------------------------------
@@ -82,48 +232,66 @@ class OpenRigBackend(ExecutionBackend):
             )
 
         version = self.preflight(deadline)
-        rig_name = self._rig_name()
-        rig_dir = self.openrig_dir / rig_name
-        seat_dir = rig_dir / "seat"
         nonce = secrets.token_hex(8)
-        result_file = seat_dir / f"hermes-result-{nonce}.json"
-        metadata = {
-            "openrig_version": version,
-            "openrig_rig_name": rig_name,
-            "openrig_runtime": runtime,
-        }
+        metadata = {"openrig_version": version, "openrig_runtime": runtime}
+        seat = self.seat_pool.acquire(self.sprint_id, request.cwd)
 
         try:
-            spec_path = self._write_spec(rig_dir, seat_dir, rig_name, runtime, request.cwd)
-            rig_id, session = self._launch(spec_path, rig_name, deadline)
-            metadata.update(openrig_rig_id=rig_id, openrig_session_name=session)
+            if seat is not None:
+                # This lease owns the seat again until it is handed back to the pool.
+                if seat.rig_id in self.pooled_rig_ids:
+                    self.pooled_rig_ids.remove(seat.rig_id)
+                if seat.rig_id not in self.owned_rig_ids:
+                    self.owned_rig_ids.append(seat.rig_id)
+                expected_generation = self._fresh_occupant(seat, deadline)
+            else:
+                seat = self._new_seat(runtime, request.cwd, deadline)
+                expected_generation = None
+            metadata.update(
+                openrig_rig_name=seat.rig_name,
+                openrig_rig_id=seat.rig_id,
+                openrig_session_name=seat.session,
+                openrig_seat_reused=expected_generation is not None,
+            )
 
-            ready = self._wait_until_ready(rig_name, rig_id, session, deadline)
+            ready = self._wait_until_ready(
+                seat.rig_name, seat.rig_id, seat.session, deadline, expected_generation,
+            )
             generation = ready["agentActivity"].get("generation")
             if not isinstance(generation, str) or not generation:
                 raise SprintRunnerError(
                     "FAILED_OPENRIG_PROTOCOL",
-                    f"OpenRig seat {session} reported no occupant generation",
+                    f"OpenRig seat {seat.session} reported no occupant generation",
                 )
             metadata.update(openrig_node_id=ready.get("nodeId"), openrig_generation=generation)
 
+            result_file = seat.seat_dir / f"hermes-result-{nonce}.json"
             send_started = self._utcnow()
-            self._send(session, self._task_text(prompt, request.cwd, result_file), deadline)
+            self._send(seat.session, self._task_text(prompt, request.cwd, result_file), deadline)
             send_confirmed = self._utcnow()
             started = self._wait_for_completion(
-                rig_name, rig_id, session, send_started, send_confirmed, generation, deadline,
+                seat.rig_name, seat.rig_id, seat.session,
+                send_started, send_confirmed, generation, deadline,
             )
             metadata["openrig_turn_started"] = started
 
             outcome = self._read_result(result_file)
-            self._save_transcript(session, rig_dir, deadline)
+            self._save_transcript(seat.session, seat.rig_dir / f"transcript-{nonce}.txt", deadline)
+
+            # Clean protocol completion: the seat is healthy enough to serve the job again.
+            seat.generation = generation
+            self.seat_pool.put(seat)
+            self.pooled_rig_ids.append(seat.rig_id)
         finally:
             # Covers rigs recorded by _launch even when it raised afterwards.
             for owned in list(self.owned_rig_ids):
-                if owned not in self.released_rig_ids:
+                if owned not in self.released_rig_ids and owned not in self.pooled_rig_ids:
                     self._release_quietly(owned)
 
-        unreleased = [r for r in self.owned_rig_ids if r not in self.released_rig_ids]
+        unreleased = [
+            r for r in self.owned_rig_ids
+            if r not in self.released_rig_ids and r not in self.pooled_rig_ids
+        ]
         if unreleased:
             raise SprintRunnerError(
                 "FAILED_OPENRIG_UNAVAILABLE",
@@ -153,8 +321,9 @@ class OpenRigBackend(ExecutionBackend):
         )
 
     def cleanup(self, success=False):
+        # Seats handed back to the pool belong to the pool, not to this lease.
         for rig_id in list(self.owned_rig_ids):
-            if rig_id not in self.released_rig_ids:
+            if rig_id not in self.released_rig_ids and rig_id not in self.pooled_rig_ids:
                 self._release(rig_id)
 
     # -- lifecycle steps ------------------------------------------------------
@@ -184,7 +353,45 @@ class OpenRigBackend(ExecutionBackend):
         }
         return match.group(1)
 
-    def _write_spec(self, rig_dir, seat_dir, rig_name, runtime, worktree):
+    def _new_seat(self, runtime, worktree, deadline):
+        rig_name = self._rig_name()
+        rig_dir = self.openrig_dir / rig_name
+        # Grant the worktree's parent so later tasks of this job (sibling worktrees)
+        # can reuse the seat; the prompt still confines work to the task worktree.
+        granted_root = Path(worktree).resolve().parent
+        spec_path = self._write_spec(rig_dir, rig_dir / "seat", rig_name, runtime, granted_root)
+        rig_id, session = self._launch(spec_path, rig_name, deadline)
+        return _Seat(
+            job=self.sprint_id, rig_id=rig_id, rig_name=rig_name, session=session,
+            rig_dir=rig_dir, granted_root=granted_root, release=self._release,
+        )
+
+    def _fresh_occupant(self, seat, deadline):
+        """Replace a pooled seat's occupant with a blank conversation; return its generation."""
+        payload = self._run_json(
+            ["seat", "launch", seat.session, "--fresh", "--stop",
+             "--reason", "hermes: fresh context for the next task", "--json"],
+            deadline, "FAILED_OPENRIG_SEAT_NOT_READY", allow_failure_payload=True,
+        )
+        info = payload.get("seat") if isinstance(payload, dict) else None
+        generation = payload.get("generation") if isinstance(payload, dict) else None
+        if (
+            not isinstance(info, dict)
+            or payload.get("ok") is not True
+            or info.get("rigId") != seat.rig_id
+            or payload.get("sessionName") != seat.session
+            or not isinstance(generation, str)
+            or not generation
+            or generation == seat.generation
+        ):
+            raise SprintRunnerError(
+                "FAILED_OPENRIG_SEAT_NOT_READY",
+                f"rig seat launch --fresh failed for {seat.session}: {_brief(payload)}",
+            )
+        self._log("info", "OpenRig seat %s relaunched fresh for reuse", seat.session)
+        return generation
+
+    def _write_spec(self, rig_dir, seat_dir, rig_name, runtime, granted_root):
         # Imported lazily: agents -> backends -> agents.claude would be circular.
         from agents.claude import CLAUDE_GIT_MUTATION_DENIALS
 
@@ -195,7 +402,7 @@ class OpenRigBackend(ExecutionBackend):
             "permissions": {
                 "allow": ["Bash", "Edit", "Write", "Read"],
                 "deny": list(CLAUDE_GIT_MUTATION_DENIALS),
-                "additionalDirectories": [str(Path(worktree).resolve())],
+                "additionalDirectories": [str(Path(granted_root).resolve())],
             }
         }
         _write_json(agent_dir / "runtime" / "hermes-settings.fragment.json", settings)
@@ -318,7 +525,7 @@ class OpenRigBackend(ExecutionBackend):
                 return
         self._log("error", "Could not confirm whether OpenRig rig %s was created", rig_name)
 
-    def _wait_until_ready(self, rig_name, rig_id, session, deadline):
+    def _wait_until_ready(self, rig_name, rig_id, session, deadline, expected_generation=None):
         while True:
             node = self._node(rig_name, rig_id, session, deadline)
             if node is None:
@@ -337,7 +544,11 @@ class OpenRigBackend(ExecutionBackend):
                     "FAILED_OPENRIG_SEAT_NOT_READY",
                     f"OpenRig seat {session} needs input during startup ({activity.get('reason')})",
                 )
-            if startup == "ready" and _hook_event(activity, "Stop", "idle"):
+            if (
+                startup == "ready"
+                and _hook_event(activity, "Stop", "idle")
+                and (expected_generation is None or activity.get("generation") == expected_generation)
+            ):
                 return node
             self._pause(deadline, f"OpenRig seat {session} did not become ready")
 
@@ -410,7 +621,7 @@ class OpenRigBackend(ExecutionBackend):
             )
         return data
 
-    def _save_transcript(self, session, rig_dir, deadline):
+    def _save_transcript(self, session, transcript_file, deadline):
         try:
             payload = self._run_json(
                 ["transcript", session, "--json", "--tail", "200"], deadline,
@@ -418,7 +629,7 @@ class OpenRigBackend(ExecutionBackend):
             )
             content = payload.get("content") if isinstance(payload, dict) else None
             if isinstance(content, str):
-                (rig_dir / "transcript.txt").write_text(content, encoding="utf-8")
+                transcript_file.write_text(content, encoding="utf-8")
         except SprintRunnerError as exc:
             # Diagnostics only; the result is already proven.
             self._log("warning", "OpenRig transcript capture failed: %s", exc.message)

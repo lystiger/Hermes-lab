@@ -11,7 +11,7 @@ Hermes (sprint runner / ReactiveJobEngine → HermesActorAdapter)
         └── ExecutionBackend.execute(ExecutionRequest) -> ExecutionResult
               ├── SubprocessBackend   "subprocess"  one-shot child process
               ├── HerdrBackend        "herdr"       one-shot CLI in a runner-owned persistent Herdr pane
-              └── OpenRigBackend      "openrig"     one task in an ephemeral Hermes-owned OpenRig seat
+              └── OpenRigBackend      "openrig"     one task on a Hermes-owned OpenRig seat, warm-pooled per job
 ```
 
 ## Contract (`base.py`)
@@ -112,11 +112,14 @@ authenticated. Hermes runs no setup and changes no global OpenRig or Claude sett
 ### Lifecycle of one `execute()`
 
 1. **Preflight.** Checks that `rig` exists, `rig --version` is 0.6.x, and `rig ps --json` answers (daemon up).
-2. **Launch.** Writes a Hermes-owned rig spec and a minimal AgentSpec (no persona, skills or plugins)
+2. **Lease or launch.** First tries to lease an idle seat from the per-job pool (see "Seat reuse" below).
+   Otherwise it writes a Hermes-owned rig spec and a minimal AgentSpec (no persona, skills or plugins)
    under `<run_dir>/openrig/<rig-name>/`, then runs `rig up <spec> --json`. The rig name is
    `hermes-<sprint>-<8 random hex>`, and the exact `rigId` returned is recorded as owned. The seat's cwd
    is `<rig-dir>/seat`, **not** the worktree, because OpenRig projects `.claude/`, `.mcp.json` and
-   `.openrig/` into the cwd. The worktree is reachable through `permissions.additionalDirectories`.
+   `.openrig/` into the cwd. The worktree's **parent** directory is granted through
+   `permissions.additionalDirectories`, so sibling task worktrees of the same job can reuse the seat.
+   The prompt still confines the agent to its own task worktree.
 3. **Permissions.** The settings fragment allows Bash/Edit/Write/Read and denies Hermes's git-mutation
    patterns. OpenRig launches Claude in `acceptEdits`, so an unlisted tool prompts; the backend sees that
    as `needs_input` and fails closed.
@@ -131,8 +134,29 @@ authenticated. Hermes runs no setup and changes no global OpenRig or Claude sett
    `{"status": "succeeded"|"failed", "summary": ...}` last. A missing or malformed file fails closed.
    stdout is a claude-result-shaped envelope built from that file, so `ClaudeAdapter` validation runs
    unchanged. stderr is the summary on failure. A transcript tail is saved to `<rig-dir>/transcript.txt`.
-8. **Release.** `rig down <rigId> --delete --force --json` runs in `finally`. `cleanup()` retries any rig
-   still owned and is idempotent; "No rig found" after our own down counts as released.
+8. **Return or release.** After a clean protocol completion (a valid result file, whether the task succeeded
+   or failed) the seat goes back to the job's pool. Any exception releases it with
+   `rig down <rigId> --delete --force --json` in `finally`. `cleanup()` retries any rig this lease still owns,
+   never touches seats handed back to the pool, and is idempotent; "No rig found" after our own down counts
+   as released.
+
+### Seat reuse (warm seat, fresh context, per job)
+
+- **Pool.** A process-wide pool inside `openrig_backend.py`, keyed by job (`sprint_id`). Each seat is leased
+  to one task at a time, and seats are never shared across jobs.
+- **Fit.** A pooled seat is reused only if the new task's worktree lies under the seat's granted root.
+  Otherwise a new rig is launched.
+- **Fresh context.** A reused seat always gets `rig seat launch <session> --fresh --stop --reason ..
+  --json` before the send. That's OpenRig's supported, audited "blank new occupant", and it brings a new
+  generation. The response must name our exact rigId and session. The seat counts as ready only when a hook
+  `Stop` carries that **new** generation, so the old occupant's evidence never counts.
+- **Why not `/clear`.** `/clear` starts a new native Claude session that OpenRig reports as an identity
+  `mismatch` with `attention_required`, and hook evidence is lost.
+- **Expiry.** An idle seat is released after 120 s, and every pooled seat is released when the process
+  exits (`atexit`). Hermes has no job-end signal yet, so idle expiry acts as the job boundary.
+- **Measured (OpenRig 0.6.9).** A fresh occupant reaches hook-idle in about 16 s, against about 28 s for
+  a new rig. In a live two-task run the end-to-end times were 34 s (new rig) and 32 s (reused): the
+  agent's own work time dominates and varies between tasks.
 
 The backend only ever stops rigs whose `rigId` it recorded. A `rig ps` row with a matching session name
 but a different `rigId` fails closed. It never touches `kernel`, the user's rigs, adopted sessions or Herdr.
@@ -162,10 +186,13 @@ them into `TaskExecutionResult.metadata["backend_runtime_metadata"]`.
 
 ### Known limitations
 
-- One ephemeral rig per `execute()`. There's no seat pooling or cross-task continuity yet, and each task
-  pays for seat startup (~5–10 s).
+- Seats are warm-pooled per job, but every task still gets a fresh occupant and pays its startup turn
+  (~16 s). There's deliberately no conversation continuity across tasks.
+- If the Hermes process crashes, pooled rigs (`hermes-*`) stay running until they're removed by hand.
+  There's no crash reconciliation yet.
+- The granted root is the worktree parent, so a seat can technically reach sibling worktrees of its job.
 - No out-of-band cancel: a cancelled Hermes task stops at its own timeout, then the rig is released.
 - The result file relies on the agent following the protocol. An agent that skips it fails closed.
 - The backend is coupled to OpenRig 0.6.x JSON shapes (`up`, `ps --nodes --full`, `send`, `down`).
-- The sprint runner reuses one backend instance per sprint. That's safe, because each `execute()` owns
-  and releases its own rig.
+- The sprint runner reuses one backend instance per sprint. That's safe, because each `execute()` leases
+  and returns or releases its own seat.

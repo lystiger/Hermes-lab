@@ -4,6 +4,7 @@ import multiprocessing
 import socket
 import threading
 import asyncio
+import http.server
 import json
 import os
 import re
@@ -201,6 +202,23 @@ def pool():
     seat_pool.drain()
 
 
+def fake_daemon_down(rig):
+    """Route the backend's id-only daemon teardown through the fake CLI's `down` handler."""
+    def down(rig_id, timeout):
+        try:
+            result = rig(["rig", "down", rig_id, "--delete", "--force", "--json"],
+                         capture_output=True, text=True, timeout=timeout)
+        except subprocess.TimeoutExpired as exc:
+            raise SprintRunnerError("FAILED_TIMEOUT", "teardown timed out") from exc
+        except OSError as exc:
+            raise SprintRunnerError("FAILED_OPENRIG_UNAVAILABLE", str(exc)) from exc
+        try:
+            return json.loads(result.stdout or "")
+        except json.JSONDecodeError:
+            return {"error": {"fact": (result.stderr or result.stdout or "")[:200]}}
+    return down
+
+
 def make_backend(tmp_path, clock, rig, which=lambda name: "/usr/bin/rig", utc_times=(T0,), pool=None, sprint_id="Sprint 07/Proof", ledger=None, cancel_event=None):
     sent_times = iter(utc_times)
     last = utc_times[-1]
@@ -216,6 +234,7 @@ def make_backend(tmp_path, clock, rig, which=lambda name: "/usr/bin/rig", utc_ti
         seat_pool=pool if pool is not None else _CURRENT_POOL[0],
         ledger=ledger,
         cancel_event=cancel_event,
+        daemon_down=fake_daemon_down(rig),
     )
 
 
@@ -605,7 +624,7 @@ def test_hermes_task_runs_through_openrig_and_verification_continues(tmp_path, c
         backend = OpenRigBackend(
             run_process=rig, which_func=lambda n: "/usr/bin/rig",
             monotonic=clock.monotonic, sleep=clock.sleep, utcnow=lambda: T0,
-            seat_pool=_CURRENT_POOL[0], **kwargs,
+            seat_pool=_CURRENT_POOL[0], daemon_down=fake_daemon_down(rig), **kwargs,
         )
         backends.append(backend)
         return backend
@@ -1412,7 +1431,7 @@ def test_cancelling_the_hermes_task_releases_the_parked_seat_by_id(tmp_path, clo
         return OpenRigBackend(
             run_process=parked, which_func=lambda n: "/usr/bin/rig",
             monotonic=clock.monotonic, sleep=clock.sleep, utcnow=lambda: T0,
-            seat_pool=_CURRENT_POOL[0], **kwargs,
+            seat_pool=_CURRENT_POOL[0], daemon_down=fake_daemon_down(parked), **kwargs,
         )
 
     adapter = HermesActorAdapter(
@@ -1559,20 +1578,89 @@ def test_a_seat_is_not_leasable_while_its_timer_is_still_starting(tmp_path, cloc
 
 
 # --- merge-gate review fixes -------------------------------------------------------
-def test_a_gone_rig_is_never_torn_down_by_a_rig_named_like_its_id(tmp_path, clock, pool):
-    # `rig down <id>` falls back to a name match when the id no longer exists.
-    ledger_dir = tmp_path / "ledger"
-    stale = "01000000000000000000000014"
-    dead_owner_ledger(ledger_dir, stale)
+class _FakeDaemon(http.server.BaseHTTPRequestHandler):
+    requests = []
+    known = set()
+
+    def do_POST(self):
+        body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+        _FakeDaemon.requests.append((self.path, body))
+        if body["rigId"] in _FakeDaemon.known:
+            status, payload = 200, {"rigId": body["rigId"], "deleted": True, "errors": []}
+        else:
+            status, payload = 404, {"error": f"Rig '{body['rigId']}' not found"}
+        data = json.dumps(payload).encode()
+        self.send_response(status)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(data)))
+        self.end_headers()
+        self.wfile.write(data)
+
+    def log_message(self, *args):
+        pass
+
+
+@pytest.fixture
+def fake_daemon(monkeypatch, tmp_path):
+    server = http.server.HTTPServer(("127.0.0.1", 0), _FakeDaemon)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    home = tmp_path / "openrig-home"
+    home.mkdir()
+    (home / "daemon.json").write_text(json.dumps({"host": "127.0.0.1", "port": server.server_port}))
+    monkeypatch.setenv("OPENRIG_HOME", str(home))
+    _FakeDaemon.requests, _FakeDaemon.known = [], set()
+    yield _FakeDaemon
+    server.shutdown()
+
+
+def test_teardown_goes_to_the_daemons_id_only_api_never_the_cli(tmp_path, clock, fake_daemon):
+    # `rig down <x>` falls back to a name match when no rig has id x; /api/down never does.
+    fake_daemon.known = {RIG_ID}
     rig = FakeRig(clock)
-    rig.gone_rig_ids.add(stale)
-    rig.listed_rigs = [{"rigId": "01000000000000000000000099", "name": stale, "status": "running"}]
+    backend = OpenRigBackend(run_dir=tmp_path / "run", sprint_id="s", run_process=rig,
+                             monotonic=clock.monotonic, sleep=clock.sleep)
 
-    make_backend(tmp_path, clock, rig, ledger=OwnershipLedger(ledger_dir)).execute(make_request(tmp_path))
+    backend._release(RIG_ID)
 
-    assert stale not in rig.rigs_down
-    assert "01000000000000000000000099" not in rig.rigs_down
-    assert stale not in ledger_rig_ids(ledger_dir)  # already gone counts as released
+    assert fake_daemon.requests == [("/api/down", {"rigId": RIG_ID, "delete": True, "force": True})]
+    assert "down" not in [c[0] for c in rig.calls]
+    assert backend.released_rig_ids == [RIG_ID]
+
+
+def test_a_gone_rig_id_is_released_without_any_name_lookup(tmp_path, clock, fake_daemon):
+    gone = "01000000000000000000000014"
+    rig = FakeRig(clock)
+    backend = OpenRigBackend(run_dir=tmp_path / "run", sprint_id="s", run_process=rig,
+                             monotonic=clock.monotonic, sleep=clock.sleep)
+
+    backend._release(gone)  # daemon answers 404 for an unknown id
+
+    assert fake_daemon.requests == [("/api/down", {"rigId": gone, "delete": True, "force": True})]
+    assert backend.released_rig_ids == [gone]
+    assert rig.calls == []
+
+
+def test_teardown_without_a_running_daemon_fails_closed(tmp_path, clock):
+    backend = OpenRigBackend(run_dir=tmp_path / "run", sprint_id="s", run_process=FakeRig(clock),
+                             monotonic=clock.monotonic, sleep=clock.sleep)
+    with pytest.raises(SprintRunnerError) as excinfo:
+        backend._release(RIG_ID)
+    assert excinfo.value.code == "FAILED_OPENRIG_UNAVAILABLE"
+
+
+def test_a_job_closed_while_the_timer_starts_never_gets_the_seat(tmp_path, clock, pool):
+    class ClosingTimer(FakeTimer):
+        def start(self):
+            super().start()
+            pool.release_job("Sprint 07/Proof")  # job ends mid-publication
+
+    pool._timer_factory = ClosingTimer
+    rig = FakeRig(clock)
+    run(tmp_path, clock, rig)
+
+    assert pool.idle_rig_ids() == []
+    assert rig.rigs_down == [RIG_ID]
 
 
 def test_a_seat_returned_after_its_job_ended_is_torn_down_not_pooled(tmp_path, clock, pool):

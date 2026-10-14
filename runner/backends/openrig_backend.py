@@ -1,11 +1,14 @@
 import atexit
 import json
+import os
 import re
 import secrets
 import shutil
 import subprocess
 import threading
 import time
+import urllib.error
+import urllib.request
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -115,11 +118,16 @@ class _SeatPool:
                     del self._timers[seat.rig_id]
             raise
         with self._lock:
-            if self._timers.get(seat.rig_id, (None, None))[1] is token:
+            current = self._timers.get(seat.rig_id, (None, None))[1] is token
+            if current and seat.job not in self._closed_jobs:
                 self._idle.setdefault(seat.job, []).append(seat)
                 return
-            # The timer already fired (or a drain ran) before publication: tear down now.
+            # The timer already fired, a drain ran, or the job ended while the timer was
+            # starting: never publish, tear down now.
+            if current:
+                del self._timers[seat.rig_id]
             self._inflight[seat.rig_id] = seat
+        timer.cancel()
         self._release(seat)
 
     def _expire(self, rig_id, token):
@@ -220,6 +228,44 @@ class _SeatPool:
 _POLL_TIMED_OUT = object()
 
 
+def _openrig_home():
+    return Path(os.environ.get("OPENRIG_HOME") or Path.home() / ".openrig")
+
+
+def daemon_down_by_id(rig_id, timeout):
+    """Tear a rig down through the local daemon's id-only `POST /api/down`.
+
+    Returns the daemon's JSON payload. An unknown id (404) returns the same "No rig found"
+    shape the CLI prints, so callers treat it as already released. Never resolves names.
+    """
+    try:
+        status = json.loads((_openrig_home() / "daemon.json").read_text(encoding="utf-8"))
+        url = f"http://{status.get('host') or '127.0.0.1'}:{int(status['port'])}/api/down"
+    except (OSError, ValueError, KeyError, TypeError) as exc:
+        raise SprintRunnerError(
+            "FAILED_OPENRIG_UNAVAILABLE", f"OpenRig daemon address unknown: {exc}"
+        ) from exc
+    body = json.dumps({"rigId": rig_id, "delete": True, "force": True}).encode("utf-8")
+    request = urllib.request.Request(
+        url, data=body, method="POST", headers={"Content-Type": "application/json"},
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=timeout) as response:
+            text = response.read().decode("utf-8", errors="replace")
+    except urllib.error.HTTPError as exc:
+        if exc.code == 404:
+            return {"error": {"fact": f"No rig found with id {rig_id}"}}
+        text = exc.read().decode("utf-8", errors="replace")
+    except (urllib.error.URLError, OSError) as exc:
+        raise SprintRunnerError(
+            "FAILED_OPENRIG_UNAVAILABLE", f"OpenRig daemon unreachable for teardown of {rig_id}: {exc}"
+        ) from exc
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        return {"error": {"fact": text[:200]}}
+
+
 def is_rig_id(value):
     return isinstance(value, str) and RIG_ID_PATTERN.fullmatch(value) is not None
 
@@ -254,6 +300,7 @@ class OpenRigBackend(ExecutionBackend):
         utcnow=None,
         seat_pool=None,
         ledger=None,
+        daemon_down=None,
         cancel_event=None,
         **kwargs,
     ):
@@ -273,6 +320,7 @@ class OpenRigBackend(ExecutionBackend):
         self.pooled_rig_ids = []
         self.seat_pool = seat_pool if seat_pool is not None else DEFAULT_SEAT_POOL
         self.ledger = ledger if ledger is not None else OwnershipLedger()
+        self._daemon_down = daemon_down or daemon_down_by_id
         # Set by the caller to stop this task out of band. Checked at step boundaries only.
         self._cancel_event = cancel_event
         self._preexisting_rig_ids = set()
@@ -772,20 +820,12 @@ class OpenRigBackend(ExecutionBackend):
             )
         if deadline is None:
             deadline = self._monotonic() + RELEASE_TIMEOUT_SECONDS
-        # `rig down` matches its argument as an id first and only falls back to a rig *name*
-        # when no rig has that id. A rig that is already gone could therefore resolve to
-        # another rig named like our id, so confirm the id still exists before tearing down.
-        if not self._rig_exists(rig_id, deadline):
-            self.released_rig_ids.append(rig_id)
-            self._forget(rig_id)
-            self._log("info", "OpenRig rig %s already gone", rig_id)
-            return
-        payload = self._run_json(
-            ["down", rig_id, "--delete", "--force", "--json"],
-            deadline,
-            "FAILED_OPENRIG_UNAVAILABLE",
-            allow_failure_payload=True,
-        )
+        remaining = self._remaining(deadline)
+        if remaining <= 0:
+            raise SprintRunnerError("FAILED_TIMEOUT", f"no time left to release OpenRig rig {rig_id}")
+        # Not `rig down`: the CLI falls back to a rig *name* match when no rig has the id,
+        # which could tear down someone else's rig. The daemon's /api/down is id-only.
+        payload = self._daemon_down(rig_id, remaining)
         already_gone = (
             isinstance(payload, dict)
             and isinstance(payload.get("error"), dict)
@@ -802,16 +842,6 @@ class OpenRigBackend(ExecutionBackend):
         self.released_rig_ids.append(rig_id)
         self._forget(rig_id)
         self._log("info", "OpenRig rig %s released", rig_id)
-
-    def _rig_exists(self, rig_id, deadline):
-        rigs = self._run_json(
-            ["ps", "--json", "--include-archived"], deadline, "FAILED_OPENRIG_UNAVAILABLE",
-        )
-        if isinstance(rigs, dict):
-            rigs = rigs.get("entries")
-        if not isinstance(rigs, list):
-            raise SprintRunnerError("FAILED_OPENRIG_PROTOCOL", "rig ps --json did not return a list")
-        return any(isinstance(r, dict) and r.get("rigId") == rig_id for r in rigs)
 
     def _forget(self, rig_id):
         try:

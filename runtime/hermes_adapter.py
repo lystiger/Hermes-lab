@@ -1116,7 +1116,7 @@ class HermesActorAdapter(ActorAdapter):
 
 
     def release_job(self, job_id: str) -> None:
-        """Release backend resources pooled for `job_id` (for OpenRig: its warm seats)."""
+        """Release backend resources pooled for `job_id` (for OpenRig: its warm seats). Safe to repeat."""
         with self._job_backends_lock:
             names = set(self._job_backends.get(job_id, set()))
         if not names:
@@ -1127,16 +1127,10 @@ class HermesActorAdapter(ActorAdapter):
         for name in sorted(names):
             try:
                 backend_reg.get(name, run_dir=self.run_dir, sprint_id=job_id, logger=logger).release_job(job_id)
-            except Exception as exc:  # noqa: BLE001 - kept so a later release_job() retries
+            except Exception as exc:  # noqa: BLE001 - a later release_job() retries
                 logger.error("Backend %s job release failed for job %s: %s", name, job_id, exc)
-                continue
-            # Forget the backend only once its release succeeded, so a failure can be retried.
-            with self._job_backends_lock:
-                remaining = self._job_backends.get(job_id)
-                if remaining is not None:
-                    remaining.discard(name)
-                    if not remaining:
-                        del self._job_backends[job_id]
+        # The names are kept: a seat leased at job end may come back (and fail teardown)
+        # later, and backend release_job() is idempotent, so any later call can retry it.
 
 
 class HermesVerifierAdapter(VerifierAdapter):

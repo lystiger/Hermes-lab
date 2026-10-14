@@ -241,8 +241,10 @@ them into `TaskExecutionResult.metadata["backend_runtime_metadata"]`.
   the rigId was recorded. A crash **inside** the `rig up` call, before its response is parsed, can leave a rig
   that is not in the ledger. Nothing on the next run releases it, and a user has to remove it by hand. Its name is
   `hermes-*`, and that is never used to match it. The ledger is also per-user state: it is not shared across machines.
-- **Rig IDs only.** `rig down` also resolves rig *names*, so the backend and the ledger accept only canonical
-  OpenRig rigIds (26-character ULIDs). A ledger entry like `kernel` makes the file unreadable: it is kept and
+- **Teardown is id-only.** The backend never runs `rig down`, because the CLI falls back to a rig *name* match when no
+  rig has the given id. It posts `{"rigId", "delete", "force"}` to the local daemon's `POST /api/down` instead (address
+  from `$OPENRIG_HOME/daemon.json`, default `~/.openrig`). A 404 means already gone and counts as released. Remote
+  `--host` daemons are not supported. The backend and the ledger also accept only canonical OpenRig rigIds (26-character ULIDs). A ledger entry like `kernel` makes the file unreadable: it is kept and
   never released. The ledger is serialized across processes with `flock` on `<ledger dir>/.lock`.
 - The granted root is the worktree parent, so a seat can technically reach sibling worktrees of its job.
 - Cancel is wired only on the runtime path (`HermesActorAdapter`). The sprint runner has no cancel source,

@@ -20,3 +20,5 @@ def pytest_configure(config):
 def _isolated_openrig_ledger(tmp_path_factory, monkeypatch):
     # Every test gets its own OpenRig ownership ledger, so no test writes to the real user state dir.
     monkeypatch.setenv("HERMES_OPENRIG_LEDGER_DIR", str(tmp_path_factory.mktemp("openrig-ledger")))
+    # No daemon.json here: a test can never reach the real OpenRig daemon's teardown API.
+    monkeypatch.setenv("OPENRIG_HOME", str(tmp_path_factory.mktemp("openrig-home")))

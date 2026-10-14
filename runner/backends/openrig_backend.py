@@ -194,6 +194,7 @@ class OpenRigBackend(ExecutionBackend):
         sleep=None,
         utcnow=None,
         seat_pool=None,
+        cancel_event=None,
         **kwargs,
     ):
         self.run_dir = Path(run_dir)
@@ -211,6 +212,8 @@ class OpenRigBackend(ExecutionBackend):
         self.released_rig_ids = []
         self.pooled_rig_ids = []
         self.seat_pool = seat_pool if seat_pool is not None else DEFAULT_SEAT_POOL
+        # Set by the caller to stop this task out of band. Checked at step boundaries only.
+        self._cancel_event = cancel_event
         self._preexisting_rig_ids = set()
 
     # -- contract -------------------------------------------------------------
@@ -232,6 +235,7 @@ class OpenRigBackend(ExecutionBackend):
             )
 
         version = self.preflight(deadline)
+        self._check_cancelled("before a seat was leased")
         nonce = secrets.token_hex(8)
         metadata = {"openrig_version": version, "openrig_runtime": runtime}
         seat = self.seat_pool.acquire(self.sprint_id, request.cwd)
@@ -527,6 +531,7 @@ class OpenRigBackend(ExecutionBackend):
 
     def _wait_until_ready(self, rig_name, rig_id, session, deadline, expected_generation=None):
         while True:
+            self._check_cancelled(f"while seat {session} was starting")
             node = self._node(rig_name, rig_id, session, deadline)
             if node is None:
                 raise SprintRunnerError(
@@ -553,6 +558,7 @@ class OpenRigBackend(ExecutionBackend):
             self._pause(deadline, f"OpenRig seat {session} did not become ready")
 
     def _send(self, session, text, deadline):
+        self._check_cancelled(f"before the prompt was sent to seat {session}")
         idle_wait = max(1, min(SEND_IDLE_WAIT_SECONDS, int(self._remaining(deadline))))
         payload = self._run_json(
             ["send", "--wait-for-idle", str(idle_wait), "--json", "--", session, text],
@@ -573,6 +579,7 @@ class OpenRigBackend(ExecutionBackend):
         """
         prompt_at = None
         while True:
+            self._check_cancelled(f"while seat {session} was working")
             node = self._node(rig_name, rig_id, session, deadline)
             if node is None or node.get("sessionStatus") != "running":
                 raise SprintRunnerError(
@@ -697,6 +704,14 @@ class OpenRigBackend(ExecutionBackend):
     def _rig_name(self):
         slug = re.sub(r"[^a-z0-9-]+", "-", self.sprint_id.lower()).strip("-")[:24] or "task"
         return f"hermes-{slug}-{secrets.token_hex(4)}"
+
+    def _check_cancelled(self, where):
+        # Only the wait steps and the send check this. Once _wait_for_completion has
+        # returned, the result is proven and a late cancel is a no-op.
+        if self._cancel_event is not None and self._cancel_event.is_set():
+            raise SprintRunnerError(
+                "FAILED_OPENRIG_CANCELLED", f"OpenRig task cancelled {where}"
+            )
 
     def _remaining(self, deadline):
         return deadline - self._monotonic()

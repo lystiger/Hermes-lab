@@ -769,8 +769,16 @@ class HermesActorAdapter(ActorAdapter):
             )
 
         # 3. Real Agent CLI / Backend Execution (blocking; dispatched off the event loop)
+        cancel_event = threading.Event()
         try:
-            return await asyncio.to_thread(self._execute_real_agent, task, run, actor_id, role, ctx)
+            return await asyncio.to_thread(
+                self._execute_real_agent, task, run, actor_id, role, ctx, cancel_event,
+            )
+        except asyncio.CancelledError:
+            # Cancelling this coroutine does not reach the worker thread. Tell the backend
+            # to stop; it releases its rig at the next wait step.
+            cancel_event.set()
+            raise
         except Exception as exc:
             logger.exception("Error executing real task %s on actor %s: %s", task.task_id, actor_id, exc)
             return TaskExecutionResult(
@@ -787,6 +795,7 @@ class HermesActorAdapter(ActorAdapter):
         actor_id: str,
         role: str,
         context: Optional[Dict[str, Any]] = None,
+        cancel_event: Optional[threading.Event] = None,
     ) -> TaskExecutionResult:
         """
         Blocking real-agent execution path: worktree preparation, agent CLI invocation,
@@ -794,6 +803,7 @@ class HermesActorAdapter(ActorAdapter):
 
         Runs on a worker thread. Git mutations inside are serialized by the per-repository
         lock; the agent process itself runs unlocked so concurrent tasks make real progress.
+        `cancel_event` is set when the task is cancelled; backends that support it stop early.
         """
         # This path obtains its own backend instance per task, so it owns releasing it.
         backend = None
@@ -816,6 +826,7 @@ class HermesActorAdapter(ActorAdapter):
                 run_dir=self.run_dir,
                 sprint_id=task.job_id,
                 logger=logger,
+                cancel_event=cancel_event,
             )
 
             # Setup task worktree
@@ -903,7 +914,7 @@ class HermesActorAdapter(ActorAdapter):
 
             logger.info("Executing real agent %s for task %s in %s", actor_id, task.task_id, worktree_path)
             raw_res = agent_adapter.execute(agent_ctx)
-            exit_code = getattr(raw_res, "exit_code", 0)
+            exit_code = getattr(raw_res, "returncode", 0)
             stdout_text = getattr(raw_res, "stdout", "") or ""
             stderr_text = getattr(raw_res, "stderr", "") or ""
 

@@ -186,7 +186,7 @@ def pool():
     seat_pool.drain()
 
 
-def make_backend(tmp_path, clock, rig, which=lambda name: "/usr/bin/rig", utc_times=(T0,), pool=None, sprint_id="Sprint 07/Proof"):
+def make_backend(tmp_path, clock, rig, which=lambda name: "/usr/bin/rig", utc_times=(T0,), pool=None, sprint_id="Sprint 07/Proof", cancel_event=None):
     sent_times = iter(utc_times)
     last = utc_times[-1]
     return OpenRigBackend(
@@ -199,6 +199,7 @@ def make_backend(tmp_path, clock, rig, which=lambda name: "/usr/bin/rig", utc_ti
         utcnow=lambda: next(sent_times, last),
         poll_interval=2.0,
         seat_pool=pool if pool is not None else _CURRENT_POOL[0],
+        cancel_event=cancel_event,
     )
 
 
@@ -1006,3 +1007,181 @@ def test_drain_reissues_a_teardown_stuck_past_its_wait(tmp_path, clock, pool):
     unblock.set()
     expiry.join(5)
     assert pool.failed_rig_ids() == []
+
+
+# --- out-of-band cancel ---------------------------------------------------------
+
+
+def cancel_on_nth(rig, event, when, n=1):
+    """Wrap the fake rig; set `event` when the n-th call matching `when(argv)` is made."""
+    seen = [0]
+
+    def call(argv, **kwargs):
+        if when(argv):
+            seen[0] += 1
+            if seen[0] == n:
+                event.set()
+        return rig(argv, **kwargs)
+
+    return call
+
+
+def node_poll(argv):
+    return argv[1] == "ps" and "--nodes" in argv
+
+
+def cancelled_execute(tmp_path, clock, rig, event, pool, utc_times=(T0,), **request_kwargs):
+    backend = make_backend(tmp_path, clock, rig, pool=pool, utc_times=utc_times, cancel_event=event)
+    with pytest.raises(SprintRunnerError) as excinfo:
+        backend.execute(make_request(tmp_path, **request_kwargs))
+    assert excinfo.value.code == "FAILED_OPENRIG_CANCELLED", excinfo.value.message
+    return backend
+
+
+def assert_released_by_id(rig, backend, rig_id=RIG_ID):
+    assert rig.rigs_down == [rig_id]
+    assert rig.calls[-1] == ["down", rig_id, "--delete", "--force", "--json"]
+    assert backend.released_rig_ids == [rig_id]
+
+
+def test_cancel_before_launch_creates_no_rig(tmp_path, clock, pool):
+    rig = FakeRig(clock)
+    event = threading.Event()
+    event.set()
+
+    cancelled_execute(tmp_path, clock, rig, event, pool)
+
+    assert not any(c[0] in ("up", "send") for c in rig.calls)
+    assert rig.rigs_down == []
+    assert pool.idle_rig_ids() == []
+
+
+def test_cancel_during_ready_wait_stops_polling_and_releases_by_id(tmp_path, clock, pool):
+    rig = FakeRig(clock, activities=[HEURISTIC])  # startup is ready but no hook Stop ever arrives
+    event = threading.Event()
+
+    backend = cancelled_execute(tmp_path, clock, cancel_on_nth(rig, event, node_poll), event, pool)
+
+    polls = [c for c in rig.calls if c[0] == "ps" and "--nodes" in c]
+    assert len(polls) == 1, "the wait must stop at the next poll after cancel"
+    assert not any(c[0] == "send" for c in rig.calls)
+    assert_released_by_id(rig, backend)
+    assert pool.idle_rig_ids() == []
+
+
+def test_cancel_during_completion_wait_releases_by_id_and_never_pools(tmp_path, clock, pool):
+    rig = FakeRig(clock, activities=[STARTUP_IDLE, STARTED, HEURISTIC])  # sent, turn started, never Stop
+    event = threading.Event()
+
+    # Poll 1 is the ready check; poll 2 is inside the completion wait, after the send.
+    wrapped = cancel_on_nth(rig, event, node_poll, n=2)
+    backend = cancelled_execute(tmp_path, clock, wrapped, event, pool)
+
+    assert rig.sent_text is not None
+    assert_released_by_id(rig, backend)
+    assert pool.idle_rig_ids() == []
+    assert backend.pooled_rig_ids == []
+
+
+def test_cancel_after_completion_is_a_no_op(tmp_path, clock, pool):
+    rig = FakeRig(clock)
+    event = threading.Event()
+    # Cancel arrives during post-completion transcript capture, after the protocol finished.
+    wrapped = cancel_on_nth(rig, event, lambda argv: argv[1] == "transcript")
+    backend = make_backend(tmp_path, clock, wrapped, pool=pool, cancel_event=event)
+
+    result = backend.execute(make_request(tmp_path))
+
+    assert event.is_set()
+    assert result.returncode == 0
+    assert result.runtime_metadata["openrig_rig_id"] == RIG_ID
+    assert pool.idle_rig_ids() == [RIG_ID]
+    assert rig.rigs_down == []
+    assert backend.released_rig_ids == []
+
+
+def test_cancelled_reused_seat_is_released_by_id_and_never_pooled(tmp_path, clock, pool):
+    rig = FakeRig(clock, activities=[STARTUP_IDLE, STARTED, FINISHED, GEN2_STOP, GEN2_STARTED, GEN2_FINISHED])
+    run(tmp_path, clock, rig)  # task 1 completes and warms the seat into the job's pool
+    assert pool.idle_rig_ids() == [RIG_ID]
+
+    event = threading.Event()
+    # Task 2 leases the warm seat, relaunches it fresh, then is cancelled as it sends.
+    wrapped = cancel_on_nth(rig, event, lambda argv: argv[1] == "send")
+    backend = make_backend(
+        tmp_path, clock, wrapped, utc_times=(T0 + timedelta(seconds=30),), pool=pool,
+        cancel_event=event,
+    )
+    with pytest.raises(SprintRunnerError) as excinfo:
+        backend.execute(make_request(tmp_path, worktree_name="worktree-2"))
+
+    assert excinfo.value.code == "FAILED_OPENRIG_CANCELLED"
+    assert any(c[:2] == ["seat", "launch"] for c in rig.calls), "task 2 must have reused the seat"
+    assert_released_by_id(rig, backend)
+    assert pool.idle_rig_ids() == []
+    assert pool.failed_rig_ids() == [] and pool.inflight_rig_ids() == []
+    assert pool.acquire("Sprint 07/Proof", tmp_path / "worktree-3") is None
+
+
+def test_cancelling_the_hermes_task_releases_the_parked_seat_by_id(tmp_path, clock, pool):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    for args in (
+        ["git", "init", "-b", "main"],
+        ["git", "config", "user.name", "Hermes Test"],
+        ["git", "config", "user.email", "test@hermes.local"],
+    ):
+        subprocess.run(args, cwd=repo, check=True, capture_output=True)
+    (repo / "README.md").write_text("x\n")
+    subprocess.run(["git", "add", "."], cwd=repo, check=True, capture_output=True)
+    subprocess.run(["git", "commit", "-m", "init"], cwd=repo, check=True, capture_output=True)
+
+    base = FakeRig(clock, activities=[HEURISTIC])  # never ready: the task parks in the ready wait
+    in_flight = threading.Event()
+    unblock = threading.Event()
+
+    def parked(argv, **kwargs):
+        if node_poll(argv):
+            in_flight.set()
+            unblock.wait(5)
+        return base(argv, **kwargs)
+
+    def factory(**kwargs):
+        return OpenRigBackend(
+            run_process=parked, which_func=lambda n: "/usr/bin/rig",
+            monotonic=clock.monotonic, sleep=clock.sleep, utcnow=lambda: T0,
+            seat_pool=_CURRENT_POOL[0], **kwargs,
+        )
+
+    adapter = HermesActorAdapter(
+        target_repo=repo,
+        worktree_root=tmp_path / "worktrees",
+        run_dir=tmp_path / "run",
+        agent_registry=AgentRegistry({ClaudeAdapter.name: ClaudeAdapter}),
+        backend_registry=BackendRegistry({OpenRigBackend.name: factory}),
+        job_id="job_cancel",
+    )
+    task = TaskNode(
+        task_id="T1", job_id="job_cancel", description="Touch nothing",
+        assigned_actor="claude", metadata={"execution_backend": "openrig", "timeout_seconds": 120},
+    )
+    run_obj = AgentRun(run_id="r1", job_id="job_cancel", task_id="T1", actor_id="claude")
+
+    async def cancel_while_parked():
+        pending = asyncio.ensure_future(adapter.execute_task(task, run_obj))
+        await asyncio.to_thread(in_flight.wait, 5)
+        pending.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await pending
+        unblock.set()
+
+    # asyncio.run waits for the worker thread, so the release has finished when it returns.
+    asyncio.run(cancel_while_parked())
+
+    # A cancel stops the wait at the next poll. Without it the fake clock would run the
+    # wait to the 120 s task timeout (about 60 polls), which also releases the rig.
+    polls = [c for c in base.calls if c[0] == "ps" and "--nodes" in c]
+    assert len(polls) == 1
+    assert not any(c[0] == "send" for c in base.calls)
+    assert base.rigs_down == [RIG_ID]
+    assert pool.idle_rig_ids("job_cancel") == []

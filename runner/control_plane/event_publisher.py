@@ -79,6 +79,9 @@ class RuntimeEventPublisher:
         job_id: Optional[str] = None,
         metadata: Optional[Dict[str, Any]] = None,
         accent_color: Optional[str] = None,
+        task_id: Optional[str] = None,
+        run_id: Optional[str] = None,
+        actor_id: Optional[str] = None,
     ) -> bool:
         normalized_id = normalize_agent_id(source_id) if source_kind == "agent" else source_id
         display_name = source_name or normalized_id.capitalize()
@@ -96,6 +99,10 @@ class RuntimeEventPublisher:
             "jobId": job_id,
             "metadata": metadata or {},
         }
+        # Runtime ids are optional; only sent when known so older APIs keep accepting the payload.
+        for key, value in (("taskId", task_id), ("runId", run_id), ("actorId", actor_id)):
+            if value:
+                payload[key] = value
         return self._post_json("/internal/events", payload)
 
     def publish_thread(

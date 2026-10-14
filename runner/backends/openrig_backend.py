@@ -35,6 +35,8 @@ SEND_IDLE_WAIT_SECONDS = 30
 # One `rig ps --nodes` poll may block at most this long, so a cancel is seen promptly
 # even when the daemon hangs. A timed-out poll is retried until the task deadline.
 POLL_QUERY_SECONDS = 10
+# How often a blocking `rig send` checks for an out-of-band cancel.
+CANCEL_POLL_SECONDS = 0.5
 # OpenRig rigIds are ULIDs. `rig down` also resolves rig *names*, so anything else
 # (for example "kernel") must never reach it.
 RIG_ID_PATTERN = re.compile(r"[0-9A-HJKMNP-TV-Z]{26}")
@@ -316,12 +318,17 @@ class OpenRigBackend(ExecutionBackend):
 
     name = "openrig"
 
+    @classmethod
+    def supports_agent(cls, agent_name):
+        return agent_name in SUPPORTED_RUNTIMES
+
     def __init__(
         self,
         run_dir,
         sprint_id,
         logger=None,
         run_process=None,
+        popen=None,
         which_func=None,
         rig_executable="rig",
         poll_interval=2.0,
@@ -342,6 +349,9 @@ class OpenRigBackend(ExecutionBackend):
         self.rig_executable = rig_executable
         self.poll_interval = poll_interval
         self._run_process = run_process or subprocess.run
+        # Interruptible path for the one call that can block for long (`rig send --wait-for-idle`).
+        # Only used in production (or when a test injects it); an injected run_process keeps the old path.
+        self._popen = popen if popen is not None else (subprocess.Popen if run_process is None else None)
         self._which = which_func or shutil.which
         self._monotonic = monotonic or time.monotonic
         self._sleep = sleep or time.sleep
@@ -797,10 +807,11 @@ class OpenRigBackend(ExecutionBackend):
     def _send(self, session, text, deadline):
         self._check_cancelled(f"before the prompt was sent to seat {session}")
         idle_wait = max(1, min(SEND_IDLE_WAIT_SECONDS, int(self._remaining(deadline))))
-        payload = self._run_json(
-            ["send", "--wait-for-idle", str(idle_wait), "--json", "--", session, text],
-            deadline, "FAILED_OPENRIG_DELIVERY", allow_failure_payload=True,
-        )
+        args = ["send", "--wait-for-idle", str(idle_wait), "--json", "--", session, text]
+        if self._popen is not None and self._cancel_event is not None:
+            payload = self._run_json_interruptible(args, deadline, "FAILED_OPENRIG_DELIVERY")
+        else:
+            payload = self._run_json(args, deadline, "FAILED_OPENRIG_DELIVERY", allow_failure_payload=True)
         if not isinstance(payload, dict) or payload.get("ok") is not True or payload.get("sent") is not True:
             raise SprintRunnerError(
                 "FAILED_OPENRIG_DELIVERY", f"rig send was not delivered: {_brief(payload)}"
@@ -1006,6 +1017,43 @@ class OpenRigBackend(ExecutionBackend):
         if remaining <= 0:
             raise SprintRunnerError("FAILED_TIMEOUT", f"{what} before the task timeout")
         self._sleep(min(self.poll_interval, remaining))
+
+    def _run_json_interruptible(self, args, deadline, failure_code):
+        """Like _run_json for a call that may block: polls the cancel event and kills the child on cancel.
+
+        Killing `rig send` is safe: a cancelled task's rig is torn down by id right after.
+        """
+        if self._remaining(deadline) <= 0:
+            raise SprintRunnerError("FAILED_TIMEOUT", f"OpenRig task timed out before rig {args[0]}")
+        self._check_cancelled(f"before rig {args[0]}")
+        try:
+            proc = self._popen(
+                [self.rig_executable, *args], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+            )
+        except FileNotFoundError as exc:
+            raise SprintRunnerError(
+                "FAILED_OPENRIG_EXECUTABLE_MISSING", f"OpenRig executable was not found: {self.rig_executable}",
+            ) from exc
+        except OSError as exc:
+            raise SprintRunnerError("FAILED_OPENRIG_UNAVAILABLE", f"Could not run rig {args[0]}: {exc}") from exc
+        while True:
+            remaining = self._remaining(deadline)
+            if remaining <= 0:
+                proc.kill()
+                proc.communicate()
+                raise SprintRunnerError("FAILED_TIMEOUT", f"OpenRig command rig {args[0]} exceeded the task timeout")
+            try:
+                stdout, _ = proc.communicate(timeout=min(CANCEL_POLL_SECONDS, remaining))
+                break
+            except subprocess.TimeoutExpired:
+                if self._cancel_event.is_set():
+                    proc.kill()
+                    proc.communicate()
+                    raise SprintRunnerError("FAILED_OPENRIG_CANCELLED", f"OpenRig task cancelled during rig {args[0]}")
+        try:
+            return json.loads(stdout or "")
+        except json.JSONDecodeError as exc:
+            raise SprintRunnerError("FAILED_OPENRIG_PROTOCOL", f"rig {args[0]} returned malformed JSON") from exc
 
     def _run(self, args, deadline, failure_code, allow_failure_payload=False):
         remaining = self._remaining(deadline)

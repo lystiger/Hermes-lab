@@ -15,6 +15,9 @@ Governance Boundaries:
 
 import sys
 import json
+import queue
+import threading
+import time
 import argparse
 import subprocess
 import py_compile
@@ -999,8 +1002,71 @@ class HermesSprintRunner:
                 sprint_id=self.sprint_id,
                 logger=self.logger,
                 keep_workspace=self.spec.get("keep_herdr_workspace", True),
+                event_sink=self._publish_execution_event,
             )
         return self._backend_cache[backend_name]
+
+    def _publish_execution_event(self, event):
+        """D-009 sink: hand a backend's execution.* event to a background publisher (never raises, never blocks).
+
+        Attribution is bound per execution: the first event of an executionId records the phase running
+        at that moment, so a timer/cleanup event that fires later (e.g. a phase-one seat released during
+        phase two) keeps its own phase. The job is always this runner's unique job id.
+        """
+        try:
+            if not default_publisher or not default_publisher.enabled:
+                return
+            execution_id = event.metadata.get("executionId")
+            owners = self.__dict__.setdefault("_execution_owners", {})
+            owner = owners.get(execution_id) if execution_id else None
+            if owner is None:
+                phase = getattr(self, "_current_phase", None) or {}
+                owner = (phase.get("name"), phase.get("agent"))
+                if execution_id:
+                    owners[execution_id] = owner
+            self._execution_event_queue().put_nowait(dict(
+                source_id=event.metadata.get("backend") or "runtime",
+                source_kind="runtime",
+                kind=event.kind,
+                detail=event.detail or event.kind,
+                job_id=self.job_id,
+                metadata=dict(event.metadata),
+                task_id=getattr(event, "task_id", None) or owner[0],
+                actor_id=getattr(event, "actor_id", None) or owner[1],
+            ))
+        except Exception:  # noqa: BLE001 - observability must never fail a phase
+            self.logger.debug("Execution event %s not queued", getattr(event, "kind", "?"), exc_info=True)
+
+    def _execution_event_queue(self):
+        """One daemon thread posts queued events in order, so a slow API never delays a phase."""
+        q = self.__dict__.get("_exec_event_q")
+        if q is None:
+            q = queue.Queue(maxsize=10000)
+            self._exec_event_q = q
+
+            def drain():
+                while True:
+                    item = q.get()
+                    try:
+                        if item is None:
+                            return
+                        default_publisher.publish(**item)
+                    except Exception:  # noqa: BLE001 - a lost observability event is acceptable
+                        pass
+                    finally:
+                        q.task_done()
+
+            threading.Thread(target=drain, name="hermes-execution-events", daemon=True).start()
+        return q
+
+    def _flush_execution_events(self, timeout=5.0):
+        """Best effort at the end of a run: give queued events a bounded chance to reach the API."""
+        q = self.__dict__.get("_exec_event_q")
+        if q is None:
+            return
+        deadline = time.monotonic() + timeout
+        while q.unfinished_tasks and time.monotonic() < deadline:
+            time.sleep(0.05)
 
     def execute_agent(self, phase, wt_dir, mailbox_messages=None, active_a2a_turn=None):
         agent_name = phase["agent"]
@@ -1176,6 +1242,7 @@ class HermesSprintRunner:
         commit_msg = phase["commit_message"]
 
         self.logger.info(f"\n=== Executing Phase: {phase_name} (Agent: {agent}) ===")
+        self._current_phase = phase
         backend_name = self.resolve_backend_name(phase)
         self._get_backend(backend_name)
 
@@ -2235,6 +2302,8 @@ class HermesSprintRunner:
                         release_error.code,
                         release_error.message,
                     )
+            # Seat releases above emit execution events; let them reach the API before exit.
+            self._flush_execution_events()
             with open(self.summary_file, "w", encoding="utf-8") as f:
                 json.dump(self.run_summary, f, indent=2)
             self.logger.info(f"Run summary written to {self.summary_file}")

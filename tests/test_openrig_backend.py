@@ -1683,3 +1683,76 @@ def test_backend_release_job_reports_a_failed_teardown_so_callers_can_retry(tmp_
         backend.release_job("Sprint 07/Proof")
     assert backend.release_job("Sprint 07/Proof") == 1
     assert rig.rigs_down == [RIG_ID, RIG_ID]
+
+
+# --- cancel during a blocking rig send ------------------------------------------------
+class BlockingSend:
+    """Stands in for subprocess.Popen of `rig send`: never finishes until killed."""
+
+    def __init__(self, cancel_after_polls, event):
+        self.cancel_after_polls, self.event = cancel_after_polls, event
+        self.polls, self.killed, self.argv = 0, False, None
+
+    def __call__(self, argv, **kwargs):
+        self.argv = argv
+        return self
+
+    def communicate(self, timeout=None):
+        if self.killed:
+            return "", ""
+        self.polls += 1
+        if self.polls == self.cancel_after_polls:
+            self.event.set()
+        raise subprocess.TimeoutExpired(self.argv, timeout)
+
+    def kill(self):
+        self.killed = True
+
+
+def test_a_cancel_during_a_blocking_rig_send_stops_it_and_releases_the_rig(tmp_path, clock, pool):
+    rig = FakeRig(clock)
+    event = threading.Event()
+    send = BlockingSend(cancel_after_polls=2, event=event)
+    backend = make_backend(tmp_path, clock, rig, pool=pool, cancel_event=event)
+    backend._popen = send
+
+    with pytest.raises(SprintRunnerError) as excinfo:
+        backend.execute(make_request(tmp_path))
+
+    assert excinfo.value.code == "FAILED_OPENRIG_CANCELLED"
+    assert send.killed and send.polls == 2
+    assert send.argv[1] == "send"
+    assert_released_by_id(rig, backend)
+    assert pool.idle_rig_ids() == []
+
+
+def test_the_interruptible_send_delivers_normally(tmp_path, clock, pool):
+    rig = FakeRig(clock)
+
+    class QuickSend:
+        def __call__(self, argv, **kwargs):
+            self.result = rig(argv, capture_output=True, text=True, timeout=30)
+            return self
+
+        def communicate(self, timeout=None):
+            return self.result.stdout, ""
+
+        def kill(self):
+            raise AssertionError("must not kill a send that finished")
+
+    backend = make_backend(tmp_path, clock, rig, pool=pool, cancel_event=threading.Event())
+    backend._popen = QuickSend()
+    result = backend.execute(make_request(tmp_path))
+    assert result.returncode == 0
+
+
+def test_an_expired_deadline_never_spawns_a_send(tmp_path, clock, pool):
+    spawned = []
+    backend = make_backend(tmp_path, clock, FakeRig(clock), pool=pool, cancel_event=threading.Event())
+    backend._popen = lambda argv, **kw: spawned.append(argv)
+
+    with pytest.raises(SprintRunnerError) as excinfo:
+        backend._run_json_interruptible(["send", "x"], clock.monotonic() - 1, "FAILED_OPENRIG_DELIVERY")
+
+    assert excinfo.value.code == "FAILED_TIMEOUT"
+    assert spawned == []

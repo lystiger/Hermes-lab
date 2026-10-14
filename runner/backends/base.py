@@ -44,5 +44,10 @@ class ExecutionBackend(ABC):
     def cleanup(self, success=False):
         """Release only runtime resources owned by this backend instance."""
 
+    @classmethod
+    def supports_agent(cls, agent_name):
+        """Whether this backend can run `agent_name`. Default: any agent."""
+        return True
+
     def release_job(self, job):
         """Release resources pooled for `job` now, at job end. Default: nothing is pooled."""

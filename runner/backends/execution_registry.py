@@ -8,6 +8,7 @@ Nothing here runs a mutating command.
 import logging
 import shutil
 import threading
+import time
 from datetime import datetime, timezone
 
 from . import events
@@ -119,4 +120,9 @@ def build_execution_snapshot(registry=None, probe=None):
     """The D-009 GET /execution body: backend status, live resources, OpenRig daemon and ledger."""
     registry = registry or default_execution_registry
     backends, openrig = (probe or probe_backends)()
-    return {"backends": backends, "resources": registry.resources(), "openrig": openrig}
+    # Epoch seconds on the same clock as event rawTs, read before the resources: every event the
+    # snapshot does not yet reflect has a later rawTs, so clients can drop anything at or before it.
+    taken_at = time.time()
+    return {
+        "backends": backends, "resources": registry.resources(), "openrig": openrig, "takenAt": taken_at,
+    }

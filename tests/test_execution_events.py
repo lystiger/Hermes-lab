@@ -706,7 +706,7 @@ def test_snapshot_shape_and_registry_contents():
                        {"daemon": "up", "ledger": {"owners": 1, "rigIds": ["01REG"]}}),
     )
 
-    assert set(snapshot) == {"backends", "resources", "openrig"}
+    assert set(snapshot) == {"backends", "resources", "openrig", "takenAt"}
     assert snapshot["backends"] == [{"name": "openrig", "available": True, "detail": "d"}]
     assert snapshot["openrig"] == {"daemon": "up", "ledger": {"owners": 1, "rigIds": ["01REG"]}}
     (row,) = snapshot["resources"]
@@ -860,3 +860,12 @@ def test_fail_closed_writes_still_halt_on_store_failure():
     bridge.set_store(BrokenStore())
     with pytest.raises(RuntimeError):
         asyncio.run(bridge.persist_and_publish(source_id="x", source_kind="runtime", kind="task.started", detail=""))
+
+
+def test_snapshot_carries_a_taken_at_cutoff_before_its_resources():
+    import time as _time
+    from runner.backends.execution_registry import ExecutionRegistry, build_execution_snapshot
+
+    before = _time.time()
+    snap = build_execution_snapshot(registry=ExecutionRegistry(), probe=lambda: ([], None))
+    assert before <= snap["takenAt"] <= _time.time()

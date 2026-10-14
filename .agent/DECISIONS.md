@@ -422,3 +422,10 @@ spell out. Human review is requested for them.
 
 - Decide whether the sprint runner should get a sink (scope item above).
 - Add `taskId` (clarification 4) if LysControl needs to group by task.
+
+### D-010 addendum: snapshot cutoff (merge-gate round 2)
+
+`GET /execution` also returns `takenAt` (epoch seconds, the same clock as event `rawTs`), read before the resources.
+Clients ignore execution events with `rawTs <= takenAt`, because the snapshot already reflects them. This matters
+because execution events are persisted best-effort: replaying older history must never bring back a resource that
+the snapshot shows as gone.

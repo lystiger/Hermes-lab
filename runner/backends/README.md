@@ -63,9 +63,9 @@ only when that instance's `cleanup()` is a no-op, as in the test doubles.
 
 - `request.timeout_seconds` is the authoritative bound, and the backend enforces it.
 - `ExecutionManager` also wraps runtime tasks in `asyncio.wait_for`. Because the backend runs in
-  `asyncio.to_thread`, an outer timeout or cancel **does not reach the backend**. The thread keeps
-  running until the backend's own timeout fires, and then the `finally` cleanup runs. The contract
-  has no out-of-band cancel. Add a generic one only when a backend concretely needs one.
+  `asyncio.to_thread`, an outer timeout or cancel **does not reach the backend** by itself. The contract
+  still has no cancel channel. A backend that needs one takes an optional `cancel_event` at construction
+  (see `OpenRigBackend` → Cancellation). The runtime sets that event when the task's coroutine is cancelled.
 
 ### Runtime metadata
 
@@ -196,13 +196,33 @@ its own 60-second budget. If `rig up`'s response is lost (timeout or garbled out
 at most 20 more seconds (3 bounded `rig ps` checks) looking for a rig that carries its random name **and**
 was absent from the pre-launch snapshot. It adopts that rig only by its exact `rigId`, then tears it down.
 
+### Cancellation
+
+`OpenRigBackend(cancel_event=...)` takes an optional `threading.Event`. Setting it stops the task out of
+band. The backend checks it at each step boundary: before a seat is leased, at the top of each ready-wait
+and completion-wait poll, and before the prompt is sent. A set event raises `FAILED_OPENRIG_CANCELLED`.
+The execute path then releases the rig it owns by its exact `rigId` (the same `finally` as any failure).
+A cancelled seat is never returned to the pool, so the next task launches a new rig.
+
+- **Who sets it.** `HermesActorAdapter.execute_task` creates one event per task and passes it to the
+  backend. It sets the event when the task's coroutine is cancelled. That covers the engine's cancel and
+  the `ExecutionManager` timeout. The sprint runner has no cancel source, so its runs stop only at the
+  timeout.
+- **Latency.** A cancel takes effect at the next poll (about 2 s). If it arrives while a `rig up` or
+  `rig send` subprocess is running, it takes effect when that call returns. `rig send` can block for up to
+  30 s (`SEND_IDLE_WAIT_SECONDS`).
+- **After completion.** Once the completion is proven, the result is returned and a late cancel does
+  nothing. The seat goes back to the pool as usual.
+- **Wiring elsewhere.** Any caller that owns a task can do the same: create a `threading.Event`, pass it as
+  `cancel_event=` when getting the backend, and set it from the code that cancels the task.
+
 ### Errors
 
 `FAILED_OPENRIG_EXECUTABLE_MISSING`, `_UNAVAILABLE` (daemon, version or CLI failure),
 `_UNSUPPORTED_RUNTIME`, `_CREATE`, `_SEAT_NOT_READY` (startup attention or a prompt during startup),
 `_DELIVERY`, `_NEEDS_INPUT` (a prompt mid-task), `_SESSION_LOST` (seat gone or occupant changed),
 `_PROTOCOL` (malformed JSON, ownership mismatch, missing generation, missing or invalid result file),
-and `FAILED_TIMEOUT`. If an owned rig cannot be released, an otherwise successful task fails with
+`_CANCELLED` (cancel event set; the owned rig is released by id), and `FAILED_TIMEOUT`. If an owned rig cannot be released, an otherwise successful task fails with
 `FAILED_OPENRIG_UNAVAILABLE` naming the rig, and `cleanup()` retries it.
 
 ### runtime_metadata
@@ -223,7 +243,10 @@ them into `TaskExecutionResult.metadata["backend_runtime_metadata"]`.
   `HermesActorAdapter` path, keyed by `job_id`, has no job-end call yet, so its idle seats are released by the
   120 s idle timer or at process exit.
 - The granted root is the worktree parent, so a seat can technically reach sibling worktrees of its job.
-- No out-of-band cancel: a cancelled Hermes task stops at its own timeout, then the rig is released.
+- Cancel is wired only on the runtime path (`HermesActorAdapter`). The sprint runner has no cancel source,
+  so a sprint-runner task still stops only at its timeout. A cancel during an in-flight `rig up` or
+  `rig send` is honored only after that call returns (up to 30 s for send). Killing the subprocess early
+  is not done.
 - The result file relies on the agent following the protocol. An agent that skips it fails closed.
 - The backend is coupled to OpenRig 0.6.x JSON shapes (`up`, `ps --nodes --full`, `send`, `down`).
 - The sprint runner reuses one backend instance per sprint. That's safe, because each `execute()` leases

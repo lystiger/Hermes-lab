@@ -220,3 +220,14 @@ def test_jobs_recoverable_is_not_shadowed_by_the_job_id_route():
     response = TestClient(app).get("/jobs/recoverable")
     assert response.status_code == 200, response.text
     assert "not found" not in response.text.lower()
+
+
+def test_cors_allows_any_local_port_and_nothing_else():
+    from fastapi.testclient import TestClient
+    from main import app
+
+    client = TestClient(app)
+    for origin in ("http://localhost:3001", "http://127.0.0.1:4173", "http://localhost:3000"):
+        assert client.get("/health", headers={"Origin": origin}).headers.get("access-control-allow-origin") == origin
+    for origin in ("http://evil.example", "http://localhost.evil.example", "https://localhost:3001"):
+        assert "access-control-allow-origin" not in client.get("/health", headers={"Origin": origin}).headers

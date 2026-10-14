@@ -84,9 +84,14 @@ origins = [
     "http://127.0.0.1:5173",
 ]
 
+# Hermes is a local API: allow any port on localhost/127.0.0.1 (dev servers, previews, the
+# LysControl web app), and nothing from other hosts.
+LOCAL_ORIGIN_REGEX = r"^http://(localhost|127\.0\.0\.1)(:\d{1,5})?$"
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=origins,
+    allow_origin_regex=LOCAL_ORIGIN_REGEX,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

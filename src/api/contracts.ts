@@ -5,7 +5,6 @@ import {
   Job,
   JobDetail,
   PipelineStep,
-  ProviderQuota,
   ProjectionItem,
   SettingItem,
   TraceEvent,
@@ -14,7 +13,12 @@ import {
   Thread,
   Message,
   MailboxEntry,
-  ExecutionSnapshot
+  ExecutionSnapshot,
+  CapacityTelemetry,
+  JobTokenTelemetry,
+  TaskNode,
+  AgentRun,
+  JobObservation
 } from './types';
 
 export interface EventSubscription {
@@ -29,7 +33,13 @@ export interface HermesApi {
   getJob(id: string): Promise<JobDetail | null>;
   getPipeline(): Promise<PipelineStep[]>;
   getTelemetry(): Promise<OverviewTelemetry>;
-  getProviderQuotas(): Promise<ProviderQuota[]>;
+  getCapacityTelemetry(): Promise<CapacityTelemetry>;
+  getJobTelemetry(jobId: string): Promise<JobTokenTelemetry>;
+  getJobTasks(jobId: string): Promise<TaskNode[]>;
+  getJobRuns(jobId: string): Promise<AgentRun[]>;
+  getJobObservations(jobId: string): Promise<JobObservation[]>;
+  getJobEvents(jobId: string, limit?: number): Promise<TraceEvent[]>;
+  getRecoverableJobs(): Promise<Job[]>;
   getProjections(): Promise<ProjectionItem[]>;
   getSettings(): Promise<{ runtime: SettingItem[]; policy: SettingItem[] }>;
   getExecutionSnapshot(): Promise<ExecutionSnapshot>;

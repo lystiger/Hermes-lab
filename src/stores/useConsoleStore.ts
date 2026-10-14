@@ -28,6 +28,8 @@ interface ConsoleUIState {
   agentRuntimeStatuses: Record<string, AgentRuntimeState>;
   jobRuntimeVersion: number;
   messageRuntimeVersion: number;
+  /** Bumped on agent.* events and after an SSE reconnect, so agent identity and telemetry refetch. */
+  agentRuntimeVersion: number;
 
   // Client UI Preferences & Selection
   selectedAgentId: string;
@@ -62,6 +64,8 @@ interface ConsoleUIState {
   setInitialEvents: (events: TraceEvent[]) => void;
   addTraceEvent: (event: TraceEvent) => void;
   tickClock: () => void;
+  /** Called after the stream reconnects: anything derived from events may have missed updates. */
+  markRuntimeResynced: () => void;
 }
 
 const baseTs = 10 * 3600 + 42 * 60 + 16;
@@ -78,6 +82,7 @@ export const useConsoleStore = create<ConsoleUIState>((set, get) => ({
   agentRuntimeStatuses: {},
   jobRuntimeVersion: 0,
   messageRuntimeVersion: 0,
+  agentRuntimeVersion: 0,
   selectedAgentId: 'claude',
   activeModalJobId: null,
   activeDossierAgent: null,
@@ -161,14 +166,23 @@ export const useConsoleStore = create<ConsoleUIState>((set, get) => ({
       const nextJobVersion = isJobEvent ? state.jobRuntimeVersion + 1 : state.jobRuntimeVersion;
       const isMessageEvent = event.kind.startsWith('message.') || event.kind.startsWith('thread.') || event.kind.startsWith('artifact.');
       const nextMessageVersion = isMessageEvent ? state.messageRuntimeVersion + 1 : state.messageRuntimeVersion;
+      const nextAgentVersion = event.kind.startsWith('agent.') ? state.agentRuntimeVersion + 1 : state.agentRuntimeVersion;
 
       return {
         allEvents: nextEvents,
         agentRuntimeStatuses: nextStatuses,
         jobRuntimeVersion: nextJobVersion,
-        messageRuntimeVersion: nextMessageVersion
+        messageRuntimeVersion: nextMessageVersion,
+        agentRuntimeVersion: nextAgentVersion
       };
     }),
+
+  markRuntimeResynced: () =>
+    set((state) => ({
+      jobRuntimeVersion: state.jobRuntimeVersion + 1,
+      messageRuntimeVersion: state.messageRuntimeVersion + 1,
+      agentRuntimeVersion: state.agentRuntimeVersion + 1
+    })),
 
   tickClock: () => {
     const nextTick = get().tick + 1;

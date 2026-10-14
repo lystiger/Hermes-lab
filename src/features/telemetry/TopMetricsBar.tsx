@@ -1,8 +1,9 @@
 import React from 'react';
-import { useTelemetry } from '../../api/hooks';
-import { UnknownValue, Freshness, StaleNotice } from '../../components/DataStates';
+import { useCapacityTelemetry, useTelemetry } from '../../api/hooks';
+import { CAPACITY_WINDOW_LABEL } from '../../api/mapping';
+import { UnknownValue, Freshness, StaleNotice, isKnown } from '../../components/DataStates';
 
-const NO_TOKEN_TOTALS = 'Hermes does not report sprint token totals in this build';
+const NO_TOKEN_TOTALS = 'Provider capacity telemetry has not reported a token total';
 const NO_SPEND = 'Hermes does not report cost or spend';
 const NO_BUDGET = 'Hermes does not expose a sprint budget, so no percentage can be computed';
 
@@ -21,6 +22,8 @@ const Metric: React.FC<MetricProps> = ({ label, children, className = '' }) => (
 
 export const TopMetricsBar: React.FC = () => {
   const { telemetry, loading, error, updatedAt, refetch } = useTelemetry();
+  const { capacity } = useCapacityTelemetry();
+  const processTokens = capacity?.summary?.totalTokens;
 
   if (error && !telemetry) {
     return (
@@ -62,9 +65,10 @@ export const TopMetricsBar: React.FC = () => {
           </div>
         </Metric>
 
-        <Metric label="TOKENS TODAY" className="flex-[1.2] min-w-[150px]">
-          <div className="font-mono-code text-[19px] text-[#E6E9ED]">
-            <UnknownValue reason={NO_TOKEN_TOTALS} />
+        {/* Process totals are since runtime start. They are never labelled as today's usage. */}
+        <Metric label="TOKENS · SINCE START" className="flex-[1.2] min-w-[150px]">
+          <div className="font-mono-code text-[19px] text-[#E6E9ED]" title={CAPACITY_WINDOW_LABEL}>
+            {isKnown(processTokens) ? processTokens : <UnknownValue reason={NO_TOKEN_TOTALS} />}
           </div>
         </Metric>
 

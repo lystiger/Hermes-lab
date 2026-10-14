@@ -4,6 +4,7 @@ import { useConsoleStore } from '../stores/useConsoleStore';
 import { useJobs, usePipeline, useAgents } from '../api/hooks';
 import { resolveActorPresentation } from '../api/actors';
 import { EmptyState, ErrorState, Freshness, LoadingState, StaleNotice } from '../components/DataStates';
+import { useRecoverableJobs } from '../api/hooks';
 
 export const QueueRoute: React.FC = () => {
   const { setActiveModalJobId, liveMotion } = useConsoleStore();
@@ -132,9 +133,46 @@ export const QueueRoute: React.FC = () => {
         showFilters={true}
       />
 
+      {/* Recoverable jobs: read-only discovery from GET /jobs/recoverable. Resume and cancel are not offered here. */}
+      <RecoverableJobs onSelect={(id) => setActiveModalJobId(id)} />
+
       <div className="px-5 pt-3.5 font-mono-code text-[11px] text-[#5C646E]">
         time estimates: not available (Hermes exposes no estimator) · concurrency policy: not reported by Hermes
       </div>
+    </div>
+  );
+};
+
+const RecoverableJobs: React.FC<{ onSelect: (jobId: string) => void }> = ({ onSelect }) => {
+  const { jobs, loading, error, updatedAt, refetch } = useRecoverableJobs();
+  return (
+    <div className="p-5 border-t border-[#1F242B]">
+      <div className="flex items-center justify-between mb-2.5 font-mono-code text-[11px]">
+        <span className="tracking-wider text-[#5C646E]">RECOVERABLE · {jobs.length} · read-only</span>
+        <Freshness at={updatedAt} />
+      </div>
+      {loading && jobs.length === 0 && <LoadingState label="Loading recoverable jobs…" />}
+      {error && <ErrorState label="Recoverable jobs" error={error} onRetry={refetch} />}
+      {!loading && !error && jobs.length === 0 && (
+        <EmptyState>No unfinished jobs are recoverable from the event ledger.</EmptyState>
+      )}
+      <div className="flex flex-col gap-1.5">
+        {jobs.map((j) => (
+          <button
+            key={j.id}
+            type="button"
+            onClick={() => onSelect(j.id)}
+            className="flex flex-wrap justify-between gap-2 p-2.5 bg-[#101216] border border-[#1F242B] text-left font-mono-code text-[11px] hover:border-[#3A4048] cursor-pointer"
+          >
+            <span className="text-[#E6E9ED]">{j.id}</span>
+            <span className="text-[#B7BEC7] font-sans">{j.title}</span>
+            <span className="text-[#8C949F]">{j.status}</span>
+          </button>
+        ))}
+      </div>
+      <p className="mt-2 font-mono-code text-[11px] text-[#5C646E]">
+        Resume and cancel are not available from this console.
+      </p>
     </div>
   );
 };

@@ -102,8 +102,7 @@ describe('M1 HTTP adapter does not invent or swallow data', () => {
     expect(mapPhaseState(null)).toBe('UNKNOWN');
   });
 
-  it('reports no provider quota rather than the removed Google measurement', async () => {
-    expect(await api.getProviderQuotas()).toEqual([]);
+  it('reports no projection rows, since Hermes has no projection source', async () => {
     expect(await api.getProjections()).toEqual([]);
   });
 

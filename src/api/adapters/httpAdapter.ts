@@ -6,7 +6,6 @@ import {
   Job,
   JobDetail,
   PipelineStep,
-  ProviderQuota,
   ProjectionItem,
   SettingItem,
   TraceEvent,
@@ -16,15 +15,53 @@ import {
   Message,
   MailboxEntry,
   ExecutionSnapshot,
-  PipelineStepState
+  PipelineStepState,
+  CapacityTelemetry,
+  JobTokenTelemetry,
+  TaskNode,
+  AgentRun,
+  JobObservation
 } from '../types';
 import { resolveActorPresentation } from '../actors';
 import { UNKNOWN } from '../unknown';
+import {
+  mapEvent,
+  mapCapacityTelemetry,
+  mapJobTokenTelemetry,
+  mapTaskNode,
+  mapAgentRun,
+  mapObservation
+} from '../mapping';
 
 /** Jobs that are being worked on right now. Anything else is queued, blocked, or terminal. */
 export const ACTIVE_JOB_STATUSES = ['RUNNING', 'PLANNING', 'PREPARING', 'VERIFYING', 'REPAIRING'];
 
 const DAY_MS = 24 * 60 * 60 * 1000;
+
+/** Job summary from GET /jobs or GET /jobs/recoverable. Keeps blocked and repair diagnostics; no invented estimates. */
+export function mapJobSummary(j: any): Job {
+  return {
+    id: j.id,
+    sprintId: j.sprintId,
+    title: j.title,
+    repository: j.repository,
+    branch: j.branch,
+    priority: j.priority || 'P1',
+    status: j.status,
+    currentPhase: j.currentPhase,
+    assignedAgentIds: j.assignedAgentIds || [],
+    createdAt: j.createdAt,
+    startedAt: j.startedAt ?? undefined,
+    completedAt: j.completedAt ?? undefined,
+    progress: j.progress ?? undefined,
+    blockedReason: j.blockedReason ?? null,
+    repairCount: j.repairCount ?? 0,
+    replanCount: j.replanCount ?? 0,
+    estimatedTokens: UNKNOWN,
+    estimatedTime: UNKNOWN,
+    budget: UNKNOWN
+  };
+}
 
 /** Maps a backend phase status without collapsing failure, cancellation or skip into BLOCKED or QUEUED. */
 export function mapPhaseState(status: string | null | undefined): PipelineStepState {
@@ -183,24 +220,17 @@ export class HttpHermesApi implements HermesApi {
     }
     const data: any[] = await res.json();
 
-    return data.map((j) => ({
-      id: j.id,
-      sprintId: j.sprintId,
-      title: j.title,
-      repository: j.repository,
-      branch: j.branch,
-      priority: j.priority || 'P1',
-      status: j.status,
-      currentPhase: j.currentPhase,
-      assignedAgentIds: j.assignedAgentIds || [],
-      createdAt: j.createdAt,
-      startedAt: j.startedAt,
-      completedAt: j.completedAt,
-      progress: j.progress,
-      estimatedTokens: UNKNOWN,
-      estimatedTime: UNKNOWN,
-      budget: UNKNOWN
-    }));
+    return data.map(mapJobSummary);
+  }
+
+  /** Recoverable jobs are read-only here: discovery only, no resume or cancel. */
+  async getRecoverableJobs(): Promise<Job[]> {
+    const res = await fetch(`${this.baseUrl}/jobs/recoverable`);
+    if (!res.ok) {
+      throw new Error(`Hermes /jobs/recoverable returned HTTP ${res.status}: ${res.statusText}`);
+    }
+    const data: any[] = await res.json();
+    return data.map(mapJobSummary);
   }
 
   async getJob(id: string): Promise<JobDetail | null> {
@@ -246,9 +276,10 @@ export class HttpHermesApi implements HermesApi {
       phases,
       tasks: data.tasks || [],
       observations: data.observations || [],
-      blockedReason: data.blockedReason,
+      blockedReason: data.blockedReason ?? null,
       repairCount: data.repairCount || 0,
       replanCount: data.replanCount || 0,
+      verification: data.verification ?? null,
       executionGraph,
       changedFiles: [],
       retryHistory: data.retryHistory || [],
@@ -320,24 +351,9 @@ export class HttpHermesApi implements HermesApi {
     const data: BackendTraceEventDTO[] = await res.json();
 
     return data.map((e) => {
-      if (e.id) this.lastEventId = e.id;
-      return {
-        id: e.id,
-        ts: e.ts,
-        rawTs: e.rawTs,
-        source: {
-          id: e.source.id,
-          kind: e.source.kind,
-          displayName: e.source.displayName,
-          accentColor: e.source.accentColor || resolveActorPresentation(e.source.id).accentColor
-        },
-        kind: e.kind,
-        detail: e.detail,
-        dur: e.dur || '—',
-        jobId: e.jobId,
-        taskId: e.taskId,
-        metadata: e.metadata
-      };
+      const event = mapEvent(e);
+      if (event.id) this.lastEventId = event.id;
+      return event;
     });
   }
 
@@ -362,27 +378,8 @@ export class HttpHermesApi implements HermesApi {
 
     const parseAndEmit = (rawEvent: MessageEvent) => {
       try {
-        const dto: BackendTraceEventDTO = JSON.parse(rawEvent.data);
-        if (dto.id) this.lastEventId = dto.id;
-
-        const event: TraceEvent = {
-          id: dto.id,
-          ts: dto.ts,
-          rawTs: dto.rawTs,
-          source: {
-            id: dto.source.id,
-            kind: dto.source.kind,
-            displayName: dto.source.displayName,
-            accentColor: dto.source.accentColor || resolveActorPresentation(dto.source.id).accentColor
-          },
-          kind: dto.kind,
-          detail: dto.detail,
-          dur: dto.dur || '—',
-          jobId: dto.jobId,
-          taskId: dto.taskId,
-          metadata: dto.metadata
-        };
-
+        const event = mapEvent(JSON.parse(rawEvent.data));
+        if (event.id) this.lastEventId = event.id;
         handler(event);
       } catch (err) {
         console.error('[HttpHermesApi] Failed to parse SSE event:', err, rawEvent.data);
@@ -455,14 +452,6 @@ export class HttpHermesApi implements HermesApi {
   // --------------------------------------------------------------------------
   // Quota & Projections: no real source is wired yet, so these return nothing rather than a measurement
   // --------------------------------------------------------------------------
-
-  /**
-   * No provider usage is fetched in M1. The former hardcoded Google quota (EXACT, 666 left) was not measured
-   * and is removed. Capacity telemetry (GET /capacity/telemetry) is wired in M2.
-   */
-  async getProviderQuotas(): Promise<ProviderQuota[]> {
-    return [];
-  }
 
   /** No projection source exists in Hermes yet, so there are no projected rows in HTTP mode. */
   async getProjections(): Promise<ProjectionItem[]> {
@@ -565,7 +554,7 @@ export class HttpHermesApi implements HermesApi {
 
     const res = await fetch(`${this.baseUrl}/threads/${encodeURIComponent(threadId)}/messages?${params.toString()}`);
     if (!res.ok) {
-      if (res.status === 404) return [];
+      // A 404 means the thread does not exist. That is an error to show, not an empty conversation.
       throw new Error(`Hermes /threads/${threadId}/messages returned HTTP ${res.status}: ${res.statusText}`);
     }
     const data: any[] = await res.json();
@@ -627,6 +616,55 @@ export class HttpHermesApi implements HermesApi {
       acknowledgedAt: e.acknowledgedAt,
       message: e.message
     }));
+  }
+
+  // --------------------------------------------------------------------------
+  // M2 real data: capacity, job telemetry, tasks, runs, observations, job events
+  // --------------------------------------------------------------------------
+
+  private async getJson(path: string, label: string): Promise<any> {
+    const res = await fetch(`${this.baseUrl}${path}`);
+    if (!res.ok) {
+      throw new Error(`Hermes ${label} returned HTTP ${res.status}: ${res.statusText}`);
+    }
+    return res.json();
+  }
+
+  async getCapacityTelemetry(): Promise<CapacityTelemetry> {
+    return mapCapacityTelemetry(await this.getJson('/capacity/telemetry', '/capacity/telemetry'));
+  }
+
+  async getJobTelemetry(jobId: string): Promise<JobTokenTelemetry> {
+    const id = encodeURIComponent(jobId);
+    return mapJobTokenTelemetry(await this.getJson(`/jobs/${id}/telemetry`, `/jobs/${jobId}/telemetry`), jobId);
+  }
+
+  async getJobTasks(jobId: string): Promise<TaskNode[]> {
+    const id = encodeURIComponent(jobId);
+    const data: any[] = await this.getJson(`/jobs/${id}/tasks`, `/jobs/${jobId}/tasks`);
+    return data.map(mapTaskNode);
+  }
+
+  async getJobRuns(jobId: string): Promise<AgentRun[]> {
+    const id = encodeURIComponent(jobId);
+    const data: any[] = await this.getJson(`/jobs/${id}/runs`, `/jobs/${jobId}/runs`);
+    return data.map(mapAgentRun);
+  }
+
+  async getJobObservations(jobId: string): Promise<JobObservation[]> {
+    const id = encodeURIComponent(jobId);
+    const data: any[] = await this.getJson(`/jobs/${id}/observations`, `/jobs/${jobId}/observations`);
+    return data.map(mapObservation);
+  }
+
+  /** Durable job history, normalised from the stored envelope. Live SSE events are merged by the store. */
+  async getJobEvents(jobId: string, limit = 500): Promise<TraceEvent[]> {
+    const id = encodeURIComponent(jobId);
+    const data: any[] = await this.getJson(
+      `/jobs/${id}/events?limit=${limit}`,
+      `/jobs/${jobId}/events`
+    );
+    return data.map(mapEvent);
   }
 
   async sendMessage(

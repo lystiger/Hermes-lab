@@ -114,11 +114,12 @@ describe('M1 truth sweep: HTTP-mode screens render only real data', () => {
     expect(metricValue('QUEUED')).toBe('0');
     expect(metricValue('BLOCKED')).toBe('0');
     expect(metricValue('FAILED 24H')).toBe('0');
-    expect(metricValue('TOKENS TODAY')).toBe('—');
+    // Process total since runtime start, from the observed capacity report; never labelled as today.
+    expect(metricValue('TOKENS · SINCE START')).toBe('0');
     expect(metricValue('EST. SPEND')).toBe('—');
     expect(screen.getByText(/counts from the latest 1 jobs/)).toBeInTheDocument();
 
-    expect(await screen.findByText('No provider usage reported. Hermes provider telemetry is not connected in this build.')).toBeInTheDocument();
+    expect(await screen.findByText(/No provider usage reported by Hermes/)).toBeInTheDocument();
     expectNoFabrication(container);
   });
 

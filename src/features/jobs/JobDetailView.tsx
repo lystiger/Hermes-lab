@@ -1,12 +1,14 @@
 import React from 'react';
 import { useConsoleStore } from '../../stores/useConsoleStore';
-import { useJob, useAgents } from '../../api/hooks';
+import { useJob, useAgents, useJobEvents } from '../../api/hooks';
 import { resolveActorPresentation } from '../../api/actors';
 import { OperationalThreadView } from '../messaging/OperationalThreadView';
 import { JobTaskExecution } from '../execution/JobTaskExecution';
 import { useNow } from '../execution/useNow';
 import { formatElapsed } from './jobTiming';
-import { ErrorState, LoadingState } from '../../components/DataStates';
+import { mergeJobEvents } from './jobEvents';
+import { JobFailure, JobObservations, JobRuns, JobTasks, JobTokens } from './JobRealData';
+import { ErrorState, LoadingState, EmptyState, Freshness } from '../../components/DataStates';
 
 interface JobDetailViewProps {
   jobId?: string;
@@ -15,6 +17,7 @@ interface JobDetailViewProps {
 export const JobDetailView: React.FC<JobDetailViewProps> = ({ jobId = '' }) => {
   const { allEvents } = useConsoleStore();
   const { job, loading, error, refetch } = useJob(jobId);
+  const durable = useJobEvents(job ? job.id : null);
   const { agents } = useAgents();
   const nowMs = useNow(1000);
 
@@ -53,7 +56,8 @@ export const JobDetailView: React.FC<JobDetailViewProps> = ({ jobId = '' }) => {
   };
 
   const statusCol = getStatusColor(job.status);
-  const jobEvents = allEvents.filter((e) => Boolean(e.jobId && (e.jobId === job.id || e.jobId === job.sprintId)));
+  const liveEvents = allEvents.filter((e) => Boolean(e.jobId && (e.jobId === job.id || e.jobId === job.sprintId)));
+  const traceRows = mergeJobEvents(durable.events, liveEvents);
 
   return (
     <div className="w-full bg-[#0A0B0D] select-none">
@@ -86,7 +90,12 @@ export const JobDetailView: React.FC<JobDetailViewProps> = ({ jobId = '' }) => {
           <span>started {job.startedAt ? job.startedAt.slice(11, 19) : '—'}</span>
           <span>completed {job.completedAt ? job.completedAt.slice(11, 19) : '—'}</span>
           <span>elapsed <span className="text-[#E6E9ED]">{formatElapsed(job.startedAt, job.completedAt, nowMs)}</span></span>
+          <span>tokens <JobTokens jobId={job.id} /></span>
         </div>
+      </div>
+
+      <div className="px-5 pt-4">
+        <JobFailure job={job} />
       </div>
 
       {/* Main Body Split */}
@@ -188,40 +197,50 @@ export const JobDetailView: React.FC<JobDetailViewProps> = ({ jobId = '' }) => {
             assignedAgentIds={job.assignedAgentIds}
           />
 
-          {/* Backend execution per task (D-009) */}
-          <JobTaskExecution events={jobEvents} />
+          <JobTasks jobId={job.id} />
+          <JobRuns jobId={job.id} />
+          <JobObservations jobId={job.id} />
 
-          {/* Execution Trace */}
+          {/* Backend execution per task (D-009) */}
+          <JobTaskExecution events={traceRows.map((r) => r.event)} />
+
+          {/* Job trace: durable history merged with the live buffer */}
           <div className="pb-8">
-            <div className="font-mono-code text-[11px] tracking-wider text-[#5C646E] mb-2.5">
-              RUNTIME EVENTS &amp; TRACES · {job.id}
+            <div className="flex items-center justify-between mb-2.5">
+              <span className="font-mono-code text-[11px] tracking-wider text-[#5C646E]">
+                RUNTIME EVENTS &amp; TRACES · {job.id}
+              </span>
+              <Freshness at={durable.updatedAt} />
             </div>
+            {durable.error && (
+              <ErrorState label="Durable job history" error={durable.error} onRetry={durable.refetch} />
+            )}
+            {!durable.error && traceRows.length === 0 && !durable.loading && (
+              <EmptyState>Hermes recorded no events for this job.</EmptyState>
+            )}
             <div className="flex flex-col">
-              {jobEvents.length === 0 ? (
-                <div className="py-4 font-mono-code text-[11px] text-[#5C646E]">
-                  No trace events for this job in the live buffer. Durable job history is not loaded yet.
-                </div>
-              ) : (
-                jobEvents.slice(0, 15).map((e) => (
-                  <div
-                    key={e.id}
-                    className="flex items-center gap-3.5 py-1 font-mono-code text-[11px] border-b border-[#101216]"
+              {traceRows.slice(0, 50).map(({ event: e, origin }) => (
+                <div
+                  key={e.id}
+                  className="flex items-center gap-3.5 py-1 font-mono-code text-[11px] border-b border-[#101216]"
+                >
+                  <span className="w-24 text-[#5C646E]">{e.ts}</span>
+                  <span
+                    style={{ color: e.source.accentColor || '#8C949F' }}
+                    className="w-16 font-medium"
                   >
-                    <span className="w-24 text-[#5C646E]">{e.ts}</span>
-                    <span
-                      style={{ color: e.source.accentColor || '#8C949F' }}
-                      className="w-16 font-medium"
-                    >
-                      {e.source.displayName}
-                    </span>
-                    <span className="w-28 text-[#8C949F]">{e.kind}</span>
-                    <span className="flex-1 min-w-0 text-[#B7BEC7] truncate font-sans">
-                      {e.detail}
-                    </span>
-                    <span className="w-16 text-right text-[#8C949F]">{e.dur}</span>
-                  </div>
-                ))
-              )}
+                    {e.source.displayName}
+                  </span>
+                  <span className="w-28 text-[#8C949F]">{e.kind}</span>
+                  <span className="flex-1 min-w-0 text-[#B7BEC7] truncate font-sans">
+                    {e.detail}
+                  </span>
+                  <span className="w-16 text-right text-[#8C949F]">{e.dur}</span>
+                  <span className="w-14 text-right text-[#5C646E]" title={origin === 'stored' ? 'durable history' : 'live buffer only'}>
+                    {origin}
+                  </span>
+                </div>
+              ))}
             </div>
           </div>
         </div>

@@ -4,7 +4,7 @@ import { TopMetricsBar } from '../features/telemetry/TopMetricsBar';
 import { ActiveExecutionCard } from '../features/jobs/ActiveExecutionCard';
 import { AgentLaneCard } from '../features/agents/AgentLaneCard';
 import { QueueProjectionBar } from '../features/jobs/QueueProjectionBar';
-import { ProviderQuotaList } from '../features/telemetry/ProviderQuotaList';
+import { ProviderTelemetryList } from '../features/telemetry/ProviderTelemetryList';
 import { useConsoleStore } from '../stores/useConsoleStore';
 import { useAgents, useJobs } from '../api/hooks';
 import { resolveActorPresentation } from '../api/actors';
@@ -162,7 +162,7 @@ export const OverviewRoute: React.FC = () => {
           <QueueProjectionBar compact={true} />
 
           {/* Provider Quotas */}
-          <ProviderQuotaList compact={true} />
+          <ProviderTelemetryList compact={true} />
         </div>
       </div>
     </div>

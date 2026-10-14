@@ -1,6 +1,6 @@
 import React from 'react';
 import { TokenBudgetMeter } from '../features/telemetry/TokenBudgetMeter';
-import { ProviderQuotaList } from '../features/telemetry/ProviderQuotaList';
+import { ProviderTelemetryList } from '../features/telemetry/ProviderTelemetryList';
 import { QueueProjectionBar } from '../features/jobs/QueueProjectionBar';
 import { useAgents } from '../api/hooks';
 import { ErrorState, LoadingState, EmptyState, UNKNOWN } from '../components/DataStates';
@@ -63,7 +63,7 @@ export const UsageRoute: React.FC = () => {
         <TokenBudgetMeter />
 
         {/* 3 · PROVIDER QUOTA */}
-        <ProviderQuotaList compact={false} />
+        <ProviderTelemetryList compact={false} />
       </div>
 
       {/* 4 · QUEUE PROJECTION */}

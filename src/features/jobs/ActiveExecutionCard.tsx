@@ -5,6 +5,7 @@ import { useConsoleStore } from '../../stores/useConsoleStore';
 import { useJob, useJobs } from '../../api/hooks';
 import { ACTIVE_JOB_STATUSES } from '../../api/adapters/httpAdapter';
 import { ErrorState, LoadingState, UnknownValue } from '../../components/DataStates';
+import { JobTokens } from './JobRealData';
 import { useNow } from '../execution/useNow';
 import { formatElapsed } from './jobTiming';
 
@@ -78,10 +79,7 @@ export const ActiveExecutionCard: React.FC<ActiveExecutionCardProps> = ({ onOpen
         <span className="text-[#2A3038]">·</span>
         <span>elapsed <span className="text-[#E6E9ED]">{formatElapsed(activeJob.startedAt, activeJob.completedAt, nowMs)}</span></span>
         <span className="text-[#2A3038]">·</span>
-        <span>
-          tokens{' '}
-          <UnknownValue reason="Per-job token totals are not on this card yet" className="text-[#8C949F]" />
-        </span>
+        <span>tokens <JobTokens jobId={activeJob.id} /></span>
       </div>
 
       {/* Pipeline Graph of this job */}

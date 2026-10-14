@@ -68,11 +68,49 @@ export const LIVE_EXECUTION = {
   takenAt: 1791961678984
 };
 
+/** GET /capacity/telemetry as observed on the live service (no providers recorded yet). */
+export const LIVE_CAPACITY = {
+  timestamp: '2026-10-14T07:57:35.236695+00:00',
+  summary: {
+    total_providers: 0,
+    total_requests: 0,
+    total_failures: 0,
+    total_throttling_events: 0,
+    total_tokens: 0,
+    input_tokens: 0,
+    output_tokens: 0,
+    cached_tokens: 0
+  },
+  providers: {},
+  jobs_tracked: 0
+};
+
+/** GET /jobs/{id}/telemetry as observed for the sample job. */
+export const LIVE_JOB_TELEMETRY = {
+  job_id: LIVE_JOB_ID,
+  tokens: { input_tokens: 0, output_tokens: 0, cached_tokens: 0, total_tokens: 0 }
+};
+
 export interface LiveOptions {
   /** Make GET /jobs fail with HTTP 500. */
   failJobs?: boolean;
   /** Replace the job list (e.g. to add an active job). */
   jobs?: unknown[];
+  /** Per-collection overrides for the sample job. Unset means the observed empty collection. */
+  tasks?: unknown[];
+  runs?: unknown[];
+  observations?: unknown[];
+  events?: unknown[];
+  /** Make a sub-resource fail with HTTP 500, e.g. 'tasks' or 'events'. */
+  failSub?: string;
+  /** Make the sample job's telemetry return the given token totals. */
+  jobTokens?: { input_tokens: number; output_tokens: number; cached_tokens: number; total_tokens: number };
+  /** Capacity report override (e.g. providers recorded). */
+  capacity?: unknown;
+  /** Recoverable job list. */
+  recoverable?: unknown[];
+  /** Make /threads/{id}/messages return 404 (thread does not exist). */
+  threadMissing?: boolean;
 }
 
 export interface LiveResponse {
@@ -91,6 +129,31 @@ export function respond(pathname: string, options: LiveOptions): LiveResponse {
   if (pathname === '/threads') return { status: 200, body: [] };
   if (pathname === '/events') return { status: 200, body: [] };
   if (pathname === '/execution') return { status: 200, body: LIVE_EXECUTION };
+  if (pathname === '/capacity/telemetry') return { status: 200, body: options.capacity ?? LIVE_CAPACITY };
+  if (pathname === '/jobs/recoverable') return { status: 200, body: options.recoverable ?? [] };
+  if (pathname === `/jobs/${LIVE_JOB_ID}/telemetry`) {
+    return {
+      status: 200,
+      body: options.jobTokens ? { job_id: LIVE_JOB_ID, tokens: options.jobTokens } : LIVE_JOB_TELEMETRY
+    };
+  }
+  const sub = pathname.match(/^\/jobs\/[^/]+\/(tasks|runs|observations|events)$/);
+  if (sub) {
+    const name = sub[1];
+    if (options.failSub === name) return { status: 500, body: { detail: `${name} store unavailable` } };
+    const bodies: Record<string, unknown[] | undefined> = {
+      tasks: options.tasks,
+      runs: options.runs,
+      observations: options.observations,
+      events: options.events
+    };
+    return { status: 200, body: bodies[name] ?? [] };
+  }
+  if (/^\/threads\/[^/]+\/messages$/.test(pathname)) {
+    return options.threadMissing
+      ? { status: 404, body: { detail: 'Thread not found' } }
+      : { status: 200, body: [] };
+  }
   return { status: 404, body: { detail: `Not found: ${pathname}` } };
 }
 

@@ -73,6 +73,9 @@ class _SeatPool:
         self._timers = {}  # rig_id -> (timer, token); the token fences stale callbacks
         self._failed = {}  # rig_id -> seat whose teardown raised; retried by drain()
         self._inflight = {}  # rig_id -> seat whose teardown is running right now
+        # Jobs already ended by release_job(). A task of such a job that finishes late
+        # (e.g. a cancelled worker thread) must not pool its seat: put() tears it down.
+        self._closed_jobs = set()
 
     def acquire(self, job, worktree):
         worktree = Path(worktree).resolve()
@@ -94,7 +97,15 @@ class _SeatPool:
         # Register the token first and publish the seat only after the timer started,
         # so no other task can lease a seat whose timer might still fail to start.
         with self._lock:
-            self._timers[seat.rig_id] = (timer, token)
+            if seat.job in self._closed_jobs:
+                self._inflight[seat.rig_id] = seat
+                closed = True
+            else:
+                self._timers[seat.rig_id] = (timer, token)
+                closed = False
+        if closed:
+            self._release(seat)
+            return
         try:
             timer.start()
         except BaseException:
@@ -172,6 +183,7 @@ class _SeatPool:
         job are retried here. A seat whose teardown fails stays in the ledger until one succeeds.
         """
         with self._lock:
+            self._closed_jobs.add(job)
             seats = self._idle.pop(job, [])
             for seat in seats:
                 timer, _ = self._timers.pop(seat.rig_id, (None, None))
@@ -191,6 +203,10 @@ class _SeatPool:
         with self._lock:
             groups = [self._idle.get(job, [])] if job is not None else list(self._idle.values())
             return [seat.rig_id for group in groups for seat in group]
+
+    def has_failed(self, job):
+        with self._lock:
+            return any(seat.job == job for seat in self._failed.values())
 
     def failed_rig_ids(self):
         with self._lock:
@@ -377,7 +393,14 @@ class OpenRigBackend(ExecutionBackend):
 
     def release_job(self, job):
         """Release the job's pooled seats now instead of waiting for the idle timer."""
-        return self.seat_pool.release_job(job)
+        released = self.seat_pool.release_job(job)
+        if self.seat_pool.has_failed(job):
+            # Kept in the pool for retry: a later release_job() or drain() tries again.
+            raise SprintRunnerError(
+                "FAILED_OPENRIG_UNAVAILABLE",
+                f"OpenRig seats of job {job} could not be released; kept for retry",
+            )
+        return released
 
     # -- lifecycle steps ------------------------------------------------------
 
@@ -749,6 +772,14 @@ class OpenRigBackend(ExecutionBackend):
             )
         if deadline is None:
             deadline = self._monotonic() + RELEASE_TIMEOUT_SECONDS
+        # `rig down` matches its argument as an id first and only falls back to a rig *name*
+        # when no rig has that id. A rig that is already gone could therefore resolve to
+        # another rig named like our id, so confirm the id still exists before tearing down.
+        if not self._rig_exists(rig_id, deadline):
+            self.released_rig_ids.append(rig_id)
+            self._forget(rig_id)
+            self._log("info", "OpenRig rig %s already gone", rig_id)
+            return
         payload = self._run_json(
             ["down", rig_id, "--delete", "--force", "--json"],
             deadline,
@@ -771,6 +802,16 @@ class OpenRigBackend(ExecutionBackend):
         self.released_rig_ids.append(rig_id)
         self._forget(rig_id)
         self._log("info", "OpenRig rig %s released", rig_id)
+
+    def _rig_exists(self, rig_id, deadline):
+        rigs = self._run_json(
+            ["ps", "--json", "--include-archived"], deadline, "FAILED_OPENRIG_UNAVAILABLE",
+        )
+        if isinstance(rigs, dict):
+            rigs = rigs.get("entries")
+        if not isinstance(rigs, list):
+            raise SprintRunnerError("FAILED_OPENRIG_PROTOCOL", "rig ps --json did not return a list")
+        return any(isinstance(r, dict) and r.get("rigId") == rig_id for r in rigs)
 
     def _forget(self, rig_id):
         try:

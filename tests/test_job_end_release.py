@@ -71,3 +71,34 @@ def test_hermes_adapter_releases_only_jobs_it_ran_and_only_once(tmp_path):
     adapter.release_job("j1")
 
     assert registry.calls == [("j1", "j1")]
+
+
+class FlakyBackendRegistry(FakeBackendRegistry):
+    def __init__(self):
+        super().__init__()
+        self.failures = 1
+
+    def get(self, name, **kwargs):
+        registry = self
+
+        class Flaky(FakeBackend):
+            def release_job(self, job):
+                if registry.failures:
+                    registry.failures -= 1
+                    raise RuntimeError("daemon hiccup")
+                super().release_job(job)
+
+        return Flaky(self.calls, **kwargs)
+
+
+def test_a_failed_job_release_is_retried_by_the_next_call(tmp_path):
+    registry = FlakyBackendRegistry()
+    adapter = HermesActorAdapter(run_dir=tmp_path, backend_registry=registry, job_id="j1")
+    adapter._job_backends["j1"] = {"openrig"}
+
+    adapter.release_job("j1")  # fails, kept
+    adapter.release_job("j1")  # retried, succeeds
+    adapter.release_job("j1")  # nothing left
+
+    assert registry.calls == [("j1", "j1")]
+    assert adapter._job_backends == {}

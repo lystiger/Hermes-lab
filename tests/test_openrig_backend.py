@@ -28,6 +28,8 @@ from runtime.task_graph import TaskNode
 
 T0 = datetime(2026, 10, 12, 5, 0, 0, tzinfo=timezone.utc)
 RIG_ID = "01000000000000000000000012"
+# Every canonical id the tests use: the fake daemon reports them as existing until torn down.
+KNOWN_TEST_RIG_IDS = {f"01{n:024d}" for n in range(1, 100)}
 GEN = "gen-1"
 
 
@@ -82,6 +84,7 @@ class FakeRig:
         self.listed_rigs = []
         self.seat_launch_override = None
         self.next_generation = "gen-2"
+        self.gone_rig_ids = set()
 
     def __call__(self, argv, capture_output, text, timeout):
         assert argv[0] == "rig" and capture_output and text
@@ -91,6 +94,12 @@ class FakeRig:
         cmd = argv[1]
         if cmd == "--version":
             return self._ok(self.version)
+        if cmd == "ps" and "--include-archived" in argv:
+            # Teardown pre-check: every test rig id exists until `rig down` succeeds for it.
+            listed = [{"rigId": "01000000000000000000000003", "name": "kernel", "status": "stopped"}] + self.listed_rigs
+            known = {r["rigId"] for r in listed}
+            listed += [{"rigId": rig_id, "name": f"rig-{rig_id}"} for rig_id in sorted(KNOWN_TEST_RIG_IDS - self.gone_rig_ids - known)]
+            return self._ok(json.dumps(listed))
         if cmd == "ps" and "--nodes" not in argv:
             return self._ok(json.dumps(
                 [{"rigId": "01000000000000000000000003", "name": "kernel", "status": "running"}] + self.listed_rigs
@@ -147,6 +156,7 @@ class FakeRig:
             self.rigs_down.append(argv[2])
             if self.down_results:
                 return self.down_results.pop(0)
+            self.gone_rig_ids.add(argv[2])
             return self._ok(json.dumps({"rigId": argv[2], "sessionsKilled": 1, "deleted": True, "errors": []}))
         raise AssertionError(f"unexpected rig call {argv}")
 
@@ -723,7 +733,7 @@ def test_orphan_recovery_retries_until_a_late_rig_appears(tmp_path, clock):
         raise subprocess.TimeoutExpired(["rig", "up"], 1)
 
     def late_listing(argv, **kwargs):
-        if argv[1] == "ps" and "--nodes" not in argv and rig.rig_name:
+        if argv[1] == "ps" and "--nodes" not in argv and "--include-archived" not in argv and rig.rig_name:
             seen["ps_after_up"] += 1
             if seen["ps_after_up"] == 2:
                 rig.listed_rigs = [{"rigId": "01000000000000000000000004", "name": rig.rig_name, "status": "running"}]
@@ -1546,3 +1556,42 @@ def test_a_seat_is_not_leasable_while_its_timer_is_still_starting(tmp_path, cloc
     assert leased_meanwhile == [None]
     assert pool.idle_rig_ids() == []
     assert rig.rigs_down == [RIG_ID]
+
+
+# --- merge-gate review fixes -------------------------------------------------------
+def test_a_gone_rig_is_never_torn_down_by_a_rig_named_like_its_id(tmp_path, clock, pool):
+    # `rig down <id>` falls back to a name match when the id no longer exists.
+    ledger_dir = tmp_path / "ledger"
+    stale = "01000000000000000000000014"
+    dead_owner_ledger(ledger_dir, stale)
+    rig = FakeRig(clock)
+    rig.gone_rig_ids.add(stale)
+    rig.listed_rigs = [{"rigId": "01000000000000000000000099", "name": stale, "status": "running"}]
+
+    make_backend(tmp_path, clock, rig, ledger=OwnershipLedger(ledger_dir)).execute(make_request(tmp_path))
+
+    assert stale not in rig.rigs_down
+    assert "01000000000000000000000099" not in rig.rigs_down
+    assert stale not in ledger_rig_ids(ledger_dir)  # already gone counts as released
+
+
+def test_a_seat_returned_after_its_job_ended_is_torn_down_not_pooled(tmp_path, clock, pool):
+    # A cancelled worker thread can finish after the engine already released the job.
+    pool.release_job("Sprint 07/Proof")
+    rig = FakeRig(clock)
+
+    run(tmp_path, clock, rig)
+
+    assert pool.idle_rig_ids() == []
+    assert rig.rigs_down == [RIG_ID]
+
+
+def test_backend_release_job_reports_a_failed_teardown_so_callers_can_retry(tmp_path, clock, pool):
+    rig = FakeRig(clock)
+    backend, _ = run(tmp_path, clock, rig)
+    rig.down_results = [subprocess.CompletedProcess([], 1, "", "daemon hiccup")]
+
+    with pytest.raises(SprintRunnerError):
+        backend.release_job("Sprint 07/Proof")
+    assert backend.release_job("Sprint 07/Proof") == 1
+    assert rig.rigs_down == [RIG_ID, RIG_ID]

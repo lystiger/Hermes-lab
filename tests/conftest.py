@@ -1,7 +1,17 @@
+import os
 import sys
+import tempfile
 from pathlib import Path
 
 import pytest
+
+# Session-wide isolation, set before ANY test code runs (including unittest setUpClass, which runs
+# before function-scoped fixtures and once started a real API server against the user's state dir).
+# Per-test fixtures below still give each test its own fresh directories.
+_SESSION_STATE = Path(tempfile.mkdtemp(prefix="hermes-test-state-"))
+os.environ["HERMES_OPENRIG_LEDGER_DIR"] = str(_SESSION_STATE / "openrig-ledger")
+os.environ["OPENRIG_HOME"] = str(_SESSION_STATE / "openrig-home")
+os.environ["HERMES_EXECUTION_STATE"] = str(_SESSION_STATE / "execution-registry.json")
 
 ROOT_DIR = Path(__file__).resolve().parent.parent
 if str(ROOT_DIR) not in sys.path:

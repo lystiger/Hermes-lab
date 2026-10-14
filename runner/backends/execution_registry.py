@@ -5,11 +5,15 @@ backend status, including the OpenRig ledger, which covers rigs left by earlier 
 Nothing here runs a mutating command.
 """
 
+import json
 import logging
+import os
 import shutil
+import tempfile
 import threading
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
 
 from . import events
 from .openrig_backend import describe_openrig
@@ -34,12 +38,90 @@ def _now():
     return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
 
+# A restored row that no event has refreshed is dropped after this long (its owner may be gone).
+RESTORED_TTL = timedelta(minutes=30)
+STATE_PATH_ENV = "HERMES_EXECUTION_STATE"
+
+
+def default_state_path():
+    override = os.environ.get(STATE_PATH_ENV)
+    if override:
+        return Path(override)
+    state_home = os.environ.get("XDG_STATE_HOME") or Path.home() / ".local" / "state"
+    return Path(state_home) / "hermes" / "execution-registry.json"
+
+
 class ExecutionRegistry:
-    """Thread-safe. Events arrive from backend worker threads and timer threads."""
+    """Thread-safe. Events arrive from backend worker threads and timer threads.
+
+    In-memory by default. The API server calls enable_persistence() so the Execution page survives
+    a restart: rows are saved after every change and reloaded flagged `details.restored`. A restored
+    row is not trusted: OpenRig rows whose rig the daemon no longer knows are pruned at snapshot
+    time, and any restored row not refreshed by an event within RESTORED_TTL is dropped.
+    """
 
     def __init__(self):
         self._lock = threading.Lock()
         self._resources = {}
+        self._path = None
+        self._save_lock = threading.Lock()
+
+    def enable_persistence(self, path=None):
+        self._path = Path(path) if path is not None else default_state_path()
+        try:
+            rows = json.loads(self._path.read_text(encoding="utf-8"))
+        except FileNotFoundError:
+            rows = []
+        except (OSError, ValueError):
+            logger.warning("Execution state %s unreadable; starting empty", self._path, exc_info=True)
+            rows = []
+        with self._lock:
+            for row in rows if isinstance(rows, list) else []:
+                if not isinstance(row, dict) or not all(row.get(k) for k in ("backend", "kind", "id")):
+                    continue
+                details = dict(row.get("details") or {})
+                details["restored"] = True
+                row = dict(row, details=details, restoredAt=_now())
+                self._resources[(row["backend"], row["kind"], row["id"])] = row
+        self._prune_expired()
+
+    def _save(self):
+        if self._path is None:
+            return
+        # Snapshot and write under one lock, so a slower save can never overwrite a newer state.
+        with self._save_lock:
+            with self._lock:
+                rows = [dict(row, details=dict(row["details"])) for row in self._resources.values()]
+            try:
+                self._path.parent.mkdir(parents=True, exist_ok=True)
+                fd, tmp = tempfile.mkstemp(dir=self._path.parent, prefix=".execution-", suffix=".tmp")
+                with os.fdopen(fd, "w", encoding="utf-8") as handle:
+                    json.dump(rows, handle)
+                os.replace(tmp, self._path)
+            except OSError:
+                # Persistence is a convenience for restarts; it must never affect execution.
+                logger.warning("Execution state not saved to %s", self._path, exc_info=True)
+
+    def _prune_expired(self):
+        cutoff = datetime.now(timezone.utc) - RESTORED_TTL
+        with self._lock:
+            for key, row in list(self._resources.items()):
+                restored_at = row.get("restoredAt")
+                if restored_at and _parse(restored_at) < cutoff:
+                    del self._resources[key]
+
+    def prune_restored_rigs(self, live_rig_ids):
+        """Drop restored OpenRig rows whose rig the daemon no longer knows."""
+        removed = False
+        with self._lock:
+            for key, row in list(self._resources.items()):
+                if row.get("restoredAt") and row["backend"] == "openrig":
+                    rig_id = row["details"].get("rigId") or row["id"]
+                    if rig_id not in live_rig_ids:
+                        del self._resources[key]
+                        removed = True
+        if removed:
+            self._save()
 
     def apply(self, event):
         metadata = event.metadata
@@ -50,7 +132,13 @@ class ExecutionRegistry:
         with self._lock:
             if event.kind == events.RESOURCE_RELEASED:
                 self._resources.pop(key, None)
-                return
+                changed = True
+            else:
+                changed = False
+        if changed:
+            self._save()
+            return
+        with self._lock:
             entry = self._resources.get(key)
             if entry is None:
                 entry = {
@@ -80,8 +168,13 @@ class ExecutionRegistry:
                     entry["since"] = _now()
                 entry["state"] = state
                 entry["expiresAt"] = metadata.get("expiresAt") if state == "idle" else None
+            # A live event proves the row is current again.
+            entry.pop("restoredAt", None)
+            entry["details"].pop("restored", None)
+        self._save()
 
     def resources(self):
+        self._prune_expired()
         with self._lock:
             rows = [dict(row, details=dict(row["details"])) for row in self._resources.values()]
         return sorted(rows, key=lambda row: row["since"] or "")
@@ -90,7 +183,14 @@ class ExecutionRegistry:
 default_execution_registry = ExecutionRegistry()
 
 
-def probe_backends(*, which=None, run_process=None, ledger=None):
+def _parse(stamp):
+    try:
+        return datetime.fromisoformat(str(stamp).replace("Z", "+00:00"))
+    except ValueError:
+        return datetime.min.replace(tzinfo=timezone.utc)
+
+
+def probe_backends(*, which=None, run_process=None, ledger=None, live_rig_ids=None):
     """Read-only availability of each backend, plus the OpenRig status (None when rig is absent)."""
     which = which or shutil.which
     herdr_found = which("herdr") is not None
@@ -103,7 +203,7 @@ def probe_backends(*, which=None, run_process=None, ledger=None):
         },
     ]
     try:
-        openrig = describe_openrig(run_process=run_process, which=which, ledger=ledger)
+        openrig = describe_openrig(run_process=run_process, which=which, ledger=ledger, live_rig_ids=live_rig_ids)
     except Exception:  # noqa: BLE001 - a status probe must not fail the endpoint
         logger.warning("OpenRig status probe failed", exc_info=True)
         openrig = {"daemon": "unknown", "ledger": {"owners": 0, "rigIds": []}}
@@ -125,7 +225,13 @@ def probe_backends(*, which=None, run_process=None, ledger=None):
 def build_execution_snapshot(registry=None, probe=None):
     """The D-009 GET /execution body: backend status, live resources, OpenRig daemon and ledger."""
     registry = registry or default_execution_registry
-    backends, openrig = (probe or probe_backends)()
+    if probe is None:
+        live = set()
+        backends, openrig = probe_backends(live_rig_ids=live)
+        if openrig is not None and openrig.get("daemon") == "up":
+            registry.prune_restored_rigs(live)
+    else:
+        backends, openrig = probe()
     # Epoch seconds on the same clock as event rawTs, read before the resources: every event the
     # snapshot does not yet reflect has a later rawTs, so clients can drop anything at or before it.
     taken_at = time.time()

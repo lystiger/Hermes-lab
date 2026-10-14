@@ -22,3 +22,5 @@ def _isolated_openrig_ledger(tmp_path_factory, monkeypatch):
     monkeypatch.setenv("HERMES_OPENRIG_LEDGER_DIR", str(tmp_path_factory.mktemp("openrig-ledger")))
     # No daemon.json here: a test can never reach the real OpenRig daemon's teardown API.
     monkeypatch.setenv("OPENRIG_HOME", str(tmp_path_factory.mktemp("openrig-home")))
+    # Never touch the real persisted Execution page state.
+    monkeypatch.setenv("HERMES_EXECUTION_STATE", str(tmp_path_factory.mktemp("exec-state") / "registry.json"))

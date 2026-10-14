@@ -1108,11 +1108,12 @@ def _iso(moment):
 STATUS_QUERY_SECONDS = 3
 
 
-def describe_openrig(rig_executable="rig", *, run_process=None, which=None, ledger=None):
+def describe_openrig(rig_executable="rig", *, run_process=None, which=None, ledger=None, live_rig_ids=None):
     """Read-only OpenRig status for GET /execution: daemon reachability and the ownership ledger.
 
     Runs only `rig ps --json`. It never runs a mutating command and never reconciles the ledger.
-    Returns None when the rig executable is not installed.
+    Returns None when the rig executable is not installed. When `live_rig_ids` is a set and the
+    daemon answered, it is filled with the rigIds the daemon knows (stopped ones included).
     """
     if (which or shutil.which)(rig_executable) is None:
         return None
@@ -1126,7 +1127,10 @@ def describe_openrig(rig_executable="rig", *, run_process=None, which=None, ledg
         daemon = "down"
     elif result is not None:
         try:
-            daemon = "up" if isinstance(json.loads(result.stdout or ""), list) else "unknown"
+            listed = json.loads(result.stdout or "")
+            daemon = "up" if isinstance(listed, list) else "unknown"
+            if daemon == "up" and live_rig_ids is not None:
+                live_rig_ids.update(r.get("rigId") for r in listed if isinstance(r, dict) and r.get("rigId"))
         except ValueError:
             daemon = "unknown"
     return {"daemon": daemon, "ledger": (ledger or OwnershipLedger()).summary()}

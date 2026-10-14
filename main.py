@@ -32,6 +32,12 @@ async def lifespan(app: FastAPI):
     store = await init_storage_lifespan()
     job_service.set_store(store)
 
+    # The Execution page survives API restarts (restored rows are re-verified; see ExecutionRegistry).
+    try:
+        default_execution_registry.enable_persistence()
+    except Exception:  # noqa: BLE001 - persistence is optional
+        pass
+
     # Recover historical messages from runs
     try:
         message_store.recover_from_runs(job_service.runs_root)

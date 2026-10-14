@@ -145,3 +145,19 @@ def test_a_verification_repair_without_a_task_is_unchanged():
     [repair] = added(plan(dict(reason=ReplanReason.VERIFICATION_REPAIR, new_observations=[obs])))
     assert repair.assigned_actor is None and repair.parent_task_id is None
     assert set(repair.metadata) == {"observation_ref", "error_details"}
+
+
+def test_a_task_linked_repair_is_dispatched_to_the_inherited_actor_by_the_real_scheduler():
+    from runtime.observations import Observation
+    from runtime.scheduler import ReactiveScheduler
+
+    graph = TaskGraph(job_id="job_fb")
+    source = failed_verifier()
+    source.required_capabilities = []  # sprint phases usually declare none; Claude lacks testing.unit
+    graph.add_task(source)
+    obs = Observation(job_id="job_fb", task_id="write_two", source="hermes.verifier",
+                      kind="verification_failure", content="pytest failed")
+    [repair] = added(plan(dict(reason=ReplanReason.VERIFICATION_REPAIR, new_observations=[obs], current_graph=graph)))
+
+    decision = ReactiveScheduler().match_actor_for_task(repair)
+    assert decision.actor_id == "claude", decision.reason

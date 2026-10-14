@@ -283,7 +283,14 @@ class ProductionPlannerAdapter(PlannerAdapter):
                         task_id=repair_task_id,
                         job_id=request.job_id,
                         description=f"Fix verification failure: {obs.content[:200]}",
-                        required_capabilities=["implementation", "testing.unit"],
+                        # A repair routed to the source task's actor must ask for what that actor has,
+                        # or the scheduler re-routes it away from the inherited agent and backend.
+                        required_capabilities=(
+                            list(source_task.required_capabilities)
+                            if source_task is not None and source_task.required_capabilities
+                            else ([] if source_task is not None and source_task.assigned_actor
+                                  else ["implementation", "testing.unit"])
+                        ),
                         assigned_actor=source_task.assigned_actor if source_task is not None else None,
                         parent_task_id=source_task.task_id if source_task is not None else None,
                         metadata=repair_meta,

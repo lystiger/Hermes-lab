@@ -192,3 +192,22 @@ def test_flush_gives_up_at_its_timeout(tmp_path, monkeypatch):
     started = _time.monotonic()
     assert reg.flush(timeout=0.2) is False
     assert _time.monotonic() - started < 0.6
+
+
+def test_the_test_session_never_points_at_real_user_state():
+    import os
+    from pathlib import Path
+
+    home_state = Path.home() / ".local" / "state" / "hermes"
+    for name in ("HERMES_EXECUTION_STATE", "HERMES_OPENRIG_LEDGER_DIR", "OPENRIG_HOME"):
+        value = Path(os.environ[name]).resolve()
+        assert home_state not in value.parents and value != home_state, name
+        assert Path.home() / ".openrig" != value, name
+
+
+def test_the_test_session_never_publishes_to_a_live_api():
+    import os
+    from control_plane.event_publisher import default_publisher
+
+    assert "LYSSTACK_CONTROL_URL" not in os.environ
+    assert not default_publisher.enabled

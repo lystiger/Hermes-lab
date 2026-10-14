@@ -364,6 +364,7 @@ class OpenRigBackend(ExecutionBackend):
         self.pooled_rig_ids = []
         self.seat_pool = seat_pool if seat_pool is not None else DEFAULT_SEAT_POOL
         self.ledger = ledger if ledger is not None else OwnershipLedger()
+        self._ledger_recorded = set()  # rigIds whose ledger write succeeded
         self._daemon_down = daemon_down or daemon_down_by_id
         # Set by the caller to stop this task out of band. Checked at step boundaries only.
         self._cancel_event = cancel_event
@@ -612,6 +613,7 @@ class OpenRigBackend(ExecutionBackend):
             self.owned_rig_ids.append(rig_id)
         try:
             self.ledger.record(rig_id)
+            self._ledger_recorded.add(rig_id)
         except (OSError, ValueError) as exc:
             raise SprintRunnerError(
                 "FAILED_OPENRIG_UNAVAILABLE",
@@ -732,13 +734,15 @@ class OpenRigBackend(ExecutionBackend):
             raise SprintRunnerError(
                 "FAILED_OPENRIG_UNAVAILABLE", f"could not record pending OpenRig launch {rig_name}: {exc}",
             ) from exc
-        tracked_before = len(self.owned_rig_ids)
+        recorded_before = set(self._ledger_recorded)
         try:
             return self._launch_tracked(spec_path, rig_name, deadline)
         finally:
             try:
-                if len(self.owned_rig_ids) > tracked_before:
-                    self.ledger.clear_pending(rig_name)  # its rigId is in the ledger now
+                # Only a rigId durably written to the ledger replaces the pending record: if that write
+                # failed, the pending entry is the last recovery handle and must survive.
+                if self._ledger_recorded - recorded_before:
+                    self.ledger.clear_pending(rig_name)
                 else:
                     self.ledger.abandon_pending(rig_name)
             except OSError as exc:

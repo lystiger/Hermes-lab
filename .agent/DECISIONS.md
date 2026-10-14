@@ -477,3 +477,6 @@ sprint-level execution_backend does not reach them. Verifier fallbacks keep the 
 - **Saves are off the execution path.** `apply()` only schedules a save. One background thread writes, coalescing
   bursts.
 - **Restarts no longer renew stale rows.** `restoredAt` is kept across restarts, and TTL expiry is persisted.
+- Round 3 fixes: the pending launch record is cleared only after the rigId is *durably* written to the ledger, so a
+  failed ownership write followed by a failed teardown still leaves a recovery handle. The registry `flush()` waits for
+  queued writes and for a write already in progress, within one timeout. The API flushes the registry at shutdown.

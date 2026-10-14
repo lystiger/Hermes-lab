@@ -155,3 +155,40 @@ def test_restart_never_renews_a_stale_row_and_expiry_is_saved(tmp_path):
         row["restoredAt"] = long_ago
     assert second.resources() == []
     assert restart(path, second).resources() == []  # the expiry was persisted
+
+
+def test_flush_waits_for_a_write_already_in_progress(tmp_path, monkeypatch):
+    import json as _json
+    import threading as _threading
+    import time as _time
+
+    path = tmp_path / "state.json"
+    reg = ExecutionRegistry()
+    reg.enable_persistence(path)
+    reg.flush()
+    real = reg._save_now
+    started = _threading.Event()
+
+    def slow():
+        started.set()
+        _time.sleep(0.3)
+        real()
+
+    monkeypatch.setattr(reg, "_save_now", slow)
+    reg.apply(ev(events.RUNNING))
+    assert started.wait(2)  # the writer has taken the work: nothing is queued any more
+    assert reg.flush(timeout=5) is True
+    assert len(_json.loads(path.read_text())) == 1
+
+
+def test_flush_gives_up_at_its_timeout(tmp_path, monkeypatch):
+    import time as _time
+
+    reg = ExecutionRegistry()
+    reg.enable_persistence(tmp_path / "state.json")
+    reg.flush()
+    monkeypatch.setattr(reg, "_save_now", lambda: _time.sleep(1.0))
+    reg.apply(ev(events.RUNNING))
+    started = _time.monotonic()
+    assert reg.flush(timeout=0.2) is False
+    assert _time.monotonic() - started < 0.6

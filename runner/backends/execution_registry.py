@@ -69,6 +69,7 @@ class ExecutionRegistry:
         # never delays an execution worker, and bursts of events coalesce into one write.
         self._dirty = threading.Condition(threading.Lock())
         self._pending_saves = 0
+        self._writing = False
         self._writer = None
 
     def enable_persistence(self, path=None):
@@ -108,9 +109,13 @@ class ExecutionRegistry:
                 while self._pending_saves == 0:
                     self._dirty.wait()
                 self._pending_saves = 0
-            self._save_now()
-            with self._dirty:
-                self._dirty.notify_all()
+                self._writing = True  # set atomically with taking the work, so flush() sees it
+            try:
+                self._save_now()
+            finally:
+                with self._dirty:
+                    self._writing = False
+                    self._dirty.notify_all()
 
     def flush(self, timeout=5.0):
         """Wait until scheduled saves are written (tests, shutdown)."""
@@ -118,11 +123,14 @@ class ExecutionRegistry:
             return
         deadline = time.monotonic() + timeout
         with self._dirty:
-            while self._pending_saves and time.monotonic() < deadline:
-                self._dirty.wait(timeout=0.05)
-        # The writer may still be mid-write of the last batch.
-        with self._save_lock:
-            pass
+            # Done only when nothing is queued AND no write is in progress, all within one timeout.
+            while self._pending_saves or self._writing:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    logger.warning("Execution state flush timed out; the last changes may not be on disk")
+                    return False
+                self._dirty.wait(timeout=min(0.05, remaining))
+        return True
 
     def _save_now(self):
         if self._path is None:

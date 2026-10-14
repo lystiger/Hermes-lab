@@ -54,6 +54,11 @@ async def lifespan(app: FastAPI):
         accent_color="#CBA35C",
     )
     yield
+    # Get the Execution page state onto disk before the process exits (the writer is a daemon thread).
+    try:
+        await asyncio.to_thread(default_execution_registry.flush, 5.0)
+    except Exception:  # noqa: BLE001 - shutdown must proceed
+        pass
     # Publish stopping event on shutdown
     event_bus.publish(
         source_id="hermes",

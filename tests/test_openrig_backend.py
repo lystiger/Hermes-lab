@@ -1877,3 +1877,31 @@ def test_a_successful_launch_leaves_no_pending_record(tmp_path, clock, pool):
     run_backend = make_backend(tmp_path, clock, FakeRig(clock), pool=pool, ledger=OwnershipLedger(ledger_dir))
     run_backend.execute(make_request(tmp_path))
     assert list(ledger_dir.glob("*.pending")) == []
+
+
+def test_when_ownership_recording_and_teardown_both_fail_the_pending_record_survives(tmp_path, clock, pool):
+    import time as _time
+
+    ledger_dir = tmp_path / "ledger"
+
+    class NoRecord(OwnershipLedger):
+        def record(self, rig_id):
+            raise OSError("disk full")
+
+    rig = FakeRig(clock)
+    rig.down_results = [subprocess.CompletedProcess([], 1, "", "daemon hiccup")] * 3
+    backend = make_backend(tmp_path, clock, rig, pool=pool, ledger=NoRecord(ledger_dir))
+    with pytest.raises(SprintRunnerError):
+        backend.execute(make_request(tmp_path))
+
+    pending = list(ledger_dir.glob("*.pending"))
+    assert len(pending) == 1  # the only recovery handle left
+    [entry] = json.loads(pending[0].read_text())["pending"]
+    assert entry["state"] == "abandoned"
+
+    # A later preflight (daemon healthy again) finds the rig under that name and releases it by id.
+    rig.down_results = []
+    rig.listed_rigs = [{"rigId": RIG_ID, "name": entry["name"], "status": "running"}]
+    make_backend(tmp_path, clock, rig, pool=pool, ledger=OwnershipLedger(ledger_dir)).preflight(clock.monotonic() + 60)
+    assert rig.rigs_down[-1] == RIG_ID
+    assert list(ledger_dir.glob("*.pending")) == []

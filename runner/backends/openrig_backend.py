@@ -26,6 +26,12 @@ RELEASE_TIMEOUT_SECONDS = 60
 ORPHAN_RECOVERY_SECONDS = 20
 ORPHAN_RECOVERY_ATTEMPTS = 3
 SEND_IDLE_WAIT_SECONDS = 30
+# One `rig ps --nodes` poll may block at most this long, so a cancel is seen promptly
+# even when the daemon hangs. A timed-out poll is retried until the task deadline.
+POLL_QUERY_SECONDS = 10
+# OpenRig rigIds are ULIDs. `rig down` also resolves rig *names*, so anything else
+# (for example "kernel") must never reach it.
+RIG_ID_PATTERN = re.compile(r"[0-9A-HJKMNP-TV-Z]{26}")
 # An idle pooled seat is released after this long. release_job() ends a job sooner.
 SEAT_IDLE_SECONDS = 120
 # Shared budget for releasing rigs that a crashed Hermes process left in the ledger.
@@ -85,21 +91,25 @@ class _SeatPool:
         token = object()
         timer = self._timer_factory(self.idle_seconds, self._expire, (seat.rig_id, token))
         timer.daemon = True
+        # Register the token first and publish the seat only after the timer started,
+        # so no other task can lease a seat whose timer might still fail to start.
         with self._lock:
-            self._idle.setdefault(seat.job, []).append(seat)
             self._timers[seat.rig_id] = (timer, token)
         try:
             timer.start()
         except BaseException:
-            # Without an expiry timer the seat must not stay leasable; the caller
-            # still owns it and tears it down.
+            # The caller still owns the seat and tears it down.
             with self._lock:
                 if self._timers.get(seat.rig_id, (None, None))[1] is token:
                     del self._timers[seat.rig_id]
-                group = self._idle.get(seat.job, [])
-                if seat in group:
-                    group.remove(seat)
             raise
+        with self._lock:
+            if self._timers.get(seat.rig_id, (None, None))[1] is token:
+                self._idle.setdefault(seat.job, []).append(seat)
+                return
+            # The timer already fired (or a drain ran) before publication: tear down now.
+            self._inflight[seat.rig_id] = seat
+        self._release(seat)
 
     def _expire(self, rig_id, token):
         with self._lock:
@@ -189,6 +199,13 @@ class _SeatPool:
     def inflight_rig_ids(self):
         with self._lock:
             return list(self._inflight)
+
+
+_POLL_TIMED_OUT = object()
+
+
+def is_rig_id(value):
+    return isinstance(value, str) and RIG_ID_PATTERN.fullmatch(value) is not None
 
 
 DEFAULT_SEAT_POOL = _SeatPool()
@@ -609,6 +626,9 @@ class OpenRigBackend(ExecutionBackend):
         while True:
             self._check_cancelled(f"while seat {session} was starting")
             node = self._node(rig_name, rig_id, session, deadline)
+            if node is _POLL_TIMED_OUT:
+                self._pause(deadline, f"OpenRig seat {session} did not become ready")
+                continue
             if node is None:
                 raise SprintRunnerError(
                     "FAILED_OPENRIG_SESSION_LOST", f"OpenRig seat {session} disappeared during startup"
@@ -657,6 +677,9 @@ class OpenRigBackend(ExecutionBackend):
         while True:
             self._check_cancelled(f"while seat {session} was working")
             node = self._node(rig_name, rig_id, session, deadline)
+            if node is _POLL_TIMED_OUT:
+                self._pause(deadline, f"OpenRig seat {session} did not finish the task")
+                continue
             if node is None or node.get("sessionStatus") != "running":
                 raise SprintRunnerError(
                     "FAILED_OPENRIG_SESSION_LOST", f"OpenRig seat {session} is no longer running"
@@ -678,6 +701,8 @@ class OpenRigBackend(ExecutionBackend):
                     if _hook_event(activity, "UserPromptSubmit", "running") and event_at > send_started:
                         prompt_at = event_at
                     elif _hook_event(activity, "Stop", "idle") and event_at > (prompt_at or send_confirmed):
+                        # A cancel that arrived during this poll still wins over completion.
+                        self._check_cancelled(f"as seat {session} finished")
                         return prompt_at is not None
             self._pause(deadline, f"OpenRig seat {session} did not finish the task")
 
@@ -718,6 +743,10 @@ class OpenRigBackend(ExecutionBackend):
             self._log("warning", "OpenRig transcript capture failed: %s", exc.message)
 
     def _release(self, rig_id, deadline=None):
+        if not is_rig_id(rig_id):
+            raise SprintRunnerError(
+                "FAILED_OPENRIG_PROTOCOL", f"refusing to tear down {rig_id!r}: not an OpenRig rigId"
+            )
         if deadline is None:
             deadline = self._monotonic() + RELEASE_TIMEOUT_SECONDS
         payload = self._run_json(
@@ -761,10 +790,17 @@ class OpenRigBackend(ExecutionBackend):
     # -- helpers --------------------------------------------------------------
 
     def _node(self, rig_name, rig_id, session, deadline):
-        nodes = self._run_json(
-            ["ps", "--nodes", "--json", "--full", "--rig", rig_name], deadline,
-            "FAILED_OPENRIG_UNAVAILABLE",
-        )
+        poll_deadline = min(deadline, self._monotonic() + POLL_QUERY_SECONDS)
+        try:
+            nodes = self._run_json(
+                ["ps", "--nodes", "--json", "--full", "--rig", rig_name], poll_deadline,
+                "FAILED_OPENRIG_UNAVAILABLE",
+            )
+        except SprintRunnerError as exc:
+            # Only the poll's own bound expired: go back to the loop, which checks cancel.
+            if exc.code == "FAILED_TIMEOUT" and self._remaining(deadline) > 0:
+                return _POLL_TIMED_OUT
+            raise
         if not isinstance(nodes, list):
             raise SprintRunnerError("FAILED_OPENRIG_PROTOCOL", "rig ps --nodes did not return a list")
         for node in nodes:

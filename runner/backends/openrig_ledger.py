@@ -17,9 +17,12 @@ nothing on another machine, so an entry from another host is never judged dead h
 Ownership is by exact rigId only. Nothing here matches rigs by name.
 """
 
+import contextlib
+import fcntl
 import json
 import logging
 import os
+import re
 import socket
 import tempfile
 import threading
@@ -29,7 +32,11 @@ from pathlib import Path
 LEDGER_DIR_ENV = "HERMES_OPENRIG_LEDGER_DIR"
 logger = logging.getLogger("hermes.runtime.openrig_ledger")
 # One lock for the process: every backend instance shares the same ledger files.
+# Cross-process safety comes from flock on the directory's .lock file (see _locked).
 _LOCK = threading.Lock()
+# OpenRig rigIds are ULIDs. `rig down` also resolves rig names, so a ledger entry that is
+# not a ULID (for example "kernel") must never be read back as something to release.
+_RIG_ID = re.compile(r"[0-9A-HJKMNP-TV-Z]{26}")
 
 
 def default_ledger_dir():
@@ -95,7 +102,7 @@ def _read(path):
         or not isinstance(pid, int) or isinstance(pid, bool) or pid <= 0
         or (started is not None and not isinstance(started, str))
         or not isinstance(rig_ids, list)
-        or not all(isinstance(rig_id, str) and rig_id for rig_id in rig_ids)
+        or not all(isinstance(rig_id, str) and _RIG_ID.fullmatch(rig_id) for rig_id in rig_ids)
     ):
         raise ValueError(f"{path.name} is malformed")
     return host, pid, started, list(rig_ids)
@@ -134,9 +141,11 @@ class OwnershipLedger:
 
     def record(self, rig_id):
         """Persist ownership of `rig_id`. Raises OSError or ValueError if it cannot be written."""
+        if not isinstance(rig_id, str) or not _RIG_ID.fullmatch(rig_id):
+            raise ValueError(f"{rig_id!r} is not an OpenRig rigId")
         host, (pid, started) = _host(), self._identity()
         path = self.directory / f"{host}-{pid}-{started or 'unknown'}.json"
-        with _LOCK:
+        with self._locked():
             rig_ids = _read(path)[3] if path.exists() else []
             if rig_id not in rig_ids:
                 rig_ids.append(rig_id)
@@ -147,7 +156,7 @@ class OwnershipLedger:
 
         Raises OSError if a file cannot be rewritten. The caller decides how to treat that.
         """
-        with _LOCK:
+        with self._locked():
             for path in self._files():
                 try:
                     host, pid, started, rig_ids = _read(path)
@@ -169,7 +178,7 @@ class OwnershipLedger:
         kept, never released. A dead owner with nothing left to release has its file removed.
         """
         stale = []
-        with _LOCK:
+        with self._locked():
             for path in self._files():
                 try:
                     host, pid, started, rig_ids = _read(path)
@@ -183,6 +192,18 @@ class OwnershipLedger:
                     continue
                 stale.append(StaleOwner(path, pid, rig_ids))
         return stale
+
+    @contextlib.contextmanager
+    def _locked(self):
+        """Serialize ledger reads and rewrites across threads and Hermes processes."""
+        with _LOCK:
+            self.directory.mkdir(parents=True, exist_ok=True)
+            with open(self.directory / ".lock", "a+") as handle:
+                fcntl.flock(handle, fcntl.LOCK_EX)
+                try:
+                    yield
+                finally:
+                    fcntl.flock(handle, fcntl.LOCK_UN)
 
     def _files(self):
         if not self.directory.is_dir():

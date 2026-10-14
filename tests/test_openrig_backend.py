@@ -1,5 +1,7 @@
 """OpenRigBackend unit tests against a scripted fake `rig` CLI (no live OpenRig)."""
 
+import multiprocessing
+import socket
 import threading
 import asyncio
 import json
@@ -16,7 +18,7 @@ from agents.claude import ClaudeAdapter
 from agents.errors import SprintRunnerError
 from runner.agents.registry import AgentRegistry
 from runner.backends.base import ExecutionRequest
-from runner.backends.openrig_backend import OpenRigBackend, _Seat, _SeatPool
+from runner.backends.openrig_backend import POLL_QUERY_SECONDS, OpenRigBackend, _Seat, _SeatPool
 from runner.backends.openrig_ledger import OwnershipLedger
 from runner.backends.registry import BackendRegistry, default_backend_registry
 from runtime.execution import AgentRun
@@ -25,7 +27,7 @@ from runtime.task_graph import TaskNode
 
 
 T0 = datetime(2026, 10, 12, 5, 0, 0, tzinfo=timezone.utc)
-RIG_ID = "01RIGOWNEDBYHERMES0000000001"
+RIG_ID = "01000000000000000000000012"
 GEN = "gen-1"
 
 
@@ -91,7 +93,7 @@ class FakeRig:
             return self._ok(self.version)
         if cmd == "ps" and "--nodes" not in argv:
             return self._ok(json.dumps(
-                [{"rigId": "01KERNEL", "name": "kernel", "status": "running"}] + self.listed_rigs
+                [{"rigId": "01000000000000000000000003", "name": "kernel", "status": "running"}] + self.listed_rigs
             ))
         if cmd == "up":
             spec = json.loads(Path(argv[2]).read_text())
@@ -113,7 +115,7 @@ class FakeRig:
             if activity is None:
                 return self._ok("[]")
             node = {
-                "rigId": RIG_ID, "nodeId": "01NODE", "canonicalSessionName": self.session,
+                "rigId": RIG_ID, "nodeId": "01000000000000000000000006", "canonicalSessionName": self.session,
                 "sessionStatus": "running", "startupStatus": self.startup, "latestError": None,
                 "agentActivity": activity, **self.node_overrides,
             }
@@ -280,7 +282,7 @@ def test_successful_lifecycle_returns_verified_result(tmp_path, clock):
         "openrig_runtime": "claude-code",
         "openrig_rig_id": RIG_ID,
         "openrig_session_name": rig.session,
-        "openrig_node_id": "01NODE",
+        "openrig_node_id": "01000000000000000000000006",
         "openrig_generation": GEN,
         "openrig_turn_started": True,
         "openrig_seat_reused": False,
@@ -337,12 +339,12 @@ def test_each_execute_owns_a_unique_rig_and_releases_only_it(tmp_path, clock):
     for rig in (rig_a, rig_b):
         downs = [c for c in rig.calls if c[0] == "down"]
         assert downs == [["down", RIG_ID, "--delete", "--force", "--json"]]
-        assert "kernel" not in json.dumps(downs) and "01KERNEL" not in json.dumps(downs)
+        assert "kernel" not in json.dumps(downs) and "01000000000000000000000003" not in json.dumps(downs)
 
 
 def test_session_owned_by_another_rig_fails_closed(tmp_path, clock):
     rig = FakeRig(clock)
-    rig.node_overrides = {"rigId": "01SOMEONEELSE"}
+    rig.node_overrides = {"rigId": "01000000000000000000000013"}
     expect_error("FAILED_OPENRIG_PROTOCOL", tmp_path, clock, rig)
     assert rig.rigs_down == [RIG_ID]
 
@@ -429,7 +431,11 @@ def test_every_rig_call_receives_only_remaining_time(tmp_path, clock):
     run(tmp_path, clock, rig, timeout=60)
     task_timeouts = rig.timeouts[:-1]  # last call is the separately budgeted release
     assert task_timeouts[0] == 60
-    assert task_timeouts == sorted(task_timeouts, reverse=True)
+    # Non-poll calls get what is left of the task; node polls are also capped per call.
+    polls = [t for c, t in zip(rig.calls, rig.timeouts) if c[:2] == ["ps", "--nodes"]]
+    others = [t for c, t in zip(rig.calls[:-1], task_timeouts) if c[:2] != ["ps", "--nodes"]]
+    assert others == sorted(others, reverse=True)
+    assert polls and all(t <= POLL_QUERY_SECONDS for t in polls)
     assert task_timeouts[-1] <= 60 - 6
 
 
@@ -651,31 +657,31 @@ def test_lost_rig_up_response_reconciles_by_unique_name_and_releases_by_id(tmp_p
     rig = FakeRig(clock)
 
     def up_times_out(r):
-        r.listed_rigs = [{"rigId": "01ORPHAN", "name": r.rig_name, "status": "running"}]
+        r.listed_rigs = [{"rigId": "01000000000000000000000008", "name": r.rig_name, "status": "running"}]
         raise subprocess.TimeoutExpired(["rig", "up"], 1)
 
     rig.up_override = up_times_out
     expect_error("FAILED_TIMEOUT", tmp_path, clock, rig)
-    assert rig.rigs_down == ["01ORPHAN"]
+    assert rig.rigs_down == ["01000000000000000000000008"]
 
 
 def test_unparseable_rig_up_response_also_reconciles(tmp_path, clock):
     rig = FakeRig(clock)
 
     def garbage(r):
-        r.listed_rigs = [{"rigId": "01ORPHAN", "name": r.rig_name, "status": "running"}]
+        r.listed_rigs = [{"rigId": "01000000000000000000000008", "name": r.rig_name, "status": "running"}]
         return r._ok("Error: something exploded")
 
     rig.up_override = garbage
     expect_error("FAILED_OPENRIG_PROTOCOL", tmp_path, clock, rig)
-    assert rig.rigs_down == ["01ORPHAN"]
+    assert rig.rigs_down == ["01000000000000000000000008"]
 
 
 def test_orphan_reconcile_never_adopts_other_rigs(tmp_path, clock):
     rig = FakeRig(clock)
 
     def up_times_out(r):
-        r.listed_rigs = [{"rigId": "01OTHER", "name": "hermes-someone-else", "status": "running"}]
+        r.listed_rigs = [{"rigId": "01000000000000000000000009", "name": "hermes-someone-else", "status": "running"}]
         raise subprocess.TimeoutExpired(["rig", "up"], 1)
 
     rig.up_override = up_times_out
@@ -701,7 +707,7 @@ def test_orphan_recovery_never_adopts_a_rig_that_existed_before_launch(tmp_path,
     rig.up_override = collide
     backend = make_backend(tmp_path, clock, rig)
     backend._rig_name = lambda: "hermes-collision-00000000"
-    rig.listed_rigs = [{"rigId": "01PREEXISTING", "name": "hermes-collision-00000000", "status": "running"}]
+    rig.listed_rigs = [{"rigId": "01000000000000000000000010", "name": "hermes-collision-00000000", "status": "running"}]
     with pytest.raises(SprintRunnerError) as excinfo:
         backend.execute(make_request(tmp_path))
     assert excinfo.value.code == "FAILED_TIMEOUT"
@@ -720,7 +726,7 @@ def test_orphan_recovery_retries_until_a_late_rig_appears(tmp_path, clock):
         if argv[1] == "ps" and "--nodes" not in argv and rig.rig_name:
             seen["ps_after_up"] += 1
             if seen["ps_after_up"] == 2:
-                rig.listed_rigs = [{"rigId": "01LATE", "name": rig.rig_name, "status": "running"}]
+                rig.listed_rigs = [{"rigId": "01000000000000000000000004", "name": rig.rig_name, "status": "running"}]
         return original(rig, argv, **kwargs)
 
     rig.up_override = up_times_out
@@ -728,7 +734,7 @@ def test_orphan_recovery_retries_until_a_late_rig_appears(tmp_path, clock):
     with pytest.raises(SprintRunnerError):
         backend.execute(make_request(tmp_path))
     assert seen["ps_after_up"] == 2
-    assert rig.rigs_down == ["01LATE"]
+    assert rig.rigs_down == ["01000000000000000000000004"]
 
 
 def test_orphan_recovery_is_bounded_after_a_timeout(tmp_path, clock):
@@ -847,7 +853,7 @@ def test_relaunch_reporting_another_rig_fails_closed(tmp_path, clock, pool):
     run(tmp_path, clock, rig)
     rig.seat_launch_override = FakeRig._ok(json.dumps({
         "ok": True, "sessionName": rig.session, "generation": "gen-2",
-        "seat": {"rigId": "01NOTOURS"},
+        "seat": {"rigId": "01000000000000000000000007"},
     }))
     with pytest.raises(SprintRunnerError) as excinfo:
         second_task(tmp_path, clock, rig, pool)
@@ -1161,58 +1167,58 @@ def test_ledger_survives_a_crash_and_the_next_backend_reconciles_it(tmp_path, cl
 
 def test_live_owner_entries_are_skipped_by_reconcile(tmp_path, clock, pool):
     ledger_dir = tmp_path / "ledger"
-    OwnershipLedger(ledger_dir).record("01LIVEOWNERRIG")  # this process: alive
+    OwnershipLedger(ledger_dir).record("01000000000000000000000005")  # this process: alive
     rig = FakeRig(clock)
     backend = make_backend(tmp_path, clock, rig, ledger=OwnershipLedger(ledger_dir))
 
     backend.execute(make_request(tmp_path))
 
-    assert "01LIVEOWNERRIG" not in rig.rigs_down
-    assert "01LIVEOWNERRIG" in ledger_rig_ids(ledger_dir)
+    assert "01000000000000000000000005" not in rig.rigs_down
+    assert "01000000000000000000000005" in ledger_rig_ids(ledger_dir)
 
 
 @pytest.mark.skipif(not Path("/proc/self/stat").exists(), reason="needs /proc start times")
 def test_reused_pid_is_treated_as_a_dead_owner(tmp_path, clock, pool):
     ledger_dir = tmp_path / "ledger"
     # Same pid as this live process, but a different process start time: the pid was reused.
-    OwnershipLedger(ledger_dir, identity=lambda: (os.getpid(), "start-of-another-process")).record("01REUSEDPID")
+    OwnershipLedger(ledger_dir, identity=lambda: (os.getpid(), "start-of-another-process")).record("01000000000000000000000011")
     rig = FakeRig(clock)
 
     make_backend(tmp_path, clock, rig, ledger=OwnershipLedger(ledger_dir)).execute(make_request(tmp_path))
 
-    assert rig.rigs_down == ["01REUSEDPID"]
-    assert "01REUSEDPID" not in ledger_rig_ids(ledger_dir)
+    assert rig.rigs_down == ["01000000000000000000000011"]
+    assert "01000000000000000000000011" not in ledger_rig_ids(ledger_dir)
 
 
 def test_non_ledger_rigs_are_never_released(tmp_path, clock, pool):
     ledger_dir = tmp_path / "ledger"
-    dead_owner_ledger(ledger_dir, "01STALE")
+    dead_owner_ledger(ledger_dir, "01000000000000000000000014")
     rig = FakeRig(clock)
     # Kernel and a Hermes-named rig that is not in the ledger: a name match must not free them.
-    rig.listed_rigs = [{"rigId": "01HERMESNAMED", "name": "hermes-sprint-07-deadbeef", "status": "running"}]
+    rig.listed_rigs = [{"rigId": "01000000000000000000000002", "name": "hermes-sprint-07-deadbeef", "status": "running"}]
 
     make_backend(tmp_path, clock, rig, ledger=OwnershipLedger(ledger_dir)).execute(make_request(tmp_path))
 
-    assert rig.rigs_down == ["01STALE"]
+    assert rig.rigs_down == ["01000000000000000000000014"]
 
 
 def test_failed_reconcile_release_is_kept_and_retried_by_a_later_run(tmp_path, clock, pool):
     ledger_dir = tmp_path / "ledger"
-    dead_owner_ledger(ledger_dir, "01STALE")
+    dead_owner_ledger(ledger_dir, "01000000000000000000000014")
     first = FakeRig(clock)
     first.down_results = [subprocess.CompletedProcess([], 1, "", "daemon hiccup")]
 
     # The stale release fails, but that must not fail this task.
     make_backend(tmp_path, clock, first, ledger=OwnershipLedger(ledger_dir)).execute(make_request(tmp_path))
-    assert first.rigs_down == ["01STALE"]
-    assert "01STALE" in ledger_rig_ids(ledger_dir)
+    assert first.rigs_down == ["01000000000000000000000014"]
+    assert "01000000000000000000000014" in ledger_rig_ids(ledger_dir)
 
     second = FakeRig(clock)
     make_backend(tmp_path, clock, second, ledger=OwnershipLedger(ledger_dir), sprint_id="Sprint 08").execute(
         make_request(tmp_path, worktree_name="worktree-2")
     )
-    assert second.rigs_down == ["01STALE"]
-    assert "01STALE" not in ledger_rig_ids(ledger_dir)
+    assert second.rigs_down == ["01000000000000000000000014"]
+    assert "01000000000000000000000014" not in ledger_rig_ids(ledger_dir)
 
 
 def test_ledger_write_failure_fails_closed_and_releases_the_rig(tmp_path, clock, pool):
@@ -1234,7 +1240,7 @@ def test_entries_from_another_host_are_never_judged_dead_here(tmp_path, clock, p
     # The pid 999999 means nothing on this machine; the owner lives on another host sharing the state dir.
     foreign = ledger_dir / "other-machine-999999-unknown.json"
     foreign.write_text(json.dumps(
-        {"host": "other-machine", "pid": 999999, "started": None, "rigIds": ["01FOREIGN"]}
+        {"host": "other-machine", "pid": 999999, "started": None, "rigIds": ["01000000000000000000000001"]}
     ), encoding="utf-8")
     rig = FakeRig(clock)
 
@@ -1431,3 +1437,112 @@ def test_cancelling_the_hermes_task_releases_the_parked_seat_by_id(tmp_path, clo
     assert not any(c[0] == "send" for c in base.calls)
     assert base.rigs_down == [RIG_ID]
     assert pool.idle_rig_ids("job_cancel") == []
+
+
+# --- full-branch Codex review fixes ------------------------------------------------
+def test_a_ledger_entry_that_is_a_rig_name_is_never_torn_down(tmp_path, clock, pool):
+    # `rig down` resolves names too, so "kernel" in a dead owner's file must not reach it.
+    ledger_dir = tmp_path / "ledger"
+    ledger_dir.mkdir()
+    poisoned = ledger_dir / "host-999999-unknown.json"
+    poisoned.write_text(json.dumps(
+        {"host": socket.gethostname(), "pid": dead_pid(), "started": None, "rigIds": ["kernel"]}
+    ), encoding="utf-8")
+    rig = FakeRig(clock)
+
+    make_backend(tmp_path, clock, rig, ledger=OwnershipLedger(ledger_dir)).execute(make_request(tmp_path))
+
+    assert "kernel" not in rig.rigs_down
+    assert rig.rigs_down == []
+    assert poisoned.exists()
+
+
+def test_the_ledger_refuses_to_record_a_non_rig_id(tmp_path):
+    with pytest.raises(ValueError):
+        OwnershipLedger(tmp_path / "ledger").record("kernel")
+
+
+def test_teardown_refuses_anything_but_a_rig_id(tmp_path, clock):
+    backend = make_backend(tmp_path, clock, FakeRig(clock))
+    with pytest.raises(SprintRunnerError) as excinfo:
+        backend._release("kernel")
+    assert excinfo.value.code == "FAILED_OPENRIG_PROTOCOL"
+
+
+def _record_many(directory, prefix, count):
+    ledger = OwnershipLedger(directory)
+    for i in range(count):
+        ledger.record(f"01{prefix}{i:023d}")
+
+
+def test_concurrent_processes_never_lose_each_others_ledger_entries(tmp_path):
+    # Another process forgets rigs while this one records: with only an in-process lock
+    # the rewrite of a shared file could drop a live owner's new rigId.
+    ledger_dir = tmp_path / "ledger"
+    ctx = multiprocessing.get_context("fork")
+    ledger = OwnershipLedger(ledger_dir)
+    for i in range(40):
+        ledger.record(f"01F{i:023d}")
+
+    def forget_all():
+        other = OwnershipLedger(ledger_dir)
+        for i in range(40):
+            other.forget(f"01F{i:023d}")
+
+    forgetter = ctx.Process(target=forget_all)
+    forgetter.start()
+    _record_many(ledger_dir, "R", 40)
+    forgetter.join(30)
+
+    assert forgetter.exitcode == 0
+    kept = ledger_rig_ids(ledger_dir)
+    assert sorted(r for r in kept if r.startswith("01R")) == [f"01R{i:023d}" for i in range(40)]
+    assert not any(r.startswith("01F") for r in kept)
+
+
+def test_cancel_during_the_final_completion_poll_never_pools_the_seat(tmp_path, clock, pool):
+    rig = FakeRig(clock)  # ready, started, then Stop on the 3rd node poll
+    event = threading.Event()
+
+    backend = cancelled_execute(tmp_path, clock, cancel_on_nth(rig, event, node_poll, n=3), event, pool)
+
+    assert_released_by_id(rig, backend)
+    assert pool.idle_rig_ids() == []
+
+
+def test_a_hung_node_poll_still_sees_the_cancel(tmp_path, clock, pool):
+    rig = FakeRig(clock, activities=[STARTUP_IDLE, STARTED, HEURISTIC])
+    event = threading.Event()
+    poll_timeouts = []
+
+    def call(argv, **kwargs):
+        if node_poll(argv) and rig.sent_text is not None:
+            poll_timeouts.append(kwargs["timeout"])
+            event.set()  # cancelled while the daemon hangs
+            raise subprocess.TimeoutExpired(argv, kwargs["timeout"])
+        return rig(argv, **kwargs)
+
+    backend = cancelled_execute(tmp_path, clock, call, event, pool, timeout=600)
+
+    assert poll_timeouts == [POLL_QUERY_SECONDS]
+    assert_released_by_id(rig, backend)
+
+
+def test_a_seat_is_not_leasable_while_its_timer_is_still_starting(tmp_path, clock, pool):
+    leased_meanwhile = []
+
+    class RacingTimer(FakeTimer):
+        def start(self):
+            worktree = (tmp_path / "worktree-2").resolve()
+            worktree.mkdir(exist_ok=True)
+            leased_meanwhile.append(pool.acquire("Sprint 07/Proof", worktree))
+            raise RuntimeError("can't start new thread")
+
+    pool._timer_factory = RacingTimer
+    rig = FakeRig(clock)
+    with pytest.raises(RuntimeError):
+        run(tmp_path, clock, rig)
+
+    assert leased_meanwhile == [None]
+    assert pool.idle_rig_ids() == []
+    assert rig.rigs_down == [RIG_ID]

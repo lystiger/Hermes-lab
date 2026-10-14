@@ -157,7 +157,9 @@ authenticated. Hermes runs no setup and changes no global OpenRig or Claude sett
   backend, so the job's idle seats are torn down immediately. The call is idempotent: a repeat call, or a
   call for an unknown job, does nothing. Leased seats are not idle, so they are never touched.
   `HermesActorAdapter` does **not** call `release_job` after each task. That would tear the pool down
-  after task one. See Known limitations for the in-process `job_launcher` path.
+  after task one. On the runtime path, `ReactiveJobEngine.run_until_complete` calls each adapter's
+  `release_job(job_id)` once the job is terminal. `HermesActorAdapter` then releases the job on every
+  backend it used for that job.
 - **Expiry.** An idle seat is still released after 120 s, as a backstop. Every pooled seat is also released
   when the process exits (`atexit`).
 - **Measured (OpenRig 0.6.9).** A fresh occupant reaches hook-idle in about 16 s, against about 28 s for
@@ -239,14 +241,15 @@ them into `TaskExecutionResult.metadata["backend_runtime_metadata"]`.
   the rigId was recorded. A crash **inside** the `rig up` call, before its response is parsed, can leave a rig
   that is not in the ledger. Nothing on the next run releases it, and a user has to remove it by hand. Its name is
   `hermes-*`, and that is never used to match it. The ledger is also per-user state: it is not shared across machines.
-- **No job-end hook for the in-process `job_launcher` path.** Sprint runs release their seats at sprint end. The
-  `HermesActorAdapter` path, keyed by `job_id`, has no job-end call yet, so its idle seats are released by the
-  120 s idle timer or at process exit.
+- **Rig IDs only.** `rig down` also resolves rig *names*, so the backend and the ledger accept only canonical
+  OpenRig rigIds (26-character ULIDs). A ledger entry like `kernel` makes the file unreadable: it is kept and
+  never released. The ledger is serialized across processes with `flock` on `<ledger dir>/.lock`.
 - The granted root is the worktree parent, so a seat can technically reach sibling worktrees of its job.
 - Cancel is wired only on the runtime path (`HermesActorAdapter`). The sprint runner has no cancel source,
-  so a sprint-runner task still stops only at its timeout. A cancel during an in-flight `rig up` or
-  `rig send` is honored only after that call returns (up to 30 s for send). Killing the subprocess early
-  is not done.
+  so a sprint-runner task still stops only at its timeout. Status polls are capped at
+  `POLL_QUERY_SECONDS` (10 s) each, so a hung daemon delays a cancel by at most that long. A cancel during
+  an in-flight `rig up` or `rig send` is honored only after that call returns (up to 30 s for send).
+  Killing the subprocess early is not done.
 - The result file relies on the agent following the protocol. An agent that skips it fails closed.
 - The backend is coupled to OpenRig 0.6.x JSON shapes (`up`, `ps --nodes --full`, `send`, `down`).
 - The sprint runner reuses one backend instance per sprint. That's safe, because each `execute()` leases

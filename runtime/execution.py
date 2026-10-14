@@ -98,6 +98,9 @@ class ActorAdapter:
     ) -> TaskExecutionResult:
         raise NotImplementedError
 
+    def release_job(self, job_id: str) -> None:
+        """The job reached a terminal state: release anything pooled for it. Default: nothing."""
+
 
 class CallableActorAdapter(ActorAdapter):
     """Adapter wrapping a synchronous or asynchronous callable function."""
@@ -159,6 +162,14 @@ class ExecutionManager:
     @property
     def default_adapter(self) -> Optional[ActorAdapter]:
         return self._default_adapter
+
+    def all_adapters(self) -> List[ActorAdapter]:
+        """Every distinct adapter, default first."""
+        adapters: List[ActorAdapter] = []
+        for adapter in [self._default_adapter, *self._adapters.values()]:
+            if adapter is not None and all(adapter is not seen for seen in adapters):
+                adapters.append(adapter)
+        return adapters
 
     def get_run(self, run_id: str) -> Optional[AgentRun]:
         return self._runs.get(run_id)

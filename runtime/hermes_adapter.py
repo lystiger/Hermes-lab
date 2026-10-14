@@ -190,6 +190,9 @@ class HermesActorAdapter(ActorAdapter):
         self.observation_registry = observation_registry
         self.spec = spec or {}
         self.job_id = job_id or f"job_{int(time.time())}"
+        # Backend names used per job, so release_job() can end that job's pooled resources.
+        self._job_backends: Dict[str, set] = {}
+        self._job_backends_lock = threading.Lock()
         self.thread_id = self.job_id
         self.base_ref = base_ref
         self.target_branch = target_branch
@@ -828,6 +831,8 @@ class HermesActorAdapter(ActorAdapter):
                 logger=logger,
                 cancel_event=cancel_event,
             )
+            with self._job_backends_lock:
+                self._job_backends.setdefault(task.job_id, set()).add(backend_name)
 
             # Setup task worktree
             wt_name = task.metadata.get("worktree_dir") or task.task_id
@@ -1108,6 +1113,22 @@ class HermesActorAdapter(ActorAdapter):
                     backend.cleanup(success=task_succeeded)
                 except Exception as cleanup_exc:
                     logger.error("Backend cleanup failed for task %s: %s", task.task_id, cleanup_exc)
+
+
+    def release_job(self, job_id: str) -> None:
+        """Release backend resources pooled for `job_id` (for OpenRig: its warm seats)."""
+        with self._job_backends_lock:
+            names = self._job_backends.pop(job_id, set())
+        if not names:
+            return
+        from runner.backends.registry import default_backend_registry
+
+        backend_reg = self.backend_registry or default_backend_registry
+        for name in sorted(names):
+            try:
+                backend_reg.get(name, run_dir=self.run_dir, sprint_id=job_id, logger=logger).release_job(job_id)
+            except Exception as exc:  # noqa: BLE001 - the idle timer still releases them
+                logger.error("Backend %s job release failed for job %s: %s", name, job_id, exc)
 
 
 class HermesVerifierAdapter(VerifierAdapter):

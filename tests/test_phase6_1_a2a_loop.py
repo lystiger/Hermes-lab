@@ -889,9 +889,9 @@ class TestPhase61TurnLimits(unittest.TestCase):
 class TestPhase61PersonaLoaderRuntimeWiring(unittest.TestCase):
     def test_persona_loader_runtime_wiring_and_prompt_injection(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
-            card_path = Path(tmp_dir) / "elysia_card.json"
+            card_path = Path(tmp_dir) / "custom_agent_card.json"
             card_path.write_text(json.dumps({
-                "name": "Elysia",
+                "name": "Custom Agent",
                 "summary": "Specialized architecture consultant and prompt designer.",
                 "traits": ["thoughtful", "precise", "encouraging"],
                 "speakingStyle": ["Speaks with clarity and warmth."],
@@ -901,18 +901,18 @@ class TestPhase61PersonaLoaderRuntimeWiring(unittest.TestCase):
             }), encoding="utf-8")
 
             # Resolve agent profile with character card path
-            profile = resolve_agent_profile("elysia", custom_override=card_path)
+            profile = resolve_agent_profile("custom-agent", custom_override=card_path)
 
-            self.assertEqual(profile.id, "elysia")
-            self.assertEqual(profile.displayName, "Elysia")
+            self.assertEqual(profile.id, "custom-agent")
+            self.assertEqual(profile.displayName, "Custom Agent")
             self.assertIsNotNone(profile.persona)
             self.assertEqual(profile.persona.summary, "Specialized architecture consultant and prompt designer.")
             self.assertIn("thoughtful", profile.persona.traits)
 
             # Render prompt section and verify privilege keys are absent
-            prompt_section = profile.persona.render_prompt_section("elysia", role="planner")
+            prompt_section = profile.persona.render_prompt_section("custom-agent", role="planner")
             self.assertIn("--- LYSSTACK AGENT IDENTITY ---", prompt_section)
-            self.assertIn("Elysia (elysia)", prompt_section)
+            self.assertIn("Custom Agent (custom-agent)", prompt_section)
             self.assertIn("Speaks with clarity and warmth.", prompt_section)
             self.assertNotIn("sudo", prompt_section)
             self.assertNotIn("arbitrary_code_exec", prompt_section)

@@ -8,7 +8,7 @@ without its role guard. The job could then report COMPLETED although the real wo
 import pytest
 
 from runtime.replanning import GraphMutationType, ProductionPlannerAdapter, ReplanReason, ReplanRequest
-from runtime.task_graph import TaskGraph, TaskNode
+from runtime.task_graph import TaskGraph, TaskNode, TaskStatus
 
 
 def failed_verifier():
@@ -161,3 +161,70 @@ def test_a_task_linked_repair_is_dispatched_to_the_inherited_actor_by_the_real_s
 
     decision = ReactiveScheduler().match_actor_for_task(repair)
     assert decision.actor_id == "claude", decision.reason
+
+
+def test_a_fallback_for_a_task_without_capabilities_is_dispatched_to_the_same_actor():
+    from runtime.scheduler import ReactiveScheduler
+
+    failed = failed_verifier()
+    failed.required_capabilities = []
+    [fix] = added(plan(dict(reason=ReplanReason.TASK_FAILURE, failed_tasks=[failed])))
+    assert fix.required_capabilities == []
+    decision = ReactiveScheduler().match_actor_for_task(fix)
+    assert decision.actor_id == "claude", decision.reason
+
+
+def test_a_deadlock_on_failed_prerequisites_is_reported_not_papered_over():
+    graph = TaskGraph(job_id="job_fb")
+    graph.add_task(TaskNode(task_id="a", job_id="job_fb"))
+    graph.add_task(TaskNode(task_id="b", job_id="job_fb", dependencies=["a"]))
+    graph.get_task("a").status = TaskStatus.FAILED
+
+    result = plan(dict(reason=ReplanReason.RUNTIME_BLOCKED, current_graph=graph))
+
+    assert result.mutations == []
+    assert result.should_continue is False
+    assert "cannot proceed" in result.explanation and "a" in result.explanation
+
+
+def test_a_chained_fallback_sees_observations_from_its_whole_lineage():
+    from runtime.hermes_adapter import HermesActorAdapter
+
+    class Registry:
+        def list_for_task(self, task_id):
+            return {"write_two": ["original finding"], "fix_write_two_1": []}.get(task_id, [])
+
+        def list_for_job(self, job_id):
+            return []
+
+    fix2 = TaskNode(
+        task_id="fix_fix_write_two_2", job_id="job_fb", parent_task_id="fix_write_two_1",
+        dependencies=["write_one"],
+        metadata={"fallback_errors": [{"task_id": "write_two", "error": "e1"}, {"task_id": "fix_write_two_1", "error": "e2"}]},
+    )
+    assert "original finding" in HermesActorAdapter._prior_observations(fix2, Registry())
+
+
+@pytest.mark.anyio
+async def test_the_engine_blocks_a_job_whose_prerequisite_failed_instead_of_looping():
+    from runtime.engine import ReactiveJobEngine
+    from runtime.execution import TaskExecutionResult
+    from runtime.job_state import JobState
+    from runtime.limits import RuntimeLimits
+
+    async def adapter(task, run, ctx):
+        return TaskExecutionResult(status="succeeded") if task.task_id == "b" else TaskExecutionResult(status="failed", error="boom")
+
+    engine = ReactiveJobEngine(
+        job_id="job_dl", goal="deadlock", planner=ProductionPlannerAdapter(),
+        limits=RuntimeLimits(max_task_attempts=1, max_replans_per_job=3),
+    )
+    engine.execution_manager.set_default_adapter(adapter)
+    await engine.initialize_and_plan(initial_tasks=[
+        TaskNode(task_id="a", job_id="job_dl", max_attempts=1),
+        TaskNode(task_id="b", job_id="job_dl", dependencies=["a"]),
+    ])
+    job = await engine.run_until_complete(max_steps=30)
+
+    assert job.state == JobState.BLOCKED
+    assert not any(t.task_id.startswith("unblock_") for t in engine.graph.list_tasks())

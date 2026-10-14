@@ -1141,9 +1141,14 @@ class HermesActorAdapter(ActorAdapter):
             for o in obs_reg.list_for_task(task.task_id):
                 if o not in prior_obs:
                     prior_obs.append(o)
-            # 1b. A fallback also sees why the task it replaces failed
-            if task.parent_task_id:
-                for o in obs_reg.list_for_task(task.parent_task_id):
+            # 1b. A fallback also sees why every task it replaces failed (the whole chain, oldest first)
+            lineage = [
+                e.get("task_id") for e in (task.metadata or {}).get("fallback_errors") or [] if isinstance(e, dict)
+            ]
+            if task.parent_task_id and task.parent_task_id not in lineage:
+                lineage.append(task.parent_task_id)
+            for ancestor in lineage:
+                for o in obs_reg.list_for_task(ancestor):
                     if o not in prior_obs:
                         prior_obs.append(o)
             # 2. Observations from dependency tasks

@@ -330,7 +330,13 @@ class ProductionPlannerAdapter(PlannerAdapter):
                     # The original instructions, not a "diagnostic": success must mean the work was done.
                     # The failure reaches the prompt through metadata["fallback_errors"].
                     description=failed_task.description,
-                    required_capabilities=failed_task.required_capabilities or ["implementation"],
+                    # Same requirements as the task it replaces. Inventing "implementation" for a task that
+                    # declared none would make the scheduler re-route it away from the inherited actor.
+                    required_capabilities=(
+                        list(failed_task.required_capabilities)
+                        if failed_task.required_capabilities
+                        else ([] if failed_task.assigned_actor else ["implementation"])
+                    ),
                     dependencies=failed_task.dependencies,
                     # The fallback is the same work on the same agent and execution path: without these
                     # it would be routed by capability alone, on the default backend, with no role guard.
@@ -353,21 +359,22 @@ class ProductionPlannerAdapter(PlannerAdapter):
         if "blocked" in reason_str or "deadlock" in reason_str:
             blocked_tasks = request.current_graph.find_dependency_blocked_tasks()
             if blocked_tasks:
-                unblock_task_id = f"unblock_deadlock_{int(time.time())}"
-                unblock_node = TaskNode(
-                    task_id=unblock_task_id,
-                    job_id=request.job_id,
-                    description=f"Resolve dependency deadlock for blocked tasks: {', '.join([t.task_id for t in blocked_tasks])}",
-                    required_capabilities=["implementation"],
-                    max_attempts=min(2, self.limits.max_task_attempts),
-                )
-                mutations.append(GraphMutation(mutation_type=GraphMutationType.ADD_TASK, task=unblock_node, reason="Resolve graph deadlock"))
-                for bt in blocked_tasks:
-                    mutations.append(GraphMutation(mutation_type=GraphMutationType.ADD_DEPENDENCY, task_id=bt.task_id, depends_on_task_id=unblock_task_id))
+                # These tasks wait on prerequisites that failed, were blocked or were cancelled. Adding
+                # another dependency can never satisfy those, so an "unblock" task would succeed and leave
+                # the graph stalled. Report that automatic recovery cannot proceed; the job blocks.
+                blockers = sorted({
+                    dep for bt in blocked_tasks for dep in bt.dependencies
+                    if (request.current_graph.get_task(dep) is None
+                        or request.current_graph.get_task(dep).status in (TaskStatus.FAILED, TaskStatus.BLOCKED, TaskStatus.CANCELLED))
+                })
                 return ReplanResult(
-                    mutations=mutations,
-                    explanation=f"Planned unblock task '{unblock_task_id}' for {len(blocked_tasks)} deadlocked tasks",
-                    should_continue=True,
+                    mutations=[],
+                    explanation=(
+                        f"Automatic recovery cannot proceed: {len(blocked_tasks)} task(s) "
+                        f"({', '.join(t.task_id for t in blocked_tasks)}) depend on unsatisfiable prerequisites "
+                        f"({', '.join(blockers) or 'unknown'})"
+                    ),
+                    should_continue=False,
                 )
 
         return ReplanResult(mutations=[], explanation=f"No automatic mutations required for {reason_str}", should_continue=False)

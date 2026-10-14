@@ -819,6 +819,16 @@ class ReactiveJobEngine:
 
         return False
 
+    async def _release_job_resources(self) -> None:
+        """Job end: let adapters release pooled resources (e.g. OpenRig seats) now, not at idle expiry."""
+        if not self.execution_manager:
+            return
+        for adapter in self.execution_manager.all_adapters():
+            try:
+                await asyncio.to_thread(adapter.release_job, self.job.job_id)
+            except Exception as exc:  # noqa: BLE001 - never mask the job outcome
+                logger.error("Job-end release failed for %s: %s", type(adapter).__name__, exc)
+
     async def run_until_complete(self, max_steps: int = 100) -> JobRecord:
         """
         Drives the engine in a loop until a terminal state is reached or max_steps is exceeded.
@@ -857,6 +867,8 @@ class ReactiveJobEngine:
             raise
         finally:
             await self._cancel_active_tasks("Engine run finished")
+            if self.is_terminal:
+                await self._release_job_resources()
             await self.event_bridge.flush()
 
         return self.job

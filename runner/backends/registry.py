@@ -1,6 +1,7 @@
 from agents.errors import SprintRunnerError
 
 from .herdr_backend import HerdrBackend
+from .openrig_backend import OpenRigBackend
 from .subprocess_backend import SubprocessBackend
 
 
@@ -28,5 +29,6 @@ default_backend_registry = BackendRegistry(
     {
         SubprocessBackend.name: SubprocessBackend,
         HerdrBackend.name: HerdrBackend,
+        OpenRigBackend.name: OpenRigBackend,
     }
 )

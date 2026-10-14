@@ -21,6 +21,7 @@ import logging
 import os
 from pathlib import Path, PureWindowsPath
 import subprocess
+import sys
 import threading
 import time
 from typing import Any, Callable, Dict, List, Optional, Sequence, Union
@@ -47,6 +48,19 @@ from tools.tools import (
 logger = logging.getLogger("hermes.runtime.hermes_adapter")
 
 DEFAULT_CONTEXT_MAX_BYTES = 131072
+
+
+def _sprint_runner_error_types() -> tuple:
+    """SprintRunnerError under both import paths.
+
+    Backends import it as ``agents.errors`` (runner/ on sys.path) while this module
+    imports ``runner.agents.errors``; the two are distinct classes at runtime.
+    """
+    types = [SprintRunnerError]
+    bare = getattr(sys.modules.get("agents.errors"), "SprintRunnerError", None)
+    if bare is not None and bare is not SprintRunnerError:
+        types.append(bare)
+    return tuple(types)
 
 
 class WorktreeError(RuntimeError):
@@ -176,6 +190,9 @@ class HermesActorAdapter(ActorAdapter):
         self.observation_registry = observation_registry
         self.spec = spec or {}
         self.job_id = job_id or f"job_{int(time.time())}"
+        # Backend names used per job, so release_job() can end that job's pooled resources.
+        self._job_backends: Dict[str, set] = {}
+        self._job_backends_lock = threading.Lock()
         self.thread_id = self.job_id
         self.base_ref = base_ref
         self.target_branch = target_branch
@@ -755,8 +772,16 @@ class HermesActorAdapter(ActorAdapter):
             )
 
         # 3. Real Agent CLI / Backend Execution (blocking; dispatched off the event loop)
+        cancel_event = threading.Event()
         try:
-            return await asyncio.to_thread(self._execute_real_agent, task, run, actor_id, role, ctx)
+            return await asyncio.to_thread(
+                self._execute_real_agent, task, run, actor_id, role, ctx, cancel_event,
+            )
+        except asyncio.CancelledError:
+            # Cancelling this coroutine does not reach the worker thread. Tell the backend
+            # to stop; it releases its rig at the next wait step.
+            cancel_event.set()
+            raise
         except Exception as exc:
             logger.exception("Error executing real task %s on actor %s: %s", task.task_id, actor_id, exc)
             return TaskExecutionResult(
@@ -773,6 +798,7 @@ class HermesActorAdapter(ActorAdapter):
         actor_id: str,
         role: str,
         context: Optional[Dict[str, Any]] = None,
+        cancel_event: Optional[threading.Event] = None,
     ) -> TaskExecutionResult:
         """
         Blocking real-agent execution path: worktree preparation, agent CLI invocation,
@@ -780,7 +806,11 @@ class HermesActorAdapter(ActorAdapter):
 
         Runs on a worker thread. Git mutations inside are serialized by the per-repository
         lock; the agent process itself runs unlocked so concurrent tasks make real progress.
+        `cancel_event` is set when the task is cancelled; backends that support it stop early.
         """
+        # This path obtains its own backend instance per task, so it owns releasing it.
+        backend = None
+        task_succeeded = False
         try:
             # Ensure authoritative integration worktree
             self.ensure_integration_worktree()
@@ -799,7 +829,10 @@ class HermesActorAdapter(ActorAdapter):
                 run_dir=self.run_dir,
                 sprint_id=task.job_id,
                 logger=logger,
+                cancel_event=cancel_event,
             )
+            with self._job_backends_lock:
+                self._job_backends.setdefault(task.job_id, set()).add(backend_name)
 
             # Setup task worktree
             wt_name = task.metadata.get("worktree_dir") or task.task_id
@@ -886,7 +919,7 @@ class HermesActorAdapter(ActorAdapter):
 
             logger.info("Executing real agent %s for task %s in %s", actor_id, task.task_id, worktree_path)
             raw_res = agent_adapter.execute(agent_ctx)
-            exit_code = getattr(raw_res, "exit_code", 0)
+            exit_code = getattr(raw_res, "returncode", 0)
             stdout_text = getattr(raw_res, "stdout", "") or ""
             stderr_text = getattr(raw_res, "stderr", "") or ""
 
@@ -1018,6 +1051,12 @@ class HermesActorAdapter(ActorAdapter):
                 "commit_sha": commit_sha,
                 "fresh_session_recommended": handoff_obs is not None,
                 "usage_snapshot": usage_snapshot.to_dict(),
+                # Backend-owned identifiers (e.g. pane/session IDs); scalars only so they stay serializable.
+                "execution_backend": getattr(raw_res, "backend", backend_name),
+                "backend_runtime_metadata": {
+                    k: v for k, v in runtime_meta.items()
+                    if isinstance(v, (str, int, float, bool)) or v is None
+                },
             }
             if runtime_meta.get("trigger_replan"):
                 exec_meta["trigger_replan"] = True
@@ -1030,6 +1069,7 @@ class HermesActorAdapter(ActorAdapter):
 
             error_msg = stderr_text if exit_code != 0 else (runtime_meta.get("summary") if status_str == "failed" else None)
 
+            task_succeeded = status_str == "succeeded"
             return TaskExecutionResult(
                 status=status_str,
                 output={"stdout": stdout_text[:5000], "exit_code": exit_code, "commit_sha": commit_sha},
@@ -1049,7 +1089,7 @@ class HermesActorAdapter(ActorAdapter):
                 metadata={"actor": actor_id, "fail_closed": True},
             )
 
-        except SprintRunnerError as exc:
+        except _sprint_runner_error_types() as exc:
             logger.warning("Agent runner error for task %s on actor %s: %s (%s)", task.task_id, actor_id, exc.code, exc.message)
             return TaskExecutionResult(
                 status="failed",
@@ -1066,6 +1106,31 @@ class HermesActorAdapter(ActorAdapter):
                 exit_reason="exception",
                 metadata={"actor": actor_id},
             )
+
+        finally:
+            if backend is not None:
+                try:
+                    backend.cleanup(success=task_succeeded)
+                except Exception as cleanup_exc:
+                    logger.error("Backend cleanup failed for task %s: %s", task.task_id, cleanup_exc)
+
+
+    def release_job(self, job_id: str) -> None:
+        """Release backend resources pooled for `job_id` (for OpenRig: its warm seats). Safe to repeat."""
+        with self._job_backends_lock:
+            names = set(self._job_backends.get(job_id, set()))
+        if not names:
+            return
+        from runner.backends.registry import default_backend_registry
+
+        backend_reg = self.backend_registry or default_backend_registry
+        for name in sorted(names):
+            try:
+                backend_reg.get(name, run_dir=self.run_dir, sprint_id=job_id, logger=logger).release_job(job_id)
+            except Exception as exc:  # noqa: BLE001 - a later release_job() retries
+                logger.error("Backend %s job release failed for job %s: %s", name, job_id, exc)
+        # The names are kept: a seat leased at job end may come back (and fail teardown)
+        # later, and backend release_job() is idempotent, so any later call can retry it.
 
 
 class HermesVerifierAdapter(VerifierAdapter):

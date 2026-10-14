@@ -131,6 +131,46 @@ async def test_hermes_actor_adapter_real_agent_dispatch(temp_git_repo):
     assert "feat(phase_scaffold)" in log_res.stdout
 
 
+@pytest.mark.anyio
+async def test_real_agent_nonzero_returncode_fails_the_task(temp_git_repo):
+    """
+    Regression: the adapter must read ExecutionResult.returncode. It used to read a
+    non-existent `exit_code`, so every result looked like success.
+    """
+    class FailingCodeAgent:
+        name = "mock_coder"
+        def execute(self, context):
+            class Res:
+                returncode = 1
+                stdout = ""
+                stderr = "agent failed"
+            return Res()
+
+    class MockAgentRegistry:
+        def get(self, name):
+            return FailingCodeAgent()
+
+    adapter = HermesActorAdapter(
+        target_repo=temp_git_repo,
+        worktree_root=temp_git_repo / ".worktrees",
+        agent_registry=MockAgentRegistry(),
+        run_dir=temp_git_repo / ".runs",
+        dry_run=False,
+    )
+    task = TaskNode(
+        task_id="phase_fail",
+        job_id="job_real_fail",
+        description="Fail on purpose",
+        assigned_actor="mock_coder",
+        metadata={"worktree_dir": "fail_wt", "branch": "task/fail"},
+    )
+    run = AgentRun(run_id="run_fail", job_id="job_real_fail", task_id="phase_fail", actor_id="mock_coder")
+
+    result = await adapter.execute_task(task=task, run=run)
+
+    assert result.status == "failed"
+
+
 # -----------------------------------------------------------------------------
 # 2. Real Worktree & Git Status Inspection
 # -----------------------------------------------------------------------------

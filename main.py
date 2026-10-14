@@ -22,7 +22,8 @@ from artifacts.artifact_registry import ArtifactRef, artifact_registry
 from messaging.message_store import message_store
 from messaging.message_router import message_router
 from runtime.storage.config import init_storage_lifespan, get_global_event_store
-from runner.backends.execution_registry import build_execution_snapshot
+from runner.backends.execution_registry import build_execution_snapshot, default_execution_registry
+from runner.backends.events import ExecutionEvent
 
 
 @asynccontextmanager
@@ -110,6 +111,9 @@ class InternalEventPayload(BaseModel):
     detail: str = Field(..., min_length=1, max_length=1000)
     duration: Optional[str] = "—"
     jobId: Optional[str] = None
+    taskId: Optional[str] = Field(None, max_length=200)
+    runId: Optional[str] = Field(None, max_length=200)
+    actorId: Optional[str] = Field(None, max_length=200)
     metadata: Optional[Dict[str, Any]] = None
 
 
@@ -156,7 +160,21 @@ async def ingest_internal_event(payload: InternalEventPayload):
         job_id=payload.jobId,
         metadata=payload.metadata,
         accent_color=payload.source.accentColor,
+        task_id=payload.taskId,
+        run_id=payload.runId,
+        actor_id=payload.actorId,
     )
+
+    # 4. D-009 execution events from out-of-process runners also feed the /execution snapshot
+    if payload.kind.startswith("execution."):
+        try:
+            default_execution_registry.apply(ExecutionEvent(
+                kind=payload.kind, job_id=payload.jobId, detail=payload.detail,
+                metadata=dict(payload.metadata or {}), task_id=payload.taskId,
+                run_id=payload.runId, actor_id=payload.actorId,
+            ))
+        except Exception:  # noqa: BLE001 - observability must never reject the event
+            pass
 
     return {
         "accepted": True,

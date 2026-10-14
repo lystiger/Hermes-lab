@@ -999,8 +999,31 @@ class HermesSprintRunner:
                 sprint_id=self.sprint_id,
                 logger=self.logger,
                 keep_workspace=self.spec.get("keep_herdr_workspace", True),
+                event_sink=self._publish_execution_event,
             )
         return self._backend_cache[backend_name]
+
+    def _publish_execution_event(self, event):
+        """D-009 sink: forward a backend's execution.* event to the Hermes API (never raises).
+
+        The backend is cached per sprint, so the task is the phase currently running.
+        """
+        try:
+            if not default_publisher or not default_publisher.enabled():
+                return
+            phase = getattr(self, "_current_phase", None) or {}
+            default_publisher.publish(
+                source_id=event.metadata.get("backend") or "runtime",
+                source_kind="runtime",
+                kind=event.kind,
+                detail=event.detail or event.kind,
+                job_id=event.job_id or self.job_id,
+                metadata=dict(event.metadata),
+                task_id=getattr(event, "task_id", None) or phase.get("name"),
+                actor_id=getattr(event, "actor_id", None) or phase.get("agent"),
+            )
+        except Exception:  # noqa: BLE001 - observability must never fail a phase
+            self.logger.debug("Execution event %s not published", getattr(event, "kind", "?"), exc_info=True)
 
     def execute_agent(self, phase, wt_dir, mailbox_messages=None, active_a2a_turn=None):
         agent_name = phase["agent"]
@@ -1176,6 +1199,7 @@ class HermesSprintRunner:
         commit_msg = phase["commit_message"]
 
         self.logger.info(f"\n=== Executing Phase: {phase_name} (Agent: {agent}) ===")
+        self._current_phase = phase
         backend_name = self.resolve_backend_name(phase)
         self._get_backend(backend_name)
 

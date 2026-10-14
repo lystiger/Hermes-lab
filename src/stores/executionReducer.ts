@@ -35,6 +35,11 @@ export const EMPTY_EXECUTION_VIEW: ExecutionView = {
   snapshotTakenAt: null
 };
 
+// Snapshot `since` is ISO 8601; event `ts` is a display clock, so derive ISO from rawTs (epoch seconds).
+function isoFromRawTs(rawTs: number): string {
+  return new Date(rawTs * 1000).toISOString();
+}
+
 export function resourceKey(backend: string, kind: string, id: string): string {
   return `${backend}|${kind}|${id}`;
 }
@@ -172,7 +177,7 @@ function buildResource(
     jobId: evt.jobId ?? current?.jobId ?? null,
     taskId: evt.taskId ?? current?.taskId ?? null,
     executionId: meta.executionId ?? current?.executionId ?? null,
-    since: stateChanged ? evt.ts : current!.since,
+    since: stateChanged ? isoFromRawTs(evt.rawTs) : current!.since,
     expiresAt: pooled ? (meta.expiresAt ?? null) : null,
     details: { ...retainedDetails, ...detailsFromMetadata(meta) }
   };

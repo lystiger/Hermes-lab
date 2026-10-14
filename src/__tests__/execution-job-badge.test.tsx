@@ -83,4 +83,45 @@ describe('JobDetailView backend badge (D-009)', () => {
     );
     expect(screen.getByText('No backend execution recorded for this job yet.')).toBeInTheDocument();
   });
+
+  it('a seat reused by a later task never relabels the earlier task', () => {
+    const seat = { kind: 'seat', id: '01SEAT', label: 'worker' };
+    const ev = (id: string, rawTs: number, taskId: string, executionId: string, kind: string, extra = {}) => ({
+      id, ts: '10:00:00.000', rawTs, source: { id: 'openrig', kind: 'runtime', displayName: 'OpenRig' },
+      kind, detail: '', dur: '—', jobId: 'job-142', taskId,
+      metadata: { backend: 'openrig', executionId, resource: seat, ...extra }
+    }) as TraceEvent;
+    useConsoleStore.setState({
+      allEvents: [
+        ev('t1-fin', 10, 'T1', 'exec-1', 'execution.finished'),
+        ev('t2-acq', 20, 'T2', 'exec-2', 'execution.resource_acquired', { reused: true })
+      ]
+    });
+    // The live seat now belongs to T2's execution and is running.
+    useExecutionStore.setState({
+      view: viewFromSnapshot({
+        backends: [], openrig: null,
+        resources: [{
+          backend: 'openrig', kind: 'seat', id: '01SEAT', label: 'worker', state: 'running',
+          jobId: 'job-142', taskId: 'T2', executionId: 'exec-2', since: '2026-10-14T00:00:00Z',
+          expiresAt: null, details: { reused: true }
+        }]
+      })
+    });
+
+    render(
+      <MemoryRouter>
+        <JobDetailView jobId="job-142" />
+      </MemoryRouter>
+    );
+
+    const [t2, t1] = screen.getAllByTestId('job-task-execution');
+    expect(within(t2).getByText('T2')).toBeInTheDocument();
+    expect(within(t2).getByText('running')).toBeInTheDocument();
+    expect(within(t2).getByText('reused')).toBeInTheDocument();
+    expect(within(t1).getByText('T1')).toBeInTheDocument();
+    expect(within(t1).getByText('finished')).toBeInTheDocument();
+    expect(within(t1).queryByText('reused')).toBeNull();
+    expect(within(t1).queryByText('running')).toBeNull();
+  });
 });

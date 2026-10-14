@@ -39,10 +39,16 @@ export const JobTaskExecution: React.FC<JobTaskExecutionProps> = ({ events }) =>
             const meta = (evt.metadata ?? {}) as Record<string, any>;
             const backend: string = meta.backend ?? evt.source.id;
             const resource = meta.resource as { kind: string; id: string; label: string } | undefined;
-            const live = resource ? resources[resourceKey(backend, resource.kind, resource.id)] : undefined;
+            const candidate = resource ? resources[resourceKey(backend, resource.kind, resource.id)] : undefined;
+            // A warm-reused seat now belongs to a later task: only borrow its live state while it is
+            // still this task's execution, otherwise the earlier task would show the later one's state.
+            const live =
+              candidate && (candidate.executionId === meta.executionId || (!meta.executionId && candidate.taskId === taskId))
+                ? candidate
+                : undefined;
             const state = live?.state ?? evt.kind.replace('execution.', '');
             const style = stateStyle(state);
-            const reused = live?.details?.reused === true || meta.reused === true;
+            const reused = meta.reused === true || (live?.details?.reused === true);
 
             return (
               <Link

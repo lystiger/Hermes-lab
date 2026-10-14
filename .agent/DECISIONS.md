@@ -480,3 +480,12 @@ sprint-level execution_backend does not reach them. Verifier fallbacks keep the 
 - Round 3 fixes: the pending launch record is cleared only after the rigId is *durably* written to the ledger, so a
   failed ownership write followed by a failed teardown still leaves a recovery handle. The registry `flush()` waits for
   queued writes and for a write already in progress, within one timeout. The API flushes the registry at shutdown.
+
+## D-014: API surface follow-ups from the LysControl audit (2026-10-14)
+
+- `GET /jobs/recoverable` was shadowed by `/jobs/{job_id}`, and crashed once it was reachable. Both are fixed.
+- CORS is an explicit allowlist (LysControl on 3000, preview on 3001, Vite on 5173), overridable with `HERMES_CORS_ORIGINS`.
+  It is not "any local port", because Hermes has no authentication.
+- **Open follow-up (security):** control endpoints (`POST /jobs`, `/messages`, `/jobs/{id}/cancel|resume`,
+  `/internal/*`) are unauthenticated, and bodyless POSTs are reachable cross-site as simple requests (CSRF), whatever
+  the CORS setting. Needs a local auth token or a CSRF guard before Hermes is exposed beyond a single-user machine.

@@ -143,6 +143,10 @@ class _SeatPool:
             current = self._timers.get(seat.rig_id, (None, None))[1] is token
             if current and seat.job not in self._closed_jobs:
                 self._idle.setdefault(seat.job, []).append(seat)
+                # Emitted under the pool lock, so a concurrent release_job()/expiry, which needs
+                # this lock to take the seat, can only report its release after this event.
+                # Sinks never block and never call back into the pool.
+                seat.event(events.RESOURCE_POOLED, "Seat returned to the job pool", expires_at=expires_at)
                 pooled = True
             else:
                 # The timer already fired, a drain ran, or the job ended while the timer was
@@ -152,7 +156,6 @@ class _SeatPool:
                 self._inflight[seat.rig_id] = seat
                 pooled = False
         if pooled:
-            seat.event(events.RESOURCE_POOLED, "Seat returned to the job pool", expires_at=expires_at)
             return
         timer.cancel()
         self._release(seat)

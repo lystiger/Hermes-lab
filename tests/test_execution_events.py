@@ -792,3 +792,71 @@ def test_execution_route_returns_the_snapshot(monkeypatch):
 
     monkeypatch.setattr(main, "build_execution_snapshot", lambda: {"backends": [], "resources": [], "openrig": None})
     assert asyncio.run(main.get_execution()) == {"backends": [], "resources": [], "openrig": None}
+
+
+# --- merge-gate review fixes -------------------------------------------------------
+def test_live_bus_events_carry_runtime_ids_for_the_ui(tmp_path):
+    from events.event_bus import RuntimeEventBus
+    from runtime.events import RuntimeEventBridge
+
+    bus = RuntimeEventBus()
+    bridge = RuntimeEventBridge()
+    bridge.set_bus(bus)
+    asyncio.run(bridge.persist_and_publish(
+        source_id="openrig", source_kind="runtime", kind=events.STARTED, detail="",
+        job_id="j1", task_id="T1", run_id="r1", actor_id="claude", metadata={"backend": "openrig"},
+    ))
+    wire = bus.get_history()[-1].to_dict() if hasattr(bus, "get_history") else bus._history[-1].to_dict()
+    assert (wire["jobId"], wire["taskId"], wire["runId"], wire["actorId"]) == ("j1", "T1", "r1", "claude")
+
+
+def test_a_bus_without_runtime_id_support_still_gets_the_event():
+    from runtime.events import RuntimeEventBridge
+
+    class OldBus:
+        def __init__(self):
+            self.got = []
+
+        def publish(self, source_id, kind, detail, source_kind="system", duration="—",
+                    job_id=None, metadata=None, accent_color=None):
+            self.got.append(kind)
+
+    bus = OldBus()
+    bridge = RuntimeEventBridge()
+    bridge.set_bus(bus)
+    asyncio.run(bridge.persist_and_publish(
+        source_id="x", source_kind="runtime", kind="execution.started", detail="", task_id="T1",
+    ))
+    assert bus.got == ["execution.started"]
+
+
+def test_an_observability_write_failure_never_halts_the_job_at_flush():
+    from runtime.events import RuntimeEventBridge
+
+    class BrokenStore:
+        async def append(self, event):
+            raise RuntimeError("disk full")
+
+    bridge = RuntimeEventBridge()
+    bridge.set_store(BrokenStore())
+
+    async def scenario():
+        assert await bridge.persist_and_publish(
+            source_id="openrig", source_kind="runtime", kind=events.STARTED, detail="", fail_closed=False,
+        ) is None
+        await bridge.flush()  # must not raise
+
+    asyncio.run(scenario())
+
+
+def test_fail_closed_writes_still_halt_on_store_failure():
+    from runtime.events import RuntimeEventBridge
+
+    class BrokenStore:
+        async def append(self, event):
+            raise RuntimeError("disk full")
+
+    bridge = RuntimeEventBridge()
+    bridge.set_store(BrokenStore())
+    with pytest.raises(RuntimeError):
+        asyncio.run(bridge.persist_and_publish(source_id="x", source_kind="runtime", kind="task.started", detail=""))

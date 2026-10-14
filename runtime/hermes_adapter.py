@@ -1197,6 +1197,7 @@ class HermesActorAdapter(ActorAdapter):
                     run_id=getattr(event, "run_id", None),
                     actor_id=getattr(event, "actor_id", None),
                     metadata=dict(event.metadata),
+                    fail_closed=False,
                 )
             except Exception:  # noqa: BLE001 - one lost event must not stall the rest
                 logger.warning("Execution event %s was not persisted", event.kind, exc_info=True)

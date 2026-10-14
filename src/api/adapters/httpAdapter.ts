@@ -27,6 +27,9 @@ import { HermesUnreachableError, recordContact, recordUnreachable } from '../con
 import { UNKNOWN } from '../unknown';
 import { actorAccent } from '../../theme/agents';
 import {
+  isStoredEvent,
+  mapBusEvent,
+  mapStoredEvent,
   mapEvent,
   mapCapacityTelemetry,
   mapJobTokenTelemetry,
@@ -58,8 +61,9 @@ export function mapJobSummary(j: any): Job {
     completedAt: j.completedAt ?? undefined,
     progress: j.progress ?? undefined,
     blockedReason: j.blockedReason ?? null,
-    repairCount: j.repairCount ?? 0,
-    replanCount: j.replanCount ?? 0,
+    // Absent counts stay absent (unknown), never zero.
+    repairCount: j.repairCount ?? undefined,
+    replanCount: j.replanCount ?? undefined,
     estimatedTokens: UNKNOWN,
     estimatedTime: UNKNOWN,
     budget: UNKNOWN
@@ -147,7 +151,8 @@ export class HttpHermesApi implements HermesApi {
       recordUnreachable(this.baseUrl);
       throw new HermesUnreachableError(this.baseUrl);
     }
-    recordContact();
+    // Only a successful response is contact. A 4xx/5xx proves the server answered, not that the data is current.
+    if (res.ok) recordContact();
     return res;
   }
 
@@ -296,15 +301,11 @@ export class HttpHermesApi implements HermesApi {
       tasks: data.tasks || [],
       observations: data.observations || [],
       blockedReason: data.blockedReason ?? null,
-      repairCount: data.repairCount || 0,
-      replanCount: data.replanCount || 0,
+      repairCount: data.repairCount ?? undefined,
+      replanCount: data.replanCount ?? undefined,
       verification: data.verification ?? null,
       executionGraph,
-      changedFiles: [],
-      retryHistory: data.retryHistory || [],
-      retriesUsed: 0,
-      maxRetries: 3,
-      tokenBreakdown: [],
+      retryHistory: Array.isArray(data.retryHistory) ? data.retryHistory : undefined,
       artifacts: data.artifacts || [],
       errors: data.errors || []
     };
@@ -683,7 +684,10 @@ export class HttpHermesApi implements HermesApi {
       `/jobs/${id}/events?limit=${limit}`,
       `/jobs/${jobId}/events`
     );
-    return data.map(mapEvent);
+    // Hermes answers with stored envelopes, or with bus envelopes when nothing is stored. Keep which it was.
+    return data.map((dto) =>
+      isStoredEvent(dto) ? { ...mapStoredEvent(dto), origin: 'stored' as const } : { ...mapBusEvent(dto), origin: 'bus' as const }
+    );
   }
 
   async sendMessage(

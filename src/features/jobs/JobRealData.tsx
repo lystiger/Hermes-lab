@@ -1,9 +1,10 @@
 import React from 'react';
 import { useJobObservations, useJobRuns, useJobTasks, useJobTelemetry } from '../../api/hooks';
 import { describeError } from '../../api/mapping';
-import { EmptyState, ErrorState, Freshness, LoadingState, UnknownValue } from '../../components/DataStates';
+import { EmptyState, Freshness, LoadingState, ResourceError, UnknownValue } from '../../components/DataStates';
 import { JobDetail } from '../../api/types';
-import { explainFailure } from './jobEvents';
+import { describeRecord, explainFailure, verificationResultLines } from './jobEvents';
+import { formatTimeOfDay } from '../time/format';
 
 const SECTION = 'font-mono-code text-[11px] tracking-wider text-lys-faint mb-2.5';
 
@@ -39,7 +40,7 @@ export const JobFailure: React.FC<{ job: JobDetail }> = ({ job }) => {
 
 /** Job token totals from GET /jobs/{id}/telemetry. Zero means no usage was tracked for this job. */
 export const JobTokens: React.FC<{ jobId: string }> = ({ jobId }) => {
-  const { telemetry, loading, error, refetch } = useJobTelemetry(jobId);
+  const { telemetry, loading, error, stale, updatedAt, refetch } = useJobTelemetry(jobId);
   if (loading && !telemetry) return <span className="text-lys-faint">tokens loading…</span>;
   if (error && !telemetry) {
     return (
@@ -50,6 +51,18 @@ export const JobTokens: React.FC<{ jobId: string }> = ({ jobId }) => {
     );
   }
   if (!telemetry) return <UnknownValue reason="Token telemetry not loaded" />;
+  // A failed refresh keeps the last good total, marked stale, with the error and a retry (M5 F2).
+  if (stale) {
+    return (
+      <span className="inline-flex flex-wrap items-center gap-2">
+        <span>{telemetry.totalTokens} <span className="text-lys-faint">tokens (last loaded {updatedAt ? formatTimeOfDay(updatedAt) : '—'})</span></span>
+        <span role="alert" className="text-lys-warning" title={error?.message}>
+          stale: refresh failed{' '}
+          <button type="button" onClick={refetch} className="underline cursor-pointer">retry</button>
+        </span>
+      </span>
+    );
+  }
   if (telemetry.totalTokens === 0) {
     return (
       <span title="No token usage has been tracked for this job. That is not proof that none was spent.">
@@ -65,11 +78,11 @@ export const JobTokens: React.FC<{ jobId: string }> = ({ jobId }) => {
 };
 
 export const JobTasks: React.FC<{ jobId: string }> = ({ jobId }) => {
-  const { tasks, loading, error, updatedAt, refetch } = useJobTasks(jobId);
+  const { tasks, loading, error, stale, updatedAt, refetch } = useJobTasks(jobId);
   return (
     <Section title={`TASKS · ${tasks.length}`} updatedAt={updatedAt}>
       {loading && tasks.length === 0 && <LoadingState label="Loading tasks…" />}
-      {error && <ErrorState label="Tasks" error={error} onRetry={refetch} />}
+      <ResourceError label="Tasks" error={error} hasData={stale || tasks.length > 0} updatedAt={updatedAt} onRetry={refetch} />
       {!loading && !error && tasks.length === 0 && <EmptyState>Hermes recorded no tasks for this job.</EmptyState>}
       <div className="flex flex-col gap-1.5 font-mono-code text-[11px]">
         {tasks.map((t) => (
@@ -95,11 +108,11 @@ export const JobTasks: React.FC<{ jobId: string }> = ({ jobId }) => {
 };
 
 export const JobRuns: React.FC<{ jobId: string }> = ({ jobId }) => {
-  const { runs, loading, error, updatedAt, refetch } = useJobRuns(jobId);
+  const { runs, loading, error, stale, updatedAt, refetch } = useJobRuns(jobId);
   return (
     <Section title={`RUNS · ${runs.length}`} updatedAt={updatedAt}>
       {loading && runs.length === 0 && <LoadingState label="Loading runs…" />}
-      {error && <ErrorState label="Runs" error={error} onRetry={refetch} />}
+      <ResourceError label="Runs" error={error} hasData={stale || runs.length > 0} updatedAt={updatedAt} onRetry={refetch} />
       {!loading && !error && runs.length === 0 && <EmptyState>Hermes recorded no runs for this job.</EmptyState>}
       <div className="flex flex-col gap-1.5 font-mono-code text-[11px]">
         {runs.map((r) => (
@@ -119,11 +132,11 @@ export const JobRuns: React.FC<{ jobId: string }> = ({ jobId }) => {
 };
 
 export const JobObservations: React.FC<{ jobId: string }> = ({ jobId }) => {
-  const { observations, loading, error, updatedAt, refetch } = useJobObservations(jobId);
+  const { observations, loading, error, stale, updatedAt, refetch } = useJobObservations(jobId);
   return (
     <Section title={`OBSERVATIONS · ${observations.length}`} updatedAt={updatedAt}>
       {loading && observations.length === 0 && <LoadingState label="Loading observations…" />}
-      {error && <ErrorState label="Observations" error={error} onRetry={refetch} />}
+      <ResourceError label="Observations" error={error} hasData={stale || observations.length > 0} updatedAt={updatedAt} onRetry={refetch} />
       {!loading && !error && observations.length === 0 && (
         <EmptyState>Hermes recorded no observations for this job.</EmptyState>
       )}
@@ -138,6 +151,68 @@ export const JobObservations: React.FC<{ jobId: string }> = ({ jobId }) => {
             <div className="mt-1 text-lys-primary font-sans text-[12px] break-words">{o.content}</div>
           </div>
         ))}
+      </div>
+    </Section>
+  );
+};
+
+/**
+ * Verification, attempts and repair/replan counts exactly as Hermes reports them. An absent value is shown as
+ * not reported; no totals, retry limits or pass counts are derived.
+ */
+export const JobDiagnostics: React.FC<{ job: JobDetail }> = ({ job }) => {
+  const v = job.verification as { status?: unknown; results?: unknown } | null | undefined;
+  const history = job.retryHistory;
+  return (
+    <Section title="DIAGNOSTICS">
+      <div className="flex flex-col gap-3 font-mono-code text-[11px]">
+        <div className="p-2 bg-lys-surface-1 border border-lys-subtle">
+          <div className="text-lys-muted tracking-wider mb-1">VERIFICATION</div>
+          {v === null || v === undefined ? (
+            <EmptyState>Hermes recorded no verification result for this job.</EmptyState>
+          ) : (
+            <div className="flex flex-col gap-1 text-lys-secondary">
+              <span>status: {typeof v.status === 'string' ? v.status : <UnknownValue reason="verification has no status" />}</span>
+              {verificationResultLines(v.results).length === 0 ? (
+                <span className="text-lys-faint">no result details were reported</span>
+              ) : (
+                verificationResultLines(v.results).map((line, i) => (
+                  <span key={i} className="break-words">{line}</span>
+                ))
+              )}
+            </div>
+          )}
+        </div>
+
+        <div className="grid grid-cols-2 gap-2">
+          <div className="p-2 bg-lys-surface-1 border border-lys-subtle">
+            <div className="text-lys-muted tracking-wider">REPAIRS</div>
+            <div className="text-lys-primary text-[14px]">
+              {job.repairCount ?? <UnknownValue reason="Hermes did not report a repair count" />}
+            </div>
+          </div>
+          <div className="p-2 bg-lys-surface-1 border border-lys-subtle">
+            <div className="text-lys-muted tracking-wider">REPLANS</div>
+            <div className="text-lys-primary text-[14px]">
+              {job.replanCount ?? <UnknownValue reason="Hermes did not report a replan count" />}
+            </div>
+          </div>
+        </div>
+
+        <div className="p-2 bg-lys-surface-1 border border-lys-subtle">
+          <div className="text-lys-muted tracking-wider mb-1">RETRY HISTORY</div>
+          {history === undefined ? (
+            <span className="text-lys-faint">not reported by Hermes for this job</span>
+          ) : history.length === 0 ? (
+            <span className="text-lys-faint">no retries recorded</span>
+          ) : (
+            <ul className="flex flex-col gap-1 text-lys-secondary">
+              {history.map((h, i) => (
+                <li key={i} className="break-words">{describeRecord(h)}</li>
+              ))}
+            </ul>
+          )}
+        </div>
       </div>
     </Section>
   );

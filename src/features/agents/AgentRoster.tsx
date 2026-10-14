@@ -1,6 +1,6 @@
 import React, { useRef } from 'react';
 import { AgentSummary } from '../../api/types';
-import { EmptyState, ErrorState, Freshness, LoadingState, UNKNOWN } from '../../components/DataStates';
+import { EmptyState, ErrorState, Freshness, LoadingState, StaleNotice, UNKNOWN } from '../../components/DataStates';
 import { FilterPills } from '../../components/FilterPills';
 import { useArrowNavigation } from '../../components/keyboard';
 
@@ -53,6 +53,7 @@ export const AgentRoster: React.FC<AgentRosterProps> = ({
 
       {loading && agents.length === 0 && <LoadingState label="Loading roster…" />}
       {Boolean(error) && agents.length === 0 && <ErrorState label="Agent roster" error={error} onRetry={onRetry} />}
+      {Boolean(error) && agents.length > 0 && <div className="p-2"><StaleNotice label="Agent roster" error={error} onRetry={onRetry} /></div>}
       {!loading && !error && agents.length === 0 && <EmptyState>Hermes reports no registered agents.</EmptyState>}
       {agents.length > 0 && visible.length === 0 && <EmptyState>No agent has status {filter.toLowerCase()}.</EmptyState>}
 

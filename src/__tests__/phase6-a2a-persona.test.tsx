@@ -207,6 +207,6 @@ describe('Phase 6 Generic Agent Identity, Personas & A2A Conversations UI', () =
     const replyButtons = screen.getAllByTitle('Reply to this message');
     fireEvent.click(replyButtons[1]); // Reply to Claude's message (msg_p6_002)
 
-    expect(screen.getByText('Replying to msg_p6_002')).toBeInTheDocument();
+    expect(screen.getByText(/Replying to msg_p6_002/)).toBeInTheDocument();
   });
 });

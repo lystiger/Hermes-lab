@@ -110,7 +110,7 @@ describe('M2 job detail: failure, tasks, runs, observations and trace', () => {
 
     expect(await screen.findByText('verify failed')).toBeInTheDocument();
     expect(screen.getByText('started')).toBeInTheDocument();
-    expect(screen.getByText('stored')).toBeInTheDocument();
+    expect(screen.getByText('durable')).toBeInTheDocument();
     expect(screen.getByText('live')).toBeInTheDocument();
   });
 

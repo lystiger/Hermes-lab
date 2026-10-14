@@ -4,7 +4,7 @@ import { JobPipelineGraph } from './JobPipelineGraph';
 import { useConsoleStore } from '../../stores/useConsoleStore';
 import { useJob, useJobs } from '../../api/hooks';
 import { ACTIVE_JOB_STATUSES } from '../../api/adapters/httpAdapter';
-import { ErrorState, LoadingState, UnknownValue } from '../../components/DataStates';
+import { ErrorState, LoadingState, StaleNotice, UnknownValue } from '../../components/DataStates';
 import { JobTokens } from './JobRealData';
 import { useNow } from '../execution/useNow';
 import { formatElapsed } from './jobTiming';
@@ -16,7 +16,7 @@ interface ActiveExecutionCardProps {
 /** The job that is active right now, taken from the real job list. Nothing is shown when none is active. */
 export const ActiveExecutionCard: React.FC<ActiveExecutionCardProps> = ({ onOpenJob }) => {
   const { ambient3d } = useConsoleStore();
-  const { jobs, loading, error, refetch } = useJobs();
+  const { jobs, loading, error, stale, refetch } = useJobs();
   const activeJob = jobs.find((j) => ACTIVE_JOB_STATUSES.includes(j.status));
   const { job: detail } = useJob(activeJob?.id ?? null);
   const nowMs = useNow(1000);
@@ -28,6 +28,9 @@ export const ActiveExecutionCard: React.FC<ActiveExecutionCardProps> = ({ onOpen
   if (error && jobs.length === 0) {
     return <ErrorState label="Active execution" error={error} onRetry={refetch} />;
   }
+
+  // Last good job list, marked stale while the latest refresh fails (M5 F2).
+  const staleNotice = stale ? <StaleNotice label="Active execution" error={error} onRetry={refetch} /> : null;
 
   if (!activeJob) {
     return (
@@ -44,6 +47,8 @@ export const ActiveExecutionCard: React.FC<ActiveExecutionCardProps> = ({ onOpen
   const branch = activeJob.branch;
 
   return (
+    <>
+    {staleNotice && <div className="px-5 pt-3">{staleNotice}</div>}
     <div className="relative p-5 pb-6 border-b border-lys-subtle overflow-hidden select-none bg-lys-base">
       {ambient3d && <AmbientGyro enabled={ambient3d} size={150} />}
 
@@ -104,5 +109,6 @@ export const ActiveExecutionCard: React.FC<ActiveExecutionCardProps> = ({ onOpen
         )}
       </div>
     </div>
+    </>
   );
 };

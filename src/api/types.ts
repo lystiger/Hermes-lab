@@ -303,7 +303,7 @@ export interface JobTokenBreakdown {
 export interface JobDetail extends Job {
   phases?: JobPhase[];
   executionGraph: PipelineStep[];
-  changedFiles: ChangedFile[];
+  changedFiles?: ChangedFile[];
   testSummary?: {
     total?: number;
     passed: number;
@@ -313,10 +313,12 @@ export interface JobDetail extends Job {
     durationMs?: number;
     rawLog?: string;
   };
-  retryHistory: JobRetryItem[];
-  retriesUsed: number;
-  maxRetries: number;
-  tokenBreakdown: JobTokenBreakdown[];
+  /** Undefined when Hermes reports no attempt history; never a fixed or invented list. */
+  retryHistory?: JobRetryItem[];
+  /** Not reported by the HTTP API. Only mock fixtures carry these. */
+  retriesUsed?: number;
+  maxRetries?: number;
+  tokenBreakdown?: JobTokenBreakdown[];
   artifacts?: ArtifactRef[];
   errors?: any[];
   /** Raw verification result from Hermes (status/results); null when none was recorded. */
@@ -356,6 +358,11 @@ export interface TraceEvent {
   runId?: string | null;
   actorId?: string | null;
   metadata?: Record<string, any>;
+  /**
+   * Where a job-history event came from. `stored` is the canonical durable envelope; `bus` is the in-memory
+   * event bus fallback, which does not survive a restart. Live SSE and the global buffer leave this unset.
+   */
+  origin?: 'stored' | 'bus';
 }
 
 export interface ProviderQuota {

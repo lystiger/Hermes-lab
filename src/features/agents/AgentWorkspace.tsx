@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAgent, useAgents } from '../../api/hooks';
 import { useConsoleStore } from '../../stores/useConsoleStore';
-import { EmptyState, ErrorState, LoadingState } from '../../components/DataStates';
+import { EmptyState, ErrorState, LoadingState, ResourceError } from '../../components/DataStates';
 import { AgentRoster } from './AgentRoster';
 import { AgentDossier } from './AgentDossier';
 
@@ -47,6 +47,11 @@ export const AgentWorkspace: React.FC<{ selectedId?: string }> = ({ selectedId }
         )}
         {effectiveId && !detail.loading && !detail.error && !detail.agent && (
           <EmptyState>Agent {effectiveId} is not in the Hermes registry.</EmptyState>
+        )}
+        {detail.agent && detail.stale && (
+          <div className="p-3">
+            <ResourceError label={`Agent ${detail.agent.displayName}`} error={detail.error} hasData updatedAt={detail.updatedAt} onRetry={detail.refetch} />
+          </div>
         )}
         {detail.agent && <AgentDossier agent={detail.agent} />}
       </div>

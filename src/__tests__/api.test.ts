@@ -59,7 +59,7 @@ describe('MockHermesApi Contract Implementation', () => {
     const activeJob = await api.getJob('#142');
     expect(activeJob).not.toBeNull();
     expect(activeJob?.assignedAgentIds).toContain('gemini');
-    expect(activeJob?.changedFiles.length).toBeGreaterThan(0);
+    expect(activeJob?.changedFiles?.length).toBeGreaterThan(0);
   });
 
   it('should support event subscriptions via subscribeEvents', () => {

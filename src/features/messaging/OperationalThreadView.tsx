@@ -32,7 +32,9 @@ export const OperationalThreadView: React.FC<OperationalThreadViewProps> = ({
   const [operatorText, setOperatorText] = useState('');
   const [isSending, setIsSending] = useState(false);
   const [targetRecipient, setTargetRecipient] = useState<string>(assignedAgentIds[0] || 'hermes');
-  const [replyToMessageId, setReplyToMessageId] = useState<string | null>(null);
+  // The message being replied to. Its id, conversation and correlation travel with the send (F3).
+  const [replyTarget, setReplyTarget] = useState<Message | null>(null);
+  const replyToMessageId = replyTarget?.id ?? null;
 
   // Extract distinct conversation IDs present in the messages
   const conversations = useMemo(() => {
@@ -55,18 +57,23 @@ export const OperationalThreadView: React.FC<OperationalThreadViewProps> = ({
     setIsSending(true);
     setSendError(null);
     try {
+      // A reply carries replyTo; its conversation is inherited; correlation links back to the original message.
       await hermesApi.sendMessage(
         targetThreadId,
         operatorText.trim(),
         [targetRecipient],
         'operator',
-        'operator_note'
+        'operator_note',
+        replyTarget?.conversationId ?? undefined,
+        replyTarget?.id,
+        replyTarget ? (replyTarget.correlationId ?? replyTarget.id) : undefined
       );
       setOperatorText('');
-      setReplyToMessageId(null);
+      // Cleared only once the send succeeded; a failed send keeps the text and the reply context.
+      setReplyTarget(null);
       refetch();
     } catch (err) {
-      // The typed text is kept so the operator can retry.
+      // The typed text and the reply target are kept so the operator can retry.
       setSendError(err instanceof Error ? err.message : String(err));
     } finally {
       setIsSending(false);
@@ -273,7 +280,7 @@ export const OperationalThreadView: React.FC<OperationalThreadViewProps> = ({
                     <button
                       type="button"
                       onClick={() => {
-                        setReplyToMessageId(msg.id);
+                        setReplyTarget(msg);
                         if (msg.from.id !== 'operator') {
                           setTargetRecipient(msg.from.id);
                         }
@@ -339,10 +346,10 @@ export const OperationalThreadView: React.FC<OperationalThreadViewProps> = ({
 
             {replyToMessageId && (
               <div className="flex items-center gap-1 text-[10px] font-mono-code text-lys-gold">
-                <span>Replying to {replyToMessageId}</span>
+                <span>Replying to {replyTarget?.id}{replyTarget?.text ? ` · "${replyTarget.text.slice(0, 40)}"` : ''}</span>
                 <button
                   type="button"
-                  onClick={() => setReplyToMessageId(null)}
+                  onClick={() => setReplyTarget(null)}
                   className="text-lys-faint hover:text-lys-danger ml-1 cursor-pointer"
                 >
                   ✕

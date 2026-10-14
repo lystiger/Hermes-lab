@@ -88,3 +88,26 @@ export const Freshness: React.FC<{ at: number | null | undefined }> = ({ at }) =
     {at ? `updated ${formatTimeOfDay(at)}` : 'not loaded yet'}
   </span>
 );
+
+/**
+ * One rule for a loaded resource that may now be failing: with data the failure is a stale notice with retry;
+ * without data it is the full error state. Callers render their own loading and empty states.
+ */
+export const ResourceError: React.FC<{ label: string; error: unknown; hasData: boolean; updatedAt?: number | null; onRetry?: () => void }> = ({
+  label,
+  error,
+  hasData,
+  updatedAt,
+  onRetry
+}) => {
+  if (!error) return null;
+  if (!hasData) return <ErrorState label={label} error={error} onRetry={onRetry} />;
+  return (
+    <div className="flex flex-col gap-1">
+      <StaleNotice label={label} error={error} onRetry={onRetry} />
+      {updatedAt !== undefined && (
+        <span className="font-mono-code text-[10px] text-lys-faint">last loaded {updatedAt ? formatTimeOfDay(updatedAt) : 'never'}</span>
+      )}
+    </div>
+  );
+};

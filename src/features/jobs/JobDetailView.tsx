@@ -7,8 +7,8 @@ import { JobTaskExecution } from '../execution/JobTaskExecution';
 import { useNow } from '../execution/useNow';
 import { formatElapsed } from './jobTiming';
 import { mergeJobEvents } from './jobEvents';
-import { JobFailure, JobObservations, JobRuns, JobTasks, JobTokens } from './JobRealData';
-import { ErrorState, LoadingState, EmptyState, Freshness } from '../../components/DataStates';
+import { JobDiagnostics, JobFailure, JobObservations, JobRuns, JobTasks, JobTokens } from './JobRealData';
+import { ErrorState, LoadingState, EmptyState, Freshness, ResourceError } from '../../components/DataStates';
 import { formatDateTime } from '../time/format';
 import { CopyId } from '../../components/CopyId';
 
@@ -18,7 +18,7 @@ interface JobDetailViewProps {
 
 export const JobDetailView: React.FC<JobDetailViewProps> = ({ jobId = '' }) => {
   const { allEvents } = useConsoleStore();
-  const { job, loading, error, refetch } = useJob(jobId);
+  const { job, loading, error, stale, updatedAt, refetch } = useJob(jobId);
   const durable = useJobEvents(job ? job.id : null);
   const { agents } = useAgents();
   const nowMs = useNow(1000);
@@ -63,6 +63,11 @@ export const JobDetailView: React.FC<JobDetailViewProps> = ({ jobId = '' }) => {
 
   return (
     <div className="w-full bg-lys-base select-none">
+      {stale && (
+        <div className="px-5 pt-4">
+          <ResourceError label={`Job ${job.id}`} error={error} hasData updatedAt={updatedAt} onRetry={refetch} />
+        </div>
+      )}
       {/* Header Banner */}
       <div className="p-5 border-b border-lys-subtle bg-lys-surface-0">
         <div className="flex items-center gap-3">
@@ -199,6 +204,7 @@ export const JobDetailView: React.FC<JobDetailViewProps> = ({ jobId = '' }) => {
             assignedAgentIds={job.assignedAgentIds}
           />
 
+          <JobDiagnostics job={job} />
           <JobTasks jobId={job.id} />
           <JobRuns jobId={job.id} />
           <JobObservations jobId={job.id} />
@@ -238,8 +244,17 @@ export const JobDetailView: React.FC<JobDetailViewProps> = ({ jobId = '' }) => {
                     {e.detail}
                   </span>
                   <span className="w-16 text-right text-lys-muted">{e.dur}</span>
-                  <span className="w-14 text-right text-lys-faint" title={origin === 'stored' ? 'durable history' : 'live buffer only'}>
-                    {origin}
+                  <span
+                    className="w-20 text-right text-lys-faint"
+                    title={
+                      origin === 'stored'
+                        ? 'Durable: canonical stored envelope'
+                        : origin === 'bus'
+                          ? 'In-memory event bus: not durable, lost on restart'
+                          : 'Live buffer only: received over the stream this session'
+                    }
+                  >
+                    {origin === 'stored' ? 'durable' : origin === 'bus' ? 'in-memory' : 'live'}
                   </span>
                 </div>
               ))}

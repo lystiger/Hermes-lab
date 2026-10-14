@@ -225,7 +225,10 @@ describe('Phase 5.1 Operational Messaging & Truthful Artifact Trust UI', () => {
         'Please review mutex locks.',
         ['claude'],
         'operator',
-        'operator_note'
+        'operator_note',
+        undefined,
+        undefined,
+        undefined
       );
     });
   });

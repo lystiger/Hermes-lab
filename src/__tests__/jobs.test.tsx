@@ -62,6 +62,7 @@ describe('Job Queue & Arbitrary Agent Reference', () => {
       loading: false,
       error: null,
       updatedAt: null,
+      stale: false,
       refetch: vi.fn()
     });
 

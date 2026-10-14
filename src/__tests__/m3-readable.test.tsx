@@ -77,7 +77,8 @@ describe('M3 connection: unmistakable when Hermes cannot be reached', () => {
     installLiveHermes({ unreachable: true });
     renderIn(<QueueRoute />);
 
-    expect(await screen.findByText("Can't reach Hermes")).toBeInTheDocument();
+    // Each panel that needs Hermes says so; none of them looks empty.
+    expect((await screen.findAllByText("Can't reach Hermes")).length).toBeGreaterThan(0);
     expect(screen.queryByText('No jobs returned by Hermes.')).not.toBeInTheDocument();
   });
 

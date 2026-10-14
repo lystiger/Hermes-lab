@@ -143,6 +143,21 @@ class CallablePlannerAdapter(PlannerAdapter):
         return ReplanResult(mutations=[], explanation=str(res))
 
 
+# Per-attempt task metadata a fallback must not reuse: it gets its own worktree, branch and history.
+_FALLBACK_DROPPED_METADATA = ("worktree_dir", "branch", "observations", "prior_runs", "fallback_for")
+
+
+def _fallback_metadata(failed_task: TaskNode) -> Dict[str, Any]:
+    """Execution settings a fallback inherits from the task it replaces (backend, role, prompt, limits)."""
+    inherited = {
+        key: value
+        for key, value in (failed_task.metadata or {}).items()
+        if key not in _FALLBACK_DROPPED_METADATA
+    }
+    inherited["fallback_for"] = failed_task.task_id
+    return inherited
+
+
 class ProductionPlannerAdapter(PlannerAdapter):
     """
     Authoritative production planning and replanning adapter.
@@ -278,6 +293,11 @@ class ProductionPlannerAdapter(PlannerAdapter):
                     description=f"Diagnostic & fallback for failed task '{failed_task.task_id}': {failed_task.error or failed_task.description}",
                     required_capabilities=failed_task.required_capabilities or ["implementation"],
                     dependencies=failed_task.dependencies,
+                    # The fallback is the same work on the same agent and execution path: without these
+                    # it would be routed by capability alone, on the default backend, with no role guard.
+                    assigned_actor=failed_task.assigned_actor,
+                    parent_task_id=failed_task.task_id,
+                    metadata=_fallback_metadata(failed_task),
                     max_attempts=min(2, self.limits.max_task_attempts),
                 )
                 mutations.append(GraphMutation(mutation_type=GraphMutationType.ADD_TASK, task=fix_node, reason=f"Fallback for {failed_task.task_id}"))

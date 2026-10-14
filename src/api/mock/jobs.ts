@@ -129,8 +129,8 @@ export const MOCK_PIPELINE: PipelineStep[] = [
   {
     id: '#142',
     phase: 'COMPLETE',
-    agentId: 'elysia',
-    agentName: 'Elysia',
+    agentId: 'hermes',
+    agentName: 'Hermes',
     task: 'Merge + report telemetry',
     meta: '',
     state: 'IDLE',

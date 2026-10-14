@@ -84,7 +84,8 @@ describe('Agent UI & Portrait Fallbacks', () => {
       </MemoryRouter>
     );
 
-    expect(await screen.findByText('Claude')).toBeInTheDocument();
+    // The name appears in the roster and as the dossier heading; the heading is the dossier.
+    expect(await screen.findByRole('heading', { name: 'Claude' })).toBeInTheDocument();
     expect(screen.getByText('[ VIEW DOSSIER ]')).toBeInTheDocument();
   });
 

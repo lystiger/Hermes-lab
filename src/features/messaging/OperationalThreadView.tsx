@@ -4,6 +4,7 @@ import { resolveActorPresentation } from '../../api/actors';
 import { hermesApi } from '../../api/client';
 import { ArtifactRef, Message } from '../../api/types';
 import { CyberButton } from '../../components/CyberButton';
+import { formatTimeOfDay } from '../time/format';
 import { ErrorState } from '../../components/DataStates';
 
 interface OperationalThreadViewProps {
@@ -72,15 +73,7 @@ export const OperationalThreadView: React.FC<OperationalThreadViewProps> = ({
     }
   };
 
-  const formatTime = (isoString?: string) => {
-    if (!isoString) return '—';
-    try {
-      const d = new Date(isoString);
-      return d.toTimeString().slice(0, 8);
-    } catch {
-      return isoString.slice(11, 19) || isoString;
-    }
-  };
+  const formatTime = (isoString?: string) => formatTimeOfDay(isoString);
 
   const getArtifactIcon = (type: string) => {
     switch (type) {

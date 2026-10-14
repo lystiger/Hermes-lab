@@ -6,6 +6,7 @@ import { executionTimeline, groupByBackend } from '../features/execution/executi
 import { useNow } from '../features/execution/useNow';
 import { useExecution } from '../api/hooks';
 import { useConsoleStore } from '../stores/useConsoleStore';
+import { formatTimeOfDay } from '../features/time/format';
 import { isRealApiMode } from '../api/client';
 
 export const ExecutionRoute: React.FC = () => {
@@ -37,7 +38,7 @@ export const ExecutionRoute: React.FC = () => {
                 snapshot failed · showing last known state
               </span>
             )}
-            {snapshotLoadedAt && <span>loaded {snapshotLoadedAt.slice(11, 19)}</span>}
+            {snapshotLoadedAt && <span>loaded {formatTimeOfDay(snapshotLoadedAt)}</span>}
             <button
               onClick={() => void refresh()}
               className="text-[#8C949F] hover:text-[#E6E9ED] cursor-pointer border border-[#1F242B] hover:border-[#3A4048] px-2 py-0.5"
@@ -52,7 +53,7 @@ export const ExecutionRoute: React.FC = () => {
       {/* Live resources grouped by backend */}
       <section className="p-5 border-b border-[#1F242B]">
         <div className="font-mono-code text-[11px] tracking-wider text-[#5C646E] mb-3.5">
-          LIVE RESOURCES · {resources.length} · BY BACKEND
+          DEPLOYED SEATS · {resources.length} · BY BACKEND
         </div>
         {groups.length === 0 ? (
           <div className="font-mono-code text-[11px] text-[#5C646E]">
@@ -67,8 +68,8 @@ export const ExecutionRoute: React.FC = () => {
                   <span className="text-[#5C646E]">{g.resources.length} resource{g.resources.length === 1 ? '' : 's'}</span>
                 </div>
                 <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3">
-                  {g.resources.map((r) => (
-                    <ExecutionResourceCard key={`${r.backend}|${r.kind}|${r.id}`} resource={r} nowMs={nowMs} />
+                  {g.resources.map((r, idx) => (
+                    <ExecutionResourceCard key={`${r.backend}|${r.kind}|${r.id}`} resource={r} nowMs={nowMs} seat={idx + 1} />
                   ))}
                 </div>
               </div>

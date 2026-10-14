@@ -9,6 +9,8 @@ import { formatElapsed } from './jobTiming';
 import { mergeJobEvents } from './jobEvents';
 import { JobFailure, JobObservations, JobRuns, JobTasks, JobTokens } from './JobRealData';
 import { ErrorState, LoadingState, EmptyState, Freshness } from '../../components/DataStates';
+import { formatDateTime } from '../time/format';
+import { CopyId } from '../../components/CopyId';
 
 interface JobDetailViewProps {
   jobId?: string;
@@ -64,7 +66,7 @@ export const JobDetailView: React.FC<JobDetailViewProps> = ({ jobId = '' }) => {
       {/* Header Banner */}
       <div className="p-5 border-b border-[#1F242B] bg-[#0C0E11]">
         <div className="flex items-center gap-3">
-          <span className="font-mono-code text-[18px] text-[#5C646E]">{job.id}</span>
+          <CopyId value={job.id} className="text-[18px] text-[#5C646E]" />
           <h2 className="text-[20px] font-semibold text-[#E6E9ED]">
             {job.title}
           </h2>
@@ -87,8 +89,8 @@ export const JobDetailView: React.FC<JobDetailViewProps> = ({ jobId = '' }) => {
           <span>{job.repository}</span>
           {job.branch && <span className="text-[#CBA35C]">{job.branch}</span>}
           <span className="text-[#2A3038]">·</span>
-          <span>started {job.startedAt ? job.startedAt.slice(11, 19) : '—'}</span>
-          <span>completed {job.completedAt ? job.completedAt.slice(11, 19) : '—'}</span>
+          <span>started {formatDateTime(job.startedAt)}</span>
+          <span>completed {formatDateTime(job.completedAt)}</span>
           <span>elapsed <span className="text-[#E6E9ED]">{formatElapsed(job.startedAt, job.completedAt, nowMs)}</span></span>
           <span>tokens <JobTokens jobId={job.id} /></span>
         </div>

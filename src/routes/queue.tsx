@@ -1,5 +1,5 @@
 import React from 'react';
-import { QueueTable } from '../features/jobs/QueueTable';
+import { MissionBoard } from '../features/jobs/MissionBoard';
 import { useConsoleStore } from '../stores/useConsoleStore';
 import { useJobs, usePipeline, useAgents } from '../api/hooks';
 import { resolveActorPresentation } from '../api/actors';
@@ -115,23 +115,20 @@ export const QueueRoute: React.FC = () => {
         </div>
       </div>
 
-      {/* Main Queue Table */}
-      <div className="px-5 pt-3.5">
-        <Freshness at={jobsUpdatedAt} />
-      </div>
-      {jobsLoading && jobs.length === 0 && <LoadingState label="Loading jobs…" />}
-      {jobsError && jobs.length === 0 && <ErrorState label="Job queue" error={jobsError} onRetry={refetchJobs} />}
+      {/* Mission board: jobs grouped by their real status */}
+      <MissionBoard
+        jobs={jobs}
+        loading={jobsLoading}
+        error={jobsError}
+        updatedAt={jobsUpdatedAt}
+        onRetry={refetchJobs}
+        onOpen={(id) => setActiveModalJobId(id)}
+      />
       {jobsError && jobs.length > 0 && (
         <div className="px-5 pt-3.5">
           <StaleNotice label="Job queue" error={jobsError} onRetry={refetchJobs} />
         </div>
       )}
-      {!jobsLoading && !jobsError && jobs.length === 0 && <EmptyState>No jobs returned by Hermes.</EmptyState>}
-      <QueueTable
-        jobs={jobs}
-        onSelectJob={(id) => setActiveModalJobId(id)}
-        showFilters={true}
-      />
 
       {/* Recoverable jobs: read-only discovery from GET /jobs/recoverable. Resume and cancel are not offered here. */}
       <RecoverableJobs onSelect={(id) => setActiveModalJobId(id)} />

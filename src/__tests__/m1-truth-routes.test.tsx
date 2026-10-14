@@ -151,7 +151,7 @@ describe('M1 truth sweep: HTTP-mode screens render only real data', () => {
     installLiveHermes();
     const { container } = renderIn(<UsageRoute />);
 
-    expect(await screen.findByText(/Usage is not measured in this build/)).toBeInTheDocument();
+    expect(await screen.findByText(/Every total here covers/)).toBeInTheDocument();
     expect(screen.getByText('2 · RUN BUDGET')).toBeInTheDocument();
     expect(screen.getByText('not reported by Hermes')).toBeInTheDocument();
     expectNoFabrication(container);
@@ -194,16 +194,16 @@ describe('M1 truth sweep: HTTP-mode screens render only real data', () => {
     useConsoleStore.setState({ allEvents: [failure, ok] });
     const { container } = renderIn(<EventsRoute />, '/events');
 
-    fireEvent.click(screen.getByRole('button', { name: 'Errors' }));
+    fireEvent.click(screen.getByRole('button', { name: /^Failures/ }));
     expect(screen.getByText('job.failed')).toBeInTheDocument();
     expect(screen.queryByText('agent.started')).not.toBeInTheDocument();
     expectNoFabrication(container);
   });
 
-  it('Events: a list filtered to nothing says so rather than showing an empty table silently', async () => {
+  it('Events: an empty stream says so rather than showing an empty table silently', async () => {
     installLiveHermes();
     renderIn(<EventsRoute />, '/events');
-    fireEvent.click(screen.getByRole('button', { name: 'Tools' }));
+    // With no events, the category pills offer only "All", and the log says so.
     expect(screen.getByText('No events received yet.')).toBeInTheDocument();
   });
 

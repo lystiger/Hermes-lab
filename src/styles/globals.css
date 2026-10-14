@@ -135,3 +135,9 @@
 .bg-striped-pattern {
   background: repeating-linear-gradient(90deg, transparent 0 4px, #0A0B0D 4px 5px);
 }
+
+/* Visible keyboard focus everywhere (accessibility rule 5). Colour comes from the current text colour. */
+:focus-visible {
+  outline: 2px solid currentColor;
+  outline-offset: 2px;
+}

@@ -6,6 +6,7 @@ import { JobModal } from './JobModal';
 import { DossierModal } from './DossierModal';
 import { useEventStream, useExecutionSnapshotLoader } from '../api/hooks';
 import { isMockMode } from '../api/client';
+import { ConnectionBanner } from './ConnectionBanner';
 
 export const Layout: React.FC = () => {
   // Mount the Hermes event stream subscription.
@@ -26,6 +27,7 @@ export const Layout: React.FC = () => {
             MOCK DATA · fixtures, not live Hermes data
           </div>
         )}
+        <ConnectionBanner />
         <Header />
         
         <div className="flex-1 min-h-0 overflow-y-auto">

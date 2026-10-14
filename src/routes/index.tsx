@@ -9,7 +9,7 @@ import { useConsoleStore } from '../stores/useConsoleStore';
 import { useAgents, useJobs } from '../api/hooks';
 import { resolveActorPresentation } from '../api/actors';
 import { eventKindColor } from '../features/events/eventKinds';
-import { ErrorState, LoadingState, EmptyState, Freshness, StaleNotice } from '../components/DataStates';
+import { ErrorState, LoadingState, EmptyState, Freshness, StaleNotice, UNKNOWN } from '../components/DataStates';
 
 export const OverviewRoute: React.FC = () => {
   const navigate = useNavigate();
@@ -20,7 +20,7 @@ export const OverviewRoute: React.FC = () => {
   const recentTrace = allEvents.slice(0, 8);
   const queueShort = jobs.slice(0, 4);
 
-  const getPrioColor = (p: string) => {
+  const getPrioColor = (p?: string) => {
     if (p === 'P0') return '#F2555A';
     if (p === 'P1') return '#E3A008';
     return '#8C949F';
@@ -136,11 +136,11 @@ export const OverviewRoute: React.FC = () => {
                   <div
                     key={q.id}
                     onClick={() => setActiveModalJobId(q.id)}
-                    style={{ borderLeftColor: getPrioColor(q.priority || 'P1') }}
+                    style={{ borderLeftColor: getPrioColor(q.priority) }}
                     className="p-2.5 bg-[#101216] border-l-2 hover:bg-[#161A20] cursor-pointer transition-colors"
                   >
                     <div className="flex items-center gap-2 font-mono-code text-[11px]">
-                      <span style={{ color: getPrioColor(q.priority || 'P1') }} className="font-semibold">{q.priority || 'P1'}</span>
+                      <span style={{ color: getPrioColor(q.priority) }} className="font-semibold">{q.priority || UNKNOWN}</span>
                       <span className="text-[#5C646E]">{q.id}</span>
                       <span className="flex-1 min-w-0 text-[12px] text-[#D7DCE2] font-sans truncate">{q.title}</span>
                       <span className="text-[#8C949F] tracking-wider">{q.status}</span>

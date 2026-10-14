@@ -1,15 +1,18 @@
 import React from 'react';
 import { ExecutionResource } from '../../api/types';
 import { Badge } from '../../components/Badge';
+import { CopyId } from '../../components/CopyId';
 import { formatExpiry, stateStyle } from './executionFormat';
 
 interface ExecutionResourceCardProps {
   resource: ExecutionResource;
   nowMs: number;
+  /** 1-based slot within its backend group, shown as the seat number. */
+  seat?: number;
 }
 
 /** One live execution resource (seat, pane or process). Failed resources are highlighted in red. */
-export const ExecutionResourceCard: React.FC<ExecutionResourceCardProps> = ({ resource, nowMs }) => {
+export const ExecutionResourceCard: React.FC<ExecutionResourceCardProps> = ({ resource, nowMs, seat }) => {
   const style = stateStyle(resource.state);
   const failed = resource.state === 'failed';
   const reused = resource.details?.reused === true;
@@ -31,8 +34,10 @@ export const ExecutionResourceCard: React.FC<ExecutionResourceCardProps> = ({ re
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0">
           <div className="text-[13px] font-sans text-[#E6E9ED] truncate" title={resource.label}>{resource.label}</div>
-          <div className="text-[#5C646E] truncate" title={`${resource.kind} · ${resource.id}`}>
-            {resource.kind} · {resource.id}
+          <div className="text-[#5C646E] flex items-center gap-2 min-w-0">
+            {seat !== undefined && <span className="text-[#8C949F]">SEAT {String(seat).padStart(2, '0')}</span>}
+            <span className="truncate" title={`${resource.kind} · ${resource.id}`}>{resource.kind}</span>
+            <CopyId value={resource.id} className="text-[10px]" />
           </div>
         </div>
         <Badge label={style.label} color={style.color} dot pulse={resource.state === 'running'} />

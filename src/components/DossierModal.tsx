@@ -1,8 +1,10 @@
 import React from 'react';
 import { useConsoleStore } from '../stores/useConsoleStore';
+import { useEscape } from './keyboard';
 
 export const DossierModal: React.FC = () => {
   const { activeDossierAgent, setActiveDossierAgent } = useConsoleStore();
+  useEscape(() => setActiveDossierAgent(null), activeDossierAgent !== null);
 
   if (!activeDossierAgent || !activeDossierAgent.presentation?.characterCardUrl) {
     return null;

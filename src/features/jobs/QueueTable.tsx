@@ -83,7 +83,7 @@ export const QueueTable: React.FC<QueueTableProps> = ({
       <div className="flex flex-col">
         {filteredJobs.map((q) => {
           const isBlocked = q.status === 'BLOCKED';
-          const prioColor = PRIO_COLOR[q.priority || 'P1'] || '#8C949F';
+          const prioColor = (q.priority && PRIO_COLOR[q.priority]) || '#8C949F';
           const statusColor = STATUS_COLOR[q.status] || '#8C949F';
 
           return (

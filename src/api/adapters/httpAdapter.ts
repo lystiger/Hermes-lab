@@ -23,6 +23,7 @@ import {
   JobObservation
 } from '../types';
 import { resolveActorPresentation } from '../actors';
+import { HermesUnreachableError, recordContact, recordUnreachable } from '../connection';
 import { UNKNOWN } from '../unknown';
 import {
   mapEvent,
@@ -46,7 +47,8 @@ export function mapJobSummary(j: any): Job {
     title: j.title,
     repository: j.repository,
     branch: j.branch,
-    priority: j.priority || 'P1',
+    // Hermes does not report a priority on every job; an absent one stays absent instead of defaulting to P1.
+    priority: j.priority || undefined,
     status: j.status,
     currentPhase: j.currentPhase,
     assignedAgentIds: j.assignedAgentIds || [],
@@ -132,8 +134,24 @@ export class HttpHermesApi implements HermesApi {
     this.baseUrl = baseUrl.replace(/\/+$/, '');
   }
 
+  /**
+   * Single entry point for HTTP requests. A network failure is reported as HermesUnreachableError and
+   * recorded for the connection banner; any HTTP response, whatever its status, counts as contact.
+   */
+  private async request(url: string, init?: RequestInit): Promise<Response> {
+    let res: Response;
+    try {
+      res = init ? await fetch(url, init) : await fetch(url);
+    } catch {
+      recordUnreachable(this.baseUrl);
+      throw new HermesUnreachableError(this.baseUrl);
+    }
+    recordContact();
+    return res;
+  }
+
   async getHealth(): Promise<HealthStatus> {
-    const res = await fetch(`${this.baseUrl}/health`);
+    const res = await this.request(`${this.baseUrl}/health`);
     if (!res.ok) {
       throw new Error(`Hermes /health returned HTTP ${res.status}: ${res.statusText}`);
     }
@@ -141,7 +159,7 @@ export class HttpHermesApi implements HermesApi {
   }
 
   async getAgents(): Promise<AgentSummary[]> {
-    const res = await fetch(`${this.baseUrl}/agents`);
+    const res = await this.request(`${this.baseUrl}/agents`);
     if (!res.ok) {
       throw new Error(`Hermes /agents returned HTTP ${res.status}: ${res.statusText}`);
     }
@@ -214,7 +232,7 @@ export class HttpHermesApi implements HermesApi {
     const params = new URLSearchParams();
     if (status) params.set('status', status);
 
-    const res = await fetch(`${this.baseUrl}/jobs?${params.toString()}`);
+    const res = await this.request(`${this.baseUrl}/jobs?${params.toString()}`);
     if (!res.ok) {
       throw new Error(`Hermes /jobs returned HTTP ${res.status}: ${res.statusText}`);
     }
@@ -225,7 +243,7 @@ export class HttpHermesApi implements HermesApi {
 
   /** Recoverable jobs are read-only here: discovery only, no resume or cancel. */
   async getRecoverableJobs(): Promise<Job[]> {
-    const res = await fetch(`${this.baseUrl}/jobs/recoverable`);
+    const res = await this.request(`${this.baseUrl}/jobs/recoverable`);
     if (!res.ok) {
       throw new Error(`Hermes /jobs/recoverable returned HTTP ${res.status}: ${res.statusText}`);
     }
@@ -234,7 +252,7 @@ export class HttpHermesApi implements HermesApi {
   }
 
   async getJob(id: string): Promise<JobDetail | null> {
-    const res = await fetch(`${this.baseUrl}/jobs/${encodeURIComponent(id)}`);
+    const res = await this.request(`${this.baseUrl}/jobs/${encodeURIComponent(id)}`);
     if (!res.ok) {
       if (res.status === 404) return null;
       throw new Error(`Hermes /jobs/${id} returned HTTP ${res.status}: ${res.statusText}`);
@@ -265,7 +283,7 @@ export class HttpHermesApi implements HermesApi {
       title: data.title,
       repository: data.repository,
       branch: data.branch,
-      priority: data.priority || 'P1',
+      priority: data.priority || undefined,
       status: data.status,
       currentPhase: data.currentPhase,
       assignedAgentIds: data.assignedAgentIds || [],
@@ -344,7 +362,7 @@ export class HttpHermesApi implements HermesApi {
     if (limit) params.set('limit', String(limit));
     if (after) params.set('after', after);
 
-    const res = await fetch(`${this.baseUrl}/events?${params.toString()}`);
+    const res = await this.request(`${this.baseUrl}/events?${params.toString()}`);
     if (!res.ok) {
       throw new Error(`Hermes /events returned HTTP ${res.status}: ${res.statusText}`);
     }
@@ -410,7 +428,7 @@ export class HttpHermesApi implements HermesApi {
   // --------------------------------------------------------------------------
 
   async getExecutionSnapshot(): Promise<ExecutionSnapshot> {
-    const res = await fetch(`${this.baseUrl}/execution`);
+    const res = await this.request(`${this.baseUrl}/execution`);
     if (!res.ok) {
       throw new Error(`Hermes /execution returned HTTP ${res.status}: ${res.statusText}`);
     }
@@ -481,7 +499,7 @@ export class HttpHermesApi implements HermesApi {
   async triggerJobAction(jobId: string, action: 'retry' | 'pause' | 'cancel' | 'promote'): Promise<boolean> {
     if (action === 'cancel') {
       try {
-        const res = await fetch(`${this.baseUrl}/jobs/${encodeURIComponent(jobId)}/cancel`, {
+        const res = await this.request(`${this.baseUrl}/jobs/${encodeURIComponent(jobId)}/cancel`, {
           method: 'POST'
         });
         return res.ok;
@@ -504,7 +522,7 @@ export class HttpHermesApi implements HermesApi {
     if (participant) params.set("participant", participant);
     if (limit) params.set("limit", String(limit));
 
-    const res = await fetch(`${this.baseUrl}/threads?${params.toString()}`);
+    const res = await this.request(`${this.baseUrl}/threads?${params.toString()}`);
     if (!res.ok) {
       throw new Error(`Hermes /threads returned HTTP ${res.status}: ${res.statusText}`);
     }
@@ -525,7 +543,7 @@ export class HttpHermesApi implements HermesApi {
   }
 
   async getThread(threadId: string): Promise<Thread | null> {
-    const res = await fetch(`${this.baseUrl}/threads/${encodeURIComponent(threadId)}`);
+    const res = await this.request(`${this.baseUrl}/threads/${encodeURIComponent(threadId)}`);
     if (!res.ok) {
       if (res.status === 404) return null;
       throw new Error(`Hermes /threads/${threadId} returned HTTP ${res.status}: ${res.statusText}`);
@@ -552,7 +570,7 @@ export class HttpHermesApi implements HermesApi {
     if (after) params.set("after", after);
     if (conversationId) params.set("conversationId", conversationId);
 
-    const res = await fetch(`${this.baseUrl}/threads/${encodeURIComponent(threadId)}/messages?${params.toString()}`);
+    const res = await this.request(`${this.baseUrl}/threads/${encodeURIComponent(threadId)}/messages?${params.toString()}`);
     if (!res.ok) {
       // A 404 means the thread does not exist. That is an error to show, not an empty conversation.
       throw new Error(`Hermes /threads/${threadId}/messages returned HTTP ${res.status}: ${res.statusText}`);
@@ -603,7 +621,7 @@ export class HttpHermesApi implements HermesApi {
     if (limit) params.set("limit", String(limit));
     if (conversationId) params.set("conversationId", conversationId);
 
-    const res = await fetch(`${this.baseUrl}/agents/${encodeURIComponent(agentId)}/inbox?${params.toString()}`);
+    const res = await this.request(`${this.baseUrl}/agents/${encodeURIComponent(agentId)}/inbox?${params.toString()}`);
     if (!res.ok) {
       throw new Error(`Hermes /agents/${agentId}/inbox returned HTTP ${res.status}: ${res.statusText}`);
     }
@@ -623,7 +641,7 @@ export class HttpHermesApi implements HermesApi {
   // --------------------------------------------------------------------------
 
   private async getJson(path: string, label: string): Promise<any> {
-    const res = await fetch(`${this.baseUrl}${path}`);
+    const res = await this.request(`${this.baseUrl}${path}`);
     if (!res.ok) {
       throw new Error(`Hermes ${label} returned HTTP ${res.status}: ${res.statusText}`);
     }
@@ -677,7 +695,7 @@ export class HttpHermesApi implements HermesApi {
     replyTo?: string,
     correlationId?: string
   ): Promise<Message> {
-    const res = await fetch(`${this.baseUrl}/messages`, {
+    const res = await this.request(`${this.baseUrl}/messages`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({

@@ -1,5 +1,7 @@
 import React from 'react';
 import { UNKNOWN } from '../api/unknown';
+import { HermesUnreachableError } from '../api/connection';
+import { formatTimeOfDay } from '../features/time/format';
 
 export { UNKNOWN };
 
@@ -27,10 +29,22 @@ export const ErrorState: React.FC<{ label: string; error: unknown; onRetry?: () 
   onRetry
 }) => {
   const message = error instanceof Error ? error.message : String(error);
+  const unreachable = error instanceof HermesUnreachableError;
   return (
     <div role="alert" className="m-4 p-4 border border-[rgba(242,85,90,0.35)] bg-[rgba(242,85,90,0.05)] font-mono-code text-[12px]">
-      <div className="text-[#F2555A]">{label} failed</div>
-      <div className="mt-1 text-[#B7BEC7] break-words">{message}</div>
+      {unreachable ? (
+        <>
+          <div className="text-[#F2555A]">Can&apos;t reach Hermes</div>
+          <div className="mt-1 text-[#B7BEC7] break-words">
+            {label} is not loading. Check that the Hermes runtime API is running at {(error as HermesUnreachableError).url}.
+          </div>
+        </>
+      ) : (
+        <>
+          <div className="text-[#F2555A]">{label} failed</div>
+          <div className="mt-1 text-[#B7BEC7] break-words">{message}</div>
+        </>
+      )}
       {onRetry && (
         <button
           type="button"
@@ -71,6 +85,6 @@ export const EmptyState: React.FC<{ children: React.ReactNode }> = ({ children }
 /** When a view's data was last fetched from Hermes. `at` is epoch milliseconds. */
 export const Freshness: React.FC<{ at: number | null | undefined }> = ({ at }) => (
   <span className="font-mono-code text-[11px] text-[#5C646E]">
-    {at ? `updated ${new Date(at).toLocaleTimeString([], { hour12: false })}` : 'not loaded yet'}
+    {at ? `updated ${formatTimeOfDay(at)}` : 'not loaded yet'}
   </span>
 );

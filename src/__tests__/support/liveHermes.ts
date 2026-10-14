@@ -111,6 +111,8 @@ export interface LiveOptions {
   recoverable?: unknown[];
   /** Make /threads/{id}/messages return 404 (thread does not exist). */
   threadMissing?: boolean;
+  /** Simulate Hermes being down: every request fails at the network level. */
+  unreachable?: boolean;
 }
 
 export interface LiveResponse {
@@ -163,6 +165,7 @@ export function installLiveHermes(options: LiveOptions = {}) {
   const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
     const url = new URL(String(input));
     requests.push(`${url.pathname}${url.search}`);
+    if (options.unreachable) throw new TypeError('Failed to fetch');
     const { status, body } = respond(url.pathname, options);
     return {
       ok: status >= 200 && status < 300,

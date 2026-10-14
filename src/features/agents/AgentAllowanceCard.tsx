@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { AgentDetail } from '../../api/types';
+import { EmptyState, isKnown } from '../../components/DataStates';
 
 export const AgentAllowanceCard: React.FC<{ agent: AgentDetail }> = ({ agent }) => {
   const [showTooltip, setShowTooltip] = useState(false);
@@ -10,6 +11,10 @@ export const AgentAllowanceCard: React.FC<{ agent: AgentDetail }> = ({ agent }) 
       <div className="text-[11px] tracking-wider text-[#5C646E] mb-2 font-mono-code">
         ALLOWANCE
       </div>
+
+      {agent.allowance.length === 0 && (
+        <EmptyState>Provider quota is not reported by Hermes for this agent.</EmptyState>
+      )}
 
       <div className="flex flex-col gap-2.5">
         {agent.allowance.map((al, idx) => {
@@ -32,14 +37,16 @@ export const AgentAllowanceCard: React.FC<{ agent: AgentDetail }> = ({ agent }) 
                 </span>
               </div>
               <div className="mt-1 h-[6px] bg-[#14171C] relative">
-                <div
-                  style={{
-                    width: al.pct,
-                    backgroundColor: al.tag === 'N/A' ? '#3A4048' : accentColor,
-                    opacity: isEst ? 0.5 : 0.9
-                  }}
-                  className="absolute left-0 top-0 bottom-0"
-                />
+                {isKnown(al.pct) && (
+                  <div
+                    style={{
+                      width: al.pct,
+                      backgroundColor: al.tag === 'N/A' ? '#3A4048' : accentColor,
+                      opacity: isEst ? 0.5 : 0.9
+                    }}
+                    className="absolute left-0 top-0 bottom-0"
+                  />
+                )}
                 <div className="absolute inset-0 bg-striped-pattern pointer-events-none" />
               </div>
             </div>

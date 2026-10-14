@@ -3,11 +3,12 @@ import { QueueTable } from '../features/jobs/QueueTable';
 import { useConsoleStore } from '../stores/useConsoleStore';
 import { useJobs, usePipeline, useAgents } from '../api/hooks';
 import { resolveActorPresentation } from '../api/actors';
+import { EmptyState, ErrorState, Freshness, LoadingState, StaleNotice } from '../components/DataStates';
 
 export const QueueRoute: React.FC = () => {
   const { setActiveModalJobId, liveMotion } = useConsoleStore();
-  const { jobs } = useJobs();
-  const { pipeline } = usePipeline();
+  const { jobs, loading: jobsLoading, error: jobsError, updatedAt: jobsUpdatedAt, refetch: refetchJobs } = useJobs();
+  const { pipeline, loading: pipelineLoading, error: pipelineError, updatedAt: pipelineUpdatedAt, refetch: refetchPipeline } = usePipeline();
   const { agents } = useAgents();
 
   const getStateColor = (state: string) => {
@@ -17,6 +18,7 @@ export const QueueRoute: React.FC = () => {
       case 'QUEUED': return '#8C949F';
       case 'CLAIMED': return '#CBA35C';
       case 'BLOCKED': return '#E3A008';
+      case 'FAILED': return '#F2555A';
       default: return '#5C646E';
     }
   };
@@ -27,8 +29,17 @@ export const QueueRoute: React.FC = () => {
       <div className="p-5 border-b border-[#1F242B] bg-[#0C0E11]">
         <div className="flex items-center gap-3.5 mb-3 font-mono-code text-[11px]">
           <span className="tracking-wider text-[#5C646E]">EXECUTION ORDER</span>
-          <span className="text-[#8C949F]">serial per repository · governed pipeline</span>
+          <span className="text-[#8C949F]">phases of the active job, in the order Hermes reports them</span>
+          <Freshness at={pipelineUpdatedAt} />
         </div>
+
+        {pipelineLoading && pipeline.length === 0 && <LoadingState label="Loading execution order…" />}
+        {pipelineError && pipeline.length === 0 && (
+          <ErrorState label="Execution order" error={pipelineError} onRetry={refetchPipeline} />
+        )}
+        {!pipelineLoading && !pipelineError && pipeline.length === 0 && (
+          <EmptyState>No active job. Nothing is executing in the latest jobs from Hermes.</EmptyState>
+        )}
 
         <div className="flex flex-col max-w-5xl">
           {pipeline.map((p, idx) => {
@@ -42,7 +53,7 @@ export const QueueRoute: React.FC = () => {
             return (
               <div key={p.id || idx}>
                 <div
-                  onClick={() => setActiveModalJobId(p.jobId || jobs.find((j) => j.status === 'RUNNING')?.id || jobs[0]?.id || p.id)}
+                  onClick={() => p.jobId && setActiveModalJobId(p.jobId)}
                   style={{
                     borderColor: isRunning ? 'rgba(217,160,91,0.45)' : isBlocked ? 'rgba(227,160,8,0.3)' : '#1F242B',
                     backgroundColor: isRunning ? 'rgba(217,160,91,0.06)' : isBlocked ? 'rgba(227,160,8,0.04)' : '#0C0E11'
@@ -104,6 +115,17 @@ export const QueueRoute: React.FC = () => {
       </div>
 
       {/* Main Queue Table */}
+      <div className="px-5 pt-3.5">
+        <Freshness at={jobsUpdatedAt} />
+      </div>
+      {jobsLoading && jobs.length === 0 && <LoadingState label="Loading jobs…" />}
+      {jobsError && jobs.length === 0 && <ErrorState label="Job queue" error={jobsError} onRetry={refetchJobs} />}
+      {jobsError && jobs.length > 0 && (
+        <div className="px-5 pt-3.5">
+          <StaleNotice label="Job queue" error={jobsError} onRetry={refetchJobs} />
+        </div>
+      )}
+      {!jobsLoading && !jobsError && jobs.length === 0 && <EmptyState>No jobs returned by Hermes.</EmptyState>}
       <QueueTable
         jobs={jobs}
         onSelectJob={(id) => setActiveModalJobId(id)}
@@ -111,7 +133,7 @@ export const QueueRoute: React.FC = () => {
       />
 
       <div className="px-5 pt-3.5 font-mono-code text-[11px] text-[#5C646E]">
-        estimates from historical medians · confidence varies per row · policy: serial per repository
+        time estimates: not available (Hermes exposes no estimator) · concurrency policy: not reported by Hermes
       </div>
     </div>
   );

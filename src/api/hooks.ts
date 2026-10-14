@@ -60,6 +60,7 @@ export function useAgents() {
   const [baseAgents, setBaseAgents] = useState<AgentSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<Error | null>(null);
+  const [updatedAt, setUpdatedAt] = useState<number | null>(null);
   const { setConnectionStatus, agentRuntimeStatuses } = useConsoleStore();
 
   const fetchAgents = useCallback(async () => {
@@ -67,6 +68,7 @@ export function useAgents() {
       setLoading(true);
       const data = await hermesApi.getAgents();
       setBaseAgents(data);
+      setUpdatedAt(Date.now());
       if (isRealApiMode) {
         setConnectionStatus('CONNECTED');
       }
@@ -98,7 +100,7 @@ export function useAgents() {
     });
   }, [baseAgents, agentRuntimeStatuses]);
 
-  return { agents, loading, error, refetch: fetchAgents };
+  return { agents, loading, error, updatedAt, refetch: fetchAgents };
 }
 
 export function useAgent(id?: AgentId) {
@@ -145,6 +147,7 @@ export function useJobs() {
   const [jobs, setJobs] = useState<Job[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<Error | null>(null);
+  const [updatedAt, setUpdatedAt] = useState<number | null>(null);
   const { jobRuntimeVersion } = useConsoleStore();
 
   const fetchJobs = useCallback(async () => {
@@ -152,6 +155,7 @@ export function useJobs() {
       setLoading(true);
       const data = await hermesApi.getJobs();
       setJobs(data);
+      setUpdatedAt(Date.now());
       setError(null);
     } catch (err) {
       setError(err as Error);
@@ -164,13 +168,14 @@ export function useJobs() {
     fetchJobs();
   }, [fetchJobs, jobRuntimeVersion]);
 
-  return { jobs, loading, error, refetch: fetchJobs };
+  return { jobs, loading, error, updatedAt, refetch: fetchJobs };
 }
 
 export function useJob(id: string | null) {
   const [job, setJob] = useState<JobDetail | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<Error | null>(null);
+  const [updatedAt, setUpdatedAt] = useState<number | null>(null);
   const { jobRuntimeVersion } = useConsoleStore();
 
   const fetchJob = useCallback(async (jobId: string) => {
@@ -178,6 +183,7 @@ export function useJob(id: string | null) {
       setLoading(true);
       const data = await hermesApi.getJob(jobId);
       setJob(data);
+      setUpdatedAt(Date.now());
       setError(null);
     } catch (err) {
       setError(err as Error);
@@ -194,13 +200,14 @@ export function useJob(id: string | null) {
     }
   }, [id, fetchJob, jobRuntimeVersion]);
 
-  return { job, loading, error, refetch: () => id && fetchJob(id) };
+  return { job, loading, error, updatedAt, refetch: () => id && fetchJob(id) };
 }
 
 export function usePipeline() {
   const [pipeline, setPipeline] = useState<PipelineStep[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<Error | null>(null);
+  const [updatedAt, setUpdatedAt] = useState<number | null>(null);
   const { jobRuntimeVersion } = useConsoleStore();
 
   const fetchPipeline = useCallback(async () => {
@@ -208,6 +215,7 @@ export function usePipeline() {
       setLoading(true);
       const data = await hermesApi.getPipeline();
       setPipeline(data);
+      setUpdatedAt(Date.now());
       setError(null);
     } catch (err) {
       setError(err as Error);
@@ -220,7 +228,7 @@ export function usePipeline() {
     fetchPipeline();
   }, [fetchPipeline, jobRuntimeVersion]);
 
-  return { pipeline, loading, error, refetch: fetchPipeline };
+  return { pipeline, loading, error, updatedAt, refetch: fetchPipeline };
 }
 
 export function useTelemetry() {
@@ -228,26 +236,34 @@ export function useTelemetry() {
   const [quotas, setQuotas] = useState<ProviderQuota[]>([]);
   const [projections, setProjections] = useState<ProjectionItem[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<Error | null>(null);
+  const [updatedAt, setUpdatedAt] = useState<number | null>(null);
 
-  useEffect(() => {
-    async function load() {
-      try {
-        const [tel, q, proj] = await Promise.all([
-          hermesApi.getTelemetry(),
-          hermesApi.getProviderQuotas(),
-          hermesApi.getProjections()
-        ]);
-        setTelemetry(tel);
-        setQuotas(q);
-        setProjections(proj);
-      } finally {
-        setLoading(false);
-      }
+  const load = useCallback(async () => {
+    try {
+      setLoading(true);
+      const [tel, q, proj] = await Promise.all([
+        hermesApi.getTelemetry(),
+        hermesApi.getProviderQuotas(),
+        hermesApi.getProjections()
+      ]);
+      setTelemetry(tel);
+      setQuotas(q);
+      setProjections(proj);
+      setUpdatedAt(Date.now());
+      setError(null);
+    } catch (err) {
+      setError(err as Error);
+    } finally {
+      setLoading(false);
     }
-    load();
   }, []);
 
-  return { telemetry, quotas, projections, loading };
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  return { telemetry, quotas, projections, loading, error, updatedAt, refetch: load };
 }
 
 export function useSettings() {

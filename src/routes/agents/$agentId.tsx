@@ -9,11 +9,12 @@ import { AgentRunsTable } from '../../features/agents/AgentRunsTable';
 import { MessageDispatcher } from '../../features/messaging/MessageDispatcher';
 import { useConsoleStore } from '../../stores/useConsoleStore';
 import { useAgent } from '../../api/hooks';
+import { ErrorState, UNKNOWN } from '../../components/DataStates';
 
 export const AgentDetailRoute: React.FC = () => {
   const { agentId } = useParams<{ agentId: string }>();
   const { setSelectedAgentId, setActiveDossierAgent } = useConsoleStore();
-  const { agent, loading } = useAgent(agentId);
+  const { agent, loading, error, refetch } = useAgent(agentId);
 
   useEffect(() => {
     if (agentId) {
@@ -27,6 +28,10 @@ export const AgentDetailRoute: React.FC = () => {
         Loading agent details for [{agentId}]...
       </div>
     );
+  }
+
+  if (error && !agent) {
+    return <ErrorState label={`Agent [${agentId}]`} error={error} onRetry={refetch} />;
   }
 
   if (!agent) {
@@ -57,7 +62,7 @@ export const AgentDetailRoute: React.FC = () => {
           />
           <div className="mt-2.5 w-full flex justify-between items-center font-mono-code text-[11px] text-[#5C646E]">
             <span>{agent.model}</span>
-            <span style={{ color: accentColor }}>{agent.traceId || `trc ${agent.id}·active`}</span>
+            <span style={{ color: accentColor }}>{agent.traceId || UNKNOWN}</span>
           </div>
 
           {/* Optional Restrained Dossier Trigger */}

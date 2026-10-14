@@ -1,4 +1,8 @@
-import { describe, it, expect, beforeAll, beforeEach } from 'vitest';
+import { describe, it, expect, beforeAll, beforeEach, vi } from 'vitest';
+// These tests exercise the mock fixtures, which are opt-in only (VITE_LYSCONTROL_MOCK=1).
+vi.hoisted(() => {
+  process.env.VITE_LYSCONTROL_MOCK = '1';
+});
 import { render, screen, within } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import ExecutionRoute from '../routes/execution';

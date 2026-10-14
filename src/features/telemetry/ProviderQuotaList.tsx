@@ -1,8 +1,30 @@
 import React from 'react';
 import { useTelemetry } from '../../api/hooks';
+import { EmptyState, ErrorState, LoadingState } from '../../components/DataStates';
+
+const NO_PROVIDER_DATA = 'No provider usage reported. Hermes provider telemetry is not connected in this build.';
 
 export const ProviderQuotaList: React.FC<{ compact?: boolean }> = ({ compact = false }) => {
-  const { quotas } = useTelemetry();
+  const { quotas, loading, error, refetch } = useTelemetry();
+
+  if (loading && quotas.length === 0 && !error) {
+    return <LoadingState label="Loading provider quota…" />;
+  }
+
+  if (error && quotas.length === 0) {
+    return <ErrorState label="Provider quota" error={error} onRetry={refetch} />;
+  }
+
+  if (quotas.length === 0) {
+    return (
+      <div className={compact ? 'p-3.5 select-none' : 'p-5 select-none'}>
+        <div className="font-mono-code text-[11px] tracking-wider text-[#5C646E] mb-3">
+          {compact ? 'PROVIDER QUOTA' : '3 · PROVIDER QUOTA'}
+        </div>
+        <EmptyState>{NO_PROVIDER_DATA}</EmptyState>
+      </div>
+    );
+  }
 
   if (compact) {
     return (

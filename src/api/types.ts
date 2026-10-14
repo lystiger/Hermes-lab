@@ -30,7 +30,18 @@ export type PhaseStatus =
   | 'SUPERSEDED'
   | 'BLOCKED';
 
-export type PipelineStepState = 'COMPLETED' | 'RUNNING' | 'QUEUED' | 'CLAIMED' | 'BLOCKED' | 'IDLE';
+// Terminal failure/cancel/skip states are kept distinct from BLOCKED; UNKNOWN is a raw status we do not map.
+export type PipelineStepState =
+  | 'COMPLETED'
+  | 'RUNNING'
+  | 'QUEUED'
+  | 'CLAIMED'
+  | 'BLOCKED'
+  | 'FAILED'
+  | 'CANCELLED'
+  | 'SKIPPED'
+  | 'UNKNOWN'
+  | 'IDLE';
 
 export type PhaseName = string;
 
@@ -378,10 +389,14 @@ export interface OverviewTelemetry {
   runningJobsCount: number;
   queuedJobsCount: number;
   blockedJobsCount: number;
-  failed24hCount: number;
+  /** null when it cannot be counted honestly (e.g. a failed job has no completedAt). */
+  failed24hCount: number | null;
+  /** Number of jobs the counts were derived from (GET /jobs returns at most its default limit). */
+  sampleSize: number;
   tokensToday: string;
   estSpendToday: string;
-  sprintBudgetUsedPct: number;
+  /** null: Hermes exposes no sprint budget, so no percentage can be computed. */
+  sprintBudgetUsedPct: number | null;
 }
 
 export interface SendMessageRequest {

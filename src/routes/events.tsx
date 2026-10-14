@@ -1,30 +1,24 @@
 import React from 'react';
 import { useConsoleStore } from '../stores/useConsoleStore';
 import { useAgents } from '../api/hooks';
+import { isErrorKind, eventKindColor } from '../features/events/eventKinds';
+import { EmptyState } from '../components/DataStates';
 
 export const EventsRoute: React.FC = () => {
-  const { allEvents, eFilter, setEFilter, setActiveModalJobId, liveMotion } = useConsoleStore();
+  const { allEvents, eFilter, setEFilter, setActiveModalJobId, liveMotion, connectionStatus } = useConsoleStore();
   const { agents } = useAgents();
 
   const filterTabs = ['All', 'Hermes', ...agents.map(a => a.displayName), 'Errors', 'Tools'];
 
-  const getKindColor = (k: string) => {
-    if (k === 'error') return '#F2555A';
-    if (k === 'retry' || k === 'quota.warn') return '#E3A008';
-    if (k.startsWith('agent.')) return '#3FB950';
-    if (k === 'job.start' || k === 'phase.change') return '#CBA35C';
-    return '#8C949F';
-  };
-
   const getRowBg = (k: string) => {
-    if (k === 'error') return 'rgba(242,85,90,0.07)';
     if (k === 'retry' || k === 'quota.warn') return 'rgba(227,160,8,0.05)';
+    if (isErrorKind(k)) return 'rgba(242,85,90,0.07)';
     return 'transparent';
   };
 
   const filteredEvents = allEvents.filter((e) => {
     if (eFilter === 'All') return true;
-    if (eFilter === 'Errors') return e.kind === 'error' || e.kind === 'retry' || e.kind === 'quota.warn';
+    if (eFilter === 'Errors') return isErrorKind(e.kind);
     if (eFilter === 'Tools') return e.kind.startsWith('tool.');
     return (
       e.source.id.toLowerCase() === eFilter.toLowerCase() ||
@@ -57,10 +51,17 @@ export const EventsRoute: React.FC = () => {
 
         <div className="flex items-center gap-3.5 font-mono-code text-[11px] text-[#5C646E] flex-shrink-0 pl-4">
           <span>{allEvents.length} events logged</span>
-          <span className="flex items-center gap-1.5 text-[#3FB950]">
-            <span className={`w-1.5 h-1.5 rounded-[1px] bg-[#3FB950] ${liveMotion ? 'animate-pulse' : ''}`} />
-            streaming
-          </span>
+          {connectionStatus === 'CONNECTED' ? (
+            <span className="flex items-center gap-1.5 text-[#3FB950]">
+              <span className={`w-1.5 h-1.5 rounded-[1px] bg-[#3FB950] ${liveMotion ? 'animate-pulse' : ''}`} />
+              streaming
+            </span>
+          ) : (
+            <span className="flex items-center gap-1.5 text-[#E3A008]">
+              <span className="w-1.5 h-1.5 rounded-[1px] bg-[#E3A008]" />
+              not streaming · {connectionStatus.toLowerCase()}
+            </span>
+          )}
         </div>
       </div>
 
@@ -76,6 +77,11 @@ export const EventsRoute: React.FC = () => {
 
       {/* Event Rows */}
       <div className="flex flex-col">
+        {filteredEvents.length === 0 && (
+          <EmptyState>
+            {allEvents.length === 0 ? 'No events received yet.' : 'No events match this filter.'}
+          </EmptyState>
+        )}
         {filteredEvents.map((e) => {
           const actorColor = e.source.accentColor || '#8C949F';
 
@@ -89,7 +95,7 @@ export const EventsRoute: React.FC = () => {
               <span style={{ color: actorColor }} className="w-20 flex-shrink-0 font-semibold">
                 {e.source.displayName}
               </span>
-              <span style={{ color: getKindColor(e.kind) }} className="w-32 flex-shrink-0 font-medium">
+              <span style={{ color: eventKindColor(e.kind) }} className="w-32 flex-shrink-0 font-medium">
                 {e.kind}
               </span>
               <span className="flex-1 min-w-[200px] text-[#B7BEC7] truncate font-sans">

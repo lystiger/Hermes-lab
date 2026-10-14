@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import { TraceEvent, AgentSummary, AgentDetail, ConnectionStatus, HealthStatus, AgentStatus } from '../api/types';
-import { isRealApiMode } from '../api/client';
+import { isMockMode } from '../api/client';
 
 function pad(n: number, w: number): string {
   return String(n).padStart(w, '0');
@@ -41,11 +41,8 @@ interface ConsoleUIState {
   
   // Real-time Visual Clock & Metrics State
   tick: number;
+  /** Local wall clock in HTTP mode; demo clock in mock mode. Elapsed times are derived from job timestamps instead. */
   clock: string;
-  elapsed: string;
-  tokensToday: string;
-  jobTokens: string;
-  hardenTokens: string;
   
   // Streamed Event Trace Buffer
   allEvents: TraceEvent[];
@@ -69,8 +66,14 @@ interface ConsoleUIState {
 
 const baseTs = 10 * 3600 + 42 * 60 + 16;
 
+/** Local wall clock as HH:MM, used in HTTP mode. */
+function wallClock(): string {
+  const d = new Date();
+  return `${pad(d.getHours(), 2)}:${pad(d.getMinutes(), 2)}`;
+}
+
 export const useConsoleStore = create<ConsoleUIState>((set, get) => ({
-  connectionStatus: isRealApiMode ? 'CONNECTING' : 'CONNECTED',
+  connectionStatus: isMockMode ? 'CONNECTED' : 'CONNECTING',
   backendHealth: null,
   agentRuntimeStatuses: {},
   jobRuntimeVersion: 0,
@@ -85,11 +88,7 @@ export const useConsoleStore = create<ConsoleUIState>((set, get) => ({
   portraits: 'both',
   
   tick: 0,
-  clock: '10:42',
-  elapsed: '08:41',
-  tokensToday: isRealApiMode ? '—' : '284K',
-  jobTokens: isRealApiMode ? '—' : '44.1k',
-  hardenTokens: isRealApiMode ? '—' : '13.7k',
+  clock: isMockMode ? '10:42' : wallClock(),
   allEvents: [],
 
   setConnectionStatus: (connectionStatus) => set({ connectionStatus }),
@@ -172,34 +171,12 @@ export const useConsoleStore = create<ConsoleUIState>((set, get) => ({
     }),
 
   tickClock: () => {
-    const state = get();
-    const nextTick = state.tick + 1;
-    const elapsedS = 521 + nextTick;
-    const elapsed = `${pad(Math.floor(elapsedS / 60), 2)}:${pad(elapsedS % 60, 2)}`;
-    const clockS = baseTs + nextTick;
-    const clock = `${pad(Math.floor(clockS / 3600), 2)}:${pad(Math.floor(clockS / 60) % 60, 2)}`;
-
-    // In simulated mock mode only, advance demo counters
-    if (!isRealApiMode) {
-      const jobTokens = `${((44100 + nextTick * 41) / 1000).toFixed(1)}k`;
-      const hardenTokens = `${((13700 + nextTick * 41) / 1000).toFixed(1)}k`;
-      const tokensToday = `${284 + Math.floor(nextTick * 0.06)}K`;
-
-      set({
-        tick: nextTick,
-        clock,
-        elapsed,
-        jobTokens,
-        hardenTokens,
-        tokensToday
-      });
+    const nextTick = get().tick + 1;
+    if (isMockMode) {
+      const clockS = baseTs + nextTick;
+      set({ tick: nextTick, clock: `${pad(Math.floor(clockS / 3600), 2)}:${pad(Math.floor(clockS / 60) % 60, 2)}` });
     } else {
-      // In real HTTP mode, keep clock ticking without fabricating fake telemetry numbers
-      set({
-        tick: nextTick,
-        clock,
-        elapsed
-      });
+      set({ tick: nextTick, clock: wallClock() });
     }
   }
 }));

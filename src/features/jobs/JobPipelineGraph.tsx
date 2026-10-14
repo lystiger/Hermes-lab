@@ -1,25 +1,35 @@
 import React from 'react';
-import { PipelineStep } from '../../api/types';
+import { PipelineStep, PipelineStepState } from '../../api/types';
 import { useConsoleStore } from '../../stores/useConsoleStore';
 import { useAgents } from '../../api/hooks';
 import { resolveActorPresentation } from '../../api/actors';
+import { EmptyState } from '../../components/DataStates';
 
 interface JobPipelineGraphProps {
-  steps?: PipelineStep[];
+  steps: PipelineStep[];
 }
 
+const STATE_LABEL: Record<PipelineStepState, string> = {
+  COMPLETED: 'completed',
+  RUNNING: 'running',
+  QUEUED: 'queued',
+  CLAIMED: 'claimed',
+  BLOCKED: 'blocked',
+  FAILED: 'failed',
+  CANCELLED: 'cancelled',
+  SKIPPED: 'skipped',
+  UNKNOWN: 'unknown status',
+  IDLE: 'idle'
+};
+
+/** Renders only the steps it is given. No phases are invented when there are none. */
 export const JobPipelineGraph: React.FC<JobPipelineGraphProps> = ({ steps }) => {
-  const { hardenTokens, liveMotion } = useConsoleStore();
+  const { liveMotion } = useConsoleStore();
   const { agents } = useAgents();
 
-  const defaultPhases: PipelineStep[] = [
-    { id: '1', phase: 'BUILD', agentId: 'gemini', agentName: 'Gemini', note: 'closed 30.4k', state: 'COMPLETED', task: 'Build', meta: '' },
-    { id: '2', phase: 'HARDEN', agentId: 'claude', agentName: 'Claude', note: `02:14 · ${hardenTokens}`, state: 'RUNNING', task: 'Harden', meta: '' },
-    { id: '3', phase: 'VERIFY', agentId: 'codex', agentName: 'Codex', note: 'staged ~19k', state: 'QUEUED', task: 'Verify', meta: '' },
-    { id: '4', phase: 'COMPLETE', agentId: 'elysia', agentName: 'Elysia', note: 'auto-merge & notify', state: 'IDLE', task: 'Complete', meta: '' }
-  ];
-
-  const graphSteps = steps || defaultPhases;
+  if (steps.length === 0) {
+    return <EmptyState>No phases reported for this job yet.</EmptyState>;
+  }
 
   return (
     <div style={{ perspective: '900px' }} className="w-full select-none">
@@ -30,11 +40,12 @@ export const JobPipelineGraph: React.FC<JobPipelineGraphProps> = ({ steps }) => 
         }}
         className="flex items-start relative"
       >
-        {graphSteps.map((p, idx) => {
+        {steps.map((p, idx) => {
           const actor = p.agentId ? resolveActorPresentation(p.agentId, agents) : null;
           const col = actor?.accentColor || '#3A4048';
           const isDone = p.state === 'COMPLETED';
           const isActive = p.state === 'RUNNING';
+          const isFailed = p.state === 'FAILED';
 
           return (
             <div
@@ -42,7 +53,7 @@ export const JobPipelineGraph: React.FC<JobPipelineGraphProps> = ({ steps }) => 
               className="flex-1 relative flex flex-col items-start"
             >
               {/* Connecting Line */}
-              {idx < graphSteps.length - 1 && (
+              {idx < steps.length - 1 && (
                 <div
                   style={{
                     backgroundColor: isDone ? 'rgba(63,185,80,0.5)' : '#1F242B'
@@ -55,8 +66,8 @@ export const JobPipelineGraph: React.FC<JobPipelineGraphProps> = ({ steps }) => 
               <div className="relative w-6 h-6 flex items-center justify-center bg-[#0A0B0D] z-10">
                 <div
                   style={{
-                    borderColor: isDone ? 'rgba(63,185,80,0.6)' : isActive ? col : '#2A3038',
-                    backgroundColor: isDone ? 'rgba(63,185,80,0.12)' : isActive ? 'rgba(217,160,91,0.16)' : '#0E1116',
+                    borderColor: isDone ? 'rgba(63,185,80,0.6)' : isFailed ? 'rgba(242,85,90,0.6)' : isActive ? col : '#2A3038',
+                    backgroundColor: isDone ? 'rgba(63,185,80,0.12)' : isFailed ? 'rgba(242,85,90,0.12)' : isActive ? 'rgba(217,160,91,0.16)' : '#0E1116',
                     boxShadow: isActive ? '0 6px 14px -6px rgba(217,160,91,0.5)' : 'none',
                     transform: 'rotate(45deg) translateZ(6px)'
                   }}
@@ -64,7 +75,7 @@ export const JobPipelineGraph: React.FC<JobPipelineGraphProps> = ({ steps }) => 
                 />
                 <div
                   style={{
-                    backgroundColor: isDone ? '#3FB950' : isActive ? col : '#2A3038',
+                    backgroundColor: isDone ? '#3FB950' : isFailed ? '#F2555A' : isActive ? col : '#2A3038',
                     transform: 'rotate(45deg) translateZ(12px)'
                   }}
                   className={`absolute w-2 h-2 ${isActive && liveMotion ? 'animate-pulse' : ''}`}
@@ -73,7 +84,7 @@ export const JobPipelineGraph: React.FC<JobPipelineGraphProps> = ({ steps }) => 
 
               {/* Phase Info */}
               <div
-                style={{ color: isDone || isActive ? '#E6E9ED' : '#5C646E' }}
+                style={{ color: isDone || isActive || isFailed ? '#E6E9ED' : '#5C646E' }}
                 className="mt-3 font-mono-code text-[12px] tracking-wider font-semibold"
               >
                 {p.phase}
@@ -87,7 +98,7 @@ export const JobPipelineGraph: React.FC<JobPipelineGraphProps> = ({ steps }) => 
               </div>
 
               <div className="mt-0.5 font-mono-code text-[11px] text-[#5C646E]">
-                {p.note}
+                {STATE_LABEL[p.state]}{p.meta ? ` · ${p.meta}` : ''}
               </div>
             </div>
           );

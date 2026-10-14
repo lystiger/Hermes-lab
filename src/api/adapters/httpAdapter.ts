@@ -15,9 +15,33 @@ import {
   Thread,
   Message,
   MailboxEntry,
-  ExecutionSnapshot
+  ExecutionSnapshot,
+  PipelineStepState
 } from '../types';
 import { resolveActorPresentation } from '../actors';
+import { UNKNOWN } from '../unknown';
+
+/** Jobs that are being worked on right now. Anything else is queued, blocked, or terminal. */
+export const ACTIVE_JOB_STATUSES = ['RUNNING', 'PLANNING', 'PREPARING', 'VERIFYING', 'REPAIRING'];
+
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+/** Maps a backend phase status without collapsing failure, cancellation or skip into BLOCKED or QUEUED. */
+export function mapPhaseState(status: string | null | undefined): PipelineStepState {
+  switch (status) {
+    case 'SUCCEEDED': return 'COMPLETED';
+    case 'RUNNING': return 'RUNNING';
+    case 'PREPARING': return 'CLAIMED';
+    case 'PENDING':
+    case 'READY': return 'QUEUED';
+    case 'BLOCKED': return 'BLOCKED';
+    case 'FAILED': return 'FAILED';
+    case 'CANCELLED': return 'CANCELLED';
+    case 'SKIPPED': return 'SKIPPED';
+    case 'SUPERSEDED': return 'IDLE';
+    default: return 'UNKNOWN';
+  }
+}
 
 interface BackendAgentDTO {
   id: string;
@@ -95,7 +119,7 @@ export class HttpHermesApi implements HermesApi {
         provider: dto.provider || 'Hermes Agent',
         model: dto.model || 'unknown',
         role: dto.role || 'Specialized Operative',
-        capabilities: dto.capabilities || ['execution'],
+        capabilities: dto.capabilities || [],
         status: (dto.status?.toUpperCase() as any) || 'IDLE',
         phase: (dto.phase as any) || undefined,
         currentTask: dto.currentTask,
@@ -122,26 +146,26 @@ export class HttpHermesApi implements HermesApi {
       return null;
     }
 
+    // GET /agents carries identity and status only. Token, context, activity, run and quota
+    // values are not fetched here, so they stay unknown rather than zero or a placeholder percentage.
     return {
       ...found,
-      input: '—',
-      output: '—',
-      cached: '—',
-      remaining: '—',
-      inPct: '0%',
-      outPct: '0%',
-      cachePct: '0%',
+      input: UNKNOWN,
+      output: UNKNOWN,
+      cached: UNKNOWN,
+      remaining: UNKNOWN,
+      inPct: UNKNOWN,
+      outPct: UNKNOWN,
+      cachePct: UNKNOWN,
       activity: [],
       metrics: [
         { label: 'STATUS', value: found.status }
       ],
       runs: [],
-      allowance: [
-        { label: 'fleet quota', value: 'Unavailable', pct: '0%', tag: 'N/A' }
-      ],
-      capacity: 'Live capacity not exposed',
-      reset: '—',
-      resetNote: 'Detailed provider token telemetry will connect in Phase 4.'
+      allowance: [],
+      capacity: UNKNOWN,
+      reset: UNKNOWN,
+      resetNote: 'Hermes GET /agents does not report provider capacity or reset windows.'
     };
   }
 
@@ -173,10 +197,9 @@ export class HttpHermesApi implements HermesApi {
       startedAt: j.startedAt,
       completedAt: j.completedAt,
       progress: j.progress,
-      estimatedTokens: '—',
-      estimatedTime: '—',
-      budget: '—',
-      policy: 'governed · serial'
+      estimatedTokens: UNKNOWN,
+      estimatedTime: UNKNOWN,
+      budget: UNKNOWN
     }));
   }
 
@@ -191,13 +214,7 @@ export class HttpHermesApi implements HermesApi {
     const phases = data.phases || [];
     const executionGraph: PipelineStep[] = phases.map((p: any) => {
       const actor = p.agentId ? resolveActorPresentation(p.agentId) : null;
-      let state: any = 'QUEUED';
-      if (p.status === 'SUCCEEDED') state = 'COMPLETED';
-      else if (p.status === 'RUNNING') state = 'RUNNING';
-      else if (p.status === 'FAILED') state = 'BLOCKED';
-      else if (p.status === 'CANCELLED') state = 'BLOCKED';
-      else if (p.status === 'BLOCKED') state = 'BLOCKED';
-      else if (p.status === 'SUPERSEDED') state = 'IDLE';
+      const rawStatus = typeof p.status === 'string' ? p.status : UNKNOWN;
 
       return {
         id: p.id || `phase-${p.order}`,
@@ -206,8 +223,8 @@ export class HttpHermesApi implements HermesApi {
         agentId: p.agentId,
         agentName: actor?.displayName || p.agentId,
         task: p.name,
-        meta: p.commitSha ? p.commitSha.slice(0, 7) : (p.status === 'SUCCEEDED' ? 'completed' : p.status.toLowerCase()),
-        state,
+        meta: p.commitSha ? p.commitSha.slice(0, 7) : (p.status === 'SUCCEEDED' ? 'completed' : rawStatus.toLowerCase()),
+        state: mapPhaseState(p.status),
         note: p.role || (p.status === 'SUPERSEDED' ? 'superseded' : undefined)
       };
     });
@@ -243,51 +260,52 @@ export class HttpHermesApi implements HermesApi {
     };
   }
 
+  /** Steps of the job that is active right now. Empty when none is active; a historical job is never shown here. */
   async getPipeline(): Promise<PipelineStep[]> {
-    try {
-      const jobs = await this.getJobs();
-      const activeJob = jobs.find((j) => j.status === 'RUNNING') || jobs[0];
-      if (!activeJob) {
-        return [];
-      }
-      const detail = await this.getJob(activeJob.id);
-      return (detail?.executionGraph || []).map((s) => ({
-        ...s,
-        jobId: activeJob.id
-      }));
-    } catch {
+    const jobs = await this.getJobs();
+    const activeJob = jobs.find((j) => ACTIVE_JOB_STATUSES.includes(j.status));
+    if (!activeJob) {
       return [];
     }
+    const detail = await this.getJob(activeJob.id);
+    return (detail?.executionGraph || []).map((s) => ({
+      ...s,
+      jobId: activeJob.id
+    }));
   }
 
+  /**
+   * Counts derived from the job list only. Errors propagate so the UI can show them instead of zeros.
+   * Token, spend and budget values are not reported by Hermes in this milestone, so they stay unknown.
+   */
   async getTelemetry(): Promise<OverviewTelemetry> {
-    try {
-      const jobs = await this.getJobs();
-      const runningJobsCount = jobs.filter((j) => j.status === 'RUNNING').length;
-      const queuedJobsCount = jobs.filter((j) => ['QUEUED', 'PREPARING'].includes(j.status)).length;
-      const blockedJobsCount = jobs.filter((j) => j.status === 'BLOCKED').length;
-      const failed24hCount = jobs.filter((j) => j.status === 'FAILED').length;
+    const jobs = await this.getJobs();
+    const countOf = (...statuses: string[]) => jobs.filter((j) => statuses.includes(j.status)).length;
 
-      return {
-        runningJobsCount,
-        queuedJobsCount,
-        blockedJobsCount,
-        failed24hCount,
-        tokensToday: '—',
-        estSpendToday: '—',
-        sprintBudgetUsedPct: 0
-      };
-    } catch {
-      return {
-        runningJobsCount: 0,
-        queuedJobsCount: 0,
-        blockedJobsCount: 0,
-        failed24hCount: 0,
-        tokensToday: '—',
-        estSpendToday: '—',
-        sprintBudgetUsedPct: 0
-      };
+    // A failed job without a completion time cannot be placed in the 24h window, so the count is unknown.
+    const cutoff = Date.now() - DAY_MS;
+    let failed24hCount: number | null = 0;
+    for (const j of jobs.filter((job) => job.status === 'FAILED')) {
+      const endedAt = j.completedAt ? Date.parse(j.completedAt) : NaN;
+      if (Number.isNaN(endedAt)) {
+        failed24hCount = null;
+        break;
+      }
+      if (endedAt >= cutoff) {
+        failed24hCount = (failed24hCount ?? 0) + 1;
+      }
     }
+
+    return {
+      runningJobsCount: countOf(...ACTIVE_JOB_STATUSES),
+      queuedJobsCount: countOf('QUEUED', 'CLAIMED'),
+      blockedJobsCount: countOf('BLOCKED'),
+      failed24hCount,
+      sampleSize: jobs.length,
+      tokensToday: UNKNOWN,
+      estSpendToday: UNKNOWN,
+      sprintBudgetUsedPct: null
+    };
   }
 
   async getTraceEvents(limit = 100, after?: string): Promise<TraceEvent[]> {
@@ -435,29 +453,18 @@ export class HttpHermesApi implements HermesApi {
   }
 
   // --------------------------------------------------------------------------
-  // Quota & Projections (Phase 4 simulated until provider accounting)
+  // Quota & Projections: no real source is wired yet, so these return nothing rather than a measurement
   // --------------------------------------------------------------------------
 
+  /**
+   * No provider usage is fetched in M1. The former hardcoded Google quota (EXACT, 666 left) was not measured
+   * and is removed. Capacity telemetry (GET /capacity/telemetry) is wired in M2.
+   */
   async getProviderQuotas(): Promise<ProviderQuota[]> {
-    return [
-      {
-        id: 'google',
-        name: 'Google AI Studio',
-        color: '#5B8CFF',
-        pct: '56%',
-        tag: 'EXACT',
-        window: 'daily',
-        left: '666 req left',
-        capacity: '1,500 req/day',
-        reset: 'daily 00:00 UTC',
-        resetTag: 'EXACT',
-        conf: 'exact',
-        basis: 'AI Studio reported quota',
-        opacity: '1'
-      }
-    ];
+    return [];
   }
 
+  /** No projection source exists in Hermes yet, so there are no projected rows in HTTP mode. */
   async getProjections(): Promise<ProjectionItem[]> {
     return [];
   }
@@ -468,9 +475,9 @@ export class HttpHermesApi implements HermesApi {
         { label: 'Hermes Runtime API', value: this.baseUrl, color: '#3FB950' },
         { label: 'Event Bus Transport', value: 'SSE / Server-Sent Events', color: '#CBA35C' }
       ],
+      // The Hermes API does not expose its execution or merge policy, so none is claimed here.
       policy: [
-        { label: 'Execution Mode', value: 'Governed Hermes Runtime', color: '#E6E9ED' },
-        { label: 'Auto-Merge Policy', value: 'Human Review Required (Strict)', color: '#E3A008' }
+        { label: 'Policy', value: 'Not exposed by the Hermes API', color: '#8C949F' }
       ]
     };
   }

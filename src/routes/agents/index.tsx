@@ -2,9 +2,10 @@ import React from 'react';
 import { AgentLaneCard } from '../../features/agents/AgentLaneCard';
 import { MessageDispatcher } from '../../features/messaging/MessageDispatcher';
 import { useAgents } from '../../api/hooks';
+import { EmptyState, ErrorState, Freshness, LoadingState } from '../../components/DataStates';
 
 export const AgentsListRoute: React.FC = () => {
-  const { agents, loading } = useAgents();
+  const { agents, loading, error, updatedAt, refetch } = useAgents();
 
   return (
     <div className="flex flex-col select-none bg-[#0A0B0D]">
@@ -13,6 +14,10 @@ export const AgentsListRoute: React.FC = () => {
         <MessageDispatcher />
       </div>
 
+      {loading && agents.length === 0 && <LoadingState label="Loading operator registry…" />}
+      {error && agents.length === 0 && <ErrorState label="Operator registry" error={error} onRetry={refetch} />}
+      {!loading && !error && agents.length === 0 && <EmptyState>Hermes reports no registered agents.</EmptyState>}
+
       {/* Agents Grid */}
       <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-2 gap-0 border-b border-[#1F242B]">
         {agents.map((ag) => (
@@ -20,14 +25,11 @@ export const AgentsListRoute: React.FC = () => {
         ))}
       </div>
 
-      {loading && (
-        <div className="p-8 text-center font-mono-code text-[12px] text-[#5C646E]">
-          Loading operator registry...
-        </div>
-      )}
-
-      <div className="p-5 font-mono-code text-[11px] text-[#5C646E]">
-        Operator configuration loaded from <span className="text-[#8C949F]">~/.lyscontrol/agents.toml</span> · Click any operator to inspect metrics, context window allocations, and trace history.
+      <div className="p-5 flex flex-wrap items-center gap-x-4 font-mono-code text-[11px] text-[#5C646E]">
+        <span>
+          Operators are reported by Hermes (GET /agents). Click an operator to inspect its identity and status.
+        </span>
+        <Freshness at={updatedAt} />
       </div>
     </div>
   );

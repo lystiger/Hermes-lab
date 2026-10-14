@@ -5,6 +5,7 @@ export const MOCK_TELEMETRY: OverviewTelemetry = {
   queuedJobsCount: 4,
   blockedJobsCount: 1,
   failed24hCount: 0,
+  sampleSize: 6,
   tokensToday: '284K',
   estSpendToday: '$4.12',
   sprintBudgetUsedPct: 58

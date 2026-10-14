@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { AgentSummary } from '../../api/types';
 import { AgentPortrait } from './AgentPortrait';
 import { useConsoleStore } from '../../stores/useConsoleStore';
+import { UNKNOWN } from '../../components/DataStates';
 
 interface AgentLaneCardProps {
   agent: AgentSummary;
@@ -19,9 +20,11 @@ export const AgentLaneCard: React.FC<AgentLaneCardProps> = ({
 
   const isRunning = agent.status === 'RUNNING';
   const accentColor = agent.presentation?.accentColor || '#8C949F';
-  const contextPct = agent.contextPct || '30%';
-  const contextUsed = agent.contextUsed || '50k';
-  const contextMax = agent.contextMax || '200k';
+  // Context figures are only shown when Hermes reports them for this agent; otherwise they are unknown.
+  const contextPct = agent.contextPct ?? UNKNOWN;
+  const contextUsed = agent.contextUsed ?? UNKNOWN;
+  const contextMax = agent.contextMax ?? UNKNOWN;
+  const hasContextPct = agent.contextPct !== undefined;
 
   const handleClick = () => {
     setSelectedAgentId(agent.id);
@@ -77,20 +80,22 @@ export const AgentLaneCard: React.FC<AgentLaneCardProps> = ({
 
             <div className="mt-2.5 flex flex-wrap items-center gap-x-3.5 gap-y-1 font-mono-code text-[11px] text-[#8C949F]">
               <span>{isRunning ? 'active runtime' : 'idle'}</span>
-              <span>{agent.sessionTokens || '0k'}</span>
+              <span>{agent.sessionTokens ?? UNKNOWN} tokens</span>
               <span style={{ color: accentColor }}>{agent.activeTool || 'tool: —'}</span>
             </div>
 
             {/* Context meter */}
             <div className="mt-2.5 flex items-center gap-2">
               <div className="flex-1 h-[3px] bg-[#1F242B] relative">
-                <div
-                  style={{
-                    width: contextPct,
-                    backgroundColor: accentColor
-                  }}
-                  className="absolute left-0 top-0 bottom-0 opacity-85"
-                />
+                {hasContextPct && (
+                  <div
+                    style={{
+                      width: contextPct,
+                      backgroundColor: accentColor
+                    }}
+                    className="absolute left-0 top-0 bottom-0 opacity-85"
+                  />
+                )}
               </div>
               <span className="font-mono-code text-[11px] text-[#5C646E]">
                 ctx {contextPct}
@@ -158,10 +163,12 @@ export const AgentLaneCard: React.FC<AgentLaneCardProps> = ({
             <span className="text-[#E6E9ED]">{contextUsed} / {contextMax} ({contextPct})</span>
           </div>
           <div className="mt-1.5 h-[7px] bg-[#14171C] relative">
-            <div
-              style={{ width: contextPct, backgroundColor: accentColor }}
-              className="absolute left-0 top-0 bottom-0 opacity-90"
-            />
+            {hasContextPct && (
+              <div
+                style={{ width: contextPct, backgroundColor: accentColor }}
+                className="absolute left-0 top-0 bottom-0 opacity-90"
+              />
+            )}
             <div className="absolute inset-0 bg-striped-pattern pointer-events-none" />
           </div>
 
@@ -185,11 +192,11 @@ export const AgentLaneCard: React.FC<AgentLaneCardProps> = ({
         <div className="grid grid-cols-4 gap-2 pt-3 border-t border-[#1F242B]">
           <div>
             <div className="text-[11px] text-[#5C646E] tracking-wider font-mono-code">QUEUE</div>
-            <div className="font-mono-code text-[13px] text-[#E6E9ED] mt-0.5">{agent.queueDepth ?? 0}</div>
+            <div className="font-mono-code text-[13px] text-[#E6E9ED] mt-0.5">{agent.queueDepth ?? UNKNOWN}</div>
           </div>
           <div>
             <div className="text-[11px] text-[#5C646E] tracking-wider font-mono-code">SESSION</div>
-            <div className="font-mono-code text-[13px] text-[#E6E9ED] mt-0.5">{agent.sessionTokens || '0k'}</div>
+            <div className="font-mono-code text-[13px] text-[#E6E9ED] mt-0.5">{agent.sessionTokens ?? UNKNOWN}</div>
           </div>
           <div>
             <div className="text-[11px] text-[#5C646E] tracking-wider font-mono-code">STATUS</div>

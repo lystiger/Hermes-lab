@@ -24,7 +24,7 @@ export const Header: React.FC = () => {
     subtitle = isRealApiMode ? 'hermes · runtime API' : 'hermes · local runtime';
   } else if (pathname === '/queue') {
     title = 'Queue';
-    subtitle = '8 jobs · serial per repository';
+    subtitle = 'job queue · latest jobs from Hermes';
   } else if (pathname === '/agents') {
     title = 'Agents';
     subtitle = `${agents.length} operators registered`;
@@ -66,6 +66,7 @@ export const Header: React.FC = () => {
   const statusLabel = isRealApiMode
     ? connectionStatus.toLowerCase()
     : 'mock mode';
+  const notMeasured = 'Not reported by the Hermes API';
 
   return (
     <header className="h-[46px] flex-shrink-0 flex items-center justify-between px-5 border-b border-[#1F242B] bg-[#0C0E11] select-none">
@@ -87,9 +88,9 @@ export const Header: React.FC = () => {
       </div>
 
       <div className="flex items-center gap-4 font-mono-code text-[11px] text-[#8C949F]">
-        <span>queue eta <span className={isRealApiMode ? 'text-[#8C949F]' : 'text-[#E6E9ED]'}>{isRealApiMode ? '—' : '~37 min'}</span></span>
+        <span title={isRealApiMode ? notMeasured : undefined}>queue eta <span className={isRealApiMode ? 'text-[#8C949F]' : 'text-[#E6E9ED]'}>{isRealApiMode ? '—' : '~37 min'}</span></span>
         <span className="text-[#2A3038]">|</span>
-        <span>budget <span className={isRealApiMode ? 'text-[#8C949F]' : 'text-[#E3A008]'}>{isRealApiMode ? '—' : '58%'}</span></span>
+        <span title={isRealApiMode ? notMeasured : undefined}>budget <span className={isRealApiMode ? 'text-[#8C949F]' : 'text-[#E3A008]'}>{isRealApiMode ? '—' : '58%'}</span></span>
         <span className="text-[#2A3038]">|</span>
         <span
           style={{ color: statusColor }}

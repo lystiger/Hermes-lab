@@ -4,22 +4,26 @@ import { useJob, useAgents } from '../../api/hooks';
 import { resolveActorPresentation } from '../../api/actors';
 import { OperationalThreadView } from '../messaging/OperationalThreadView';
 import { JobTaskExecution } from '../execution/JobTaskExecution';
+import { useNow } from '../execution/useNow';
+import { formatElapsed } from './jobTiming';
+import { ErrorState, LoadingState } from '../../components/DataStates';
 
 interface JobDetailViewProps {
   jobId?: string;
 }
 
 export const JobDetailView: React.FC<JobDetailViewProps> = ({ jobId = '' }) => {
-  const { elapsed, allEvents } = useConsoleStore();
-  const { job, loading } = useJob(jobId);
+  const { allEvents } = useConsoleStore();
+  const { job, loading, error, refetch } = useJob(jobId);
   const { agents } = useAgents();
+  const nowMs = useNow(1000);
 
   if (loading && !job) {
-    return (
-      <div className="w-full p-12 bg-[#0A0B0D] font-mono-code text-[12px] text-[#8C949F] flex items-center justify-center">
-        <span>Loading job {jobId}...</span>
-      </div>
-    );
+    return <LoadingState label={`Loading job ${jobId}…`} />;
+  }
+
+  if (error && !job) {
+    return <ErrorState label={`Job ${jobId}`} error={error} onRetry={refetch} />;
   }
 
   if (!job) {
@@ -81,8 +85,7 @@ export const JobDetailView: React.FC<JobDetailViewProps> = ({ jobId = '' }) => {
           <span className="text-[#2A3038]">·</span>
           <span>started {job.startedAt ? job.startedAt.slice(11, 19) : '—'}</span>
           <span>completed {job.completedAt ? job.completedAt.slice(11, 19) : '—'}</span>
-          <span>elapsed <span className="text-[#E6E9ED]">{job.status === 'RUNNING' ? elapsed : '—'}</span></span>
-          <span>policy <span className="text-[#E6E9ED]">{job.policy || 'governed · serial'}</span></span>
+          <span>elapsed <span className="text-[#E6E9ED]">{formatElapsed(job.startedAt, job.completedAt, nowMs)}</span></span>
         </div>
       </div>
 
@@ -196,7 +199,7 @@ export const JobDetailView: React.FC<JobDetailViewProps> = ({ jobId = '' }) => {
             <div className="flex flex-col">
               {jobEvents.length === 0 ? (
                 <div className="py-4 font-mono-code text-[11px] text-[#5C646E]">
-                  No trace events recorded for this job yet.
+                  No trace events for this job in the live buffer. Durable job history is not loaded yet.
                 </div>
               ) : (
                 jobEvents.slice(0, 15).map((e) => (

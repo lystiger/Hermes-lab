@@ -3,29 +3,22 @@ import { useNavigate } from 'react-router-dom';
 import { TopMetricsBar } from '../features/telemetry/TopMetricsBar';
 import { ActiveExecutionCard } from '../features/jobs/ActiveExecutionCard';
 import { AgentLaneCard } from '../features/agents/AgentLaneCard';
-import { BudgetRiskAlert } from '../features/telemetry/BudgetRiskAlert';
 import { QueueProjectionBar } from '../features/jobs/QueueProjectionBar';
 import { ProviderQuotaList } from '../features/telemetry/ProviderQuotaList';
 import { useConsoleStore } from '../stores/useConsoleStore';
 import { useAgents, useJobs } from '../api/hooks';
 import { resolveActorPresentation } from '../api/actors';
+import { eventKindColor } from '../features/events/eventKinds';
+import { ErrorState, LoadingState, EmptyState, Freshness, StaleNotice } from '../components/DataStates';
 
 export const OverviewRoute: React.FC = () => {
   const navigate = useNavigate();
   const { allEvents, setActiveModalJobId } = useConsoleStore();
-  const { agents } = useAgents();
-  const { jobs } = useJobs();
+  const { agents, loading: agentsLoading, error: agentsError, refetch: refetchAgents } = useAgents();
+  const { jobs, loading: jobsLoading, error: jobsError, updatedAt: jobsUpdatedAt, refetch: refetchJobs } = useJobs();
 
   const recentTrace = allEvents.slice(0, 8);
   const queueShort = jobs.slice(0, 4);
-
-  const getKindColor = (k: string) => {
-    if (k === 'error') return '#F2555A';
-    if (k === 'retry' || k === 'quota.warn') return '#E3A008';
-    if (k.startsWith('agent.')) return '#3FB950';
-    if (k === 'job.start' || k === 'phase.change') return '#CBA35C';
-    return '#8C949F';
-  };
 
   const getPrioColor = (p: string) => {
     if (p === 'P0') return '#F2555A';
@@ -43,14 +36,20 @@ export const OverviewRoute: React.FC = () => {
         {/* Left Column */}
         <div className="flex-1 min-w-0 flex flex-col">
           {/* Active Execution Banner */}
-          <ActiveExecutionCard onOpenJob={() => setActiveModalJobId('#142')} />
+          <ActiveExecutionCard onOpenJob={(jobId) => setActiveModalJobId(jobId)} />
 
           {/* Agent Lanes Row */}
-          <div className="flex items-stretch flex-wrap border-b border-[#1F242B]">
-            {agents.slice(0, 3).map((ag) => (
-              <AgentLaneCard key={ag.id} agent={ag} size="compact" />
-            ))}
-          </div>
+          {agentsLoading && agents.length === 0 ? (
+            <LoadingState label="Loading agents…" />
+          ) : agentsError && agents.length === 0 ? (
+            <ErrorState label="Agent registry" error={agentsError} onRetry={refetchAgents} />
+          ) : (
+            <div className="flex items-stretch flex-wrap border-b border-[#1F242B]">
+              {agents.slice(0, 3).map((ag) => (
+                <AgentLaneCard key={ag.id} agent={ag} size="compact" />
+              ))}
+            </div>
+          )}
 
           {/* Live Trace Stream */}
           <div className="p-5">
@@ -67,6 +66,7 @@ export const OverviewRoute: React.FC = () => {
             </div>
 
             <div className="flex flex-col">
+              {recentTrace.length === 0 && <EmptyState>No events received yet.</EmptyState>}
               {recentTrace.map((e) => {
                 const actorColor = e.source.accentColor || '#8C949F';
                 return (
@@ -82,7 +82,7 @@ export const OverviewRoute: React.FC = () => {
                       {e.source.displayName}
                     </span>
                     <span
-                      style={{ color: getKindColor(e.kind) }}
+                      style={{ color: eventKindColor(e.kind) }}
                       className="w-28"
                     >
                       {e.kind}
@@ -100,14 +100,11 @@ export const OverviewRoute: React.FC = () => {
 
         {/* Right Rail */}
         <div className="w-full xl:w-80 flex-shrink-0 border-l border-[#1F242B] bg-[#0C0E11] flex flex-col">
-          {/* Budget Risk Warning */}
-          <BudgetRiskAlert />
-
           {/* Queue Shortlist */}
           <div className="p-4 border-b border-[#1F242B]">
             <div className="flex items-center justify-between mb-3">
               <span className="font-mono-code text-[11px] tracking-wider text-[#5C646E]">
-                QUEUE · {jobs.length}
+                QUEUE · {jobsLoading && jobs.length === 0 ? '…' : jobs.length}
               </span>
               <button
                 onClick={() => navigate('/queue')}
@@ -115,6 +112,19 @@ export const OverviewRoute: React.FC = () => {
               >
                 all →
               </button>
+            </div>
+
+            {jobsError && jobs.length === 0 && (
+              <ErrorState label="Job queue" error={jobsError} onRetry={refetchJobs} />
+            )}
+            {jobsError && jobs.length > 0 && (
+              <StaleNotice label="Job queue" error={jobsError} onRetry={refetchJobs} />
+            )}
+            {!jobsError && !jobsLoading && jobs.length === 0 && (
+              <EmptyState>No jobs returned by Hermes.</EmptyState>
+            )}
+            <div className="mb-2">
+              <Freshness at={jobsUpdatedAt} />
             </div>
 
             <div className="flex flex-col gap-1">

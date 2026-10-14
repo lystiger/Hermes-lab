@@ -17,6 +17,11 @@ export const AgentActivityList: React.FC<{ agent: AgentDetail }> = ({ agent }) =
       <div className="text-[11px] tracking-wider text-[#5C646E] mb-2 font-mono-code">
         CURRENT ACTIVITY
       </div>
+      {agent.activity.length === 0 && (
+        <div className="font-mono-code text-[11px] text-[#5C646E]">
+          Activity is not loaded in this build. Live events for this agent appear in Events.
+        </div>
+      )}
       <div className="flex flex-col gap-1">
         {agent.activity.map((act, idx) => (
           <div

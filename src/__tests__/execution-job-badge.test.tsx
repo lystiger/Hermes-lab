@@ -43,7 +43,7 @@ const execEvent: TraceEvent = {
 
 describe('JobDetailView backend badge (D-009)', () => {
   beforeEach(() => {
-    vi.spyOn(hooks, 'useJob').mockReturnValue({ job: JOB, loading: false, error: null, refetch: vi.fn() });
+    vi.spyOn(hooks, 'useJob').mockReturnValue({ job: JOB, loading: false, error: null, updatedAt: null, refetch: vi.fn() });
     useConsoleStore.setState({ allEvents: [execEvent], activeModalJobId: 'job-142' });
     // Live resource state comes from the execution snapshot.
     useExecutionStore.setState({

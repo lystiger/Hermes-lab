@@ -1,4 +1,8 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
+// These tests exercise the mock fixtures, which are opt-in only (VITE_LYSCONTROL_MOCK=1).
+vi.hoisted(() => {
+  process.env.VITE_LYSCONTROL_MOCK = '1';
+});
 import { render, screen } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { AgentPortrait } from '../features/agents/AgentPortrait';

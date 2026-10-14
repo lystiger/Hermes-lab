@@ -4,6 +4,7 @@ import { resolveActorPresentation } from '../../api/actors';
 import { hermesApi } from '../../api/client';
 import { ArtifactRef, Message } from '../../api/types';
 import { CyberButton } from '../../components/CyberButton';
+import { ErrorState } from '../../components/DataStates';
 
 interface OperationalThreadViewProps {
   jobId?: string;
@@ -16,11 +17,13 @@ export const OperationalThreadView: React.FC<OperationalThreadViewProps> = ({
   threadId,
   assignedAgentIds = []
 }) => {
-  const { threads } = useThreads(jobId);
+  const { threads, error: threadsError } = useThreads(jobId);
   const activeThread = threads.find((t) => t.id === threadId || (jobId && (t.jobId === jobId || t.id.includes(jobId)))) || threads[0];
   const targetThreadId = threadId || activeThread?.id || (jobId ? `thread_job_${jobId}` : null);
 
-  const { messages, loading: loadingMessages, refetch } = useMessages(targetThreadId);
+  const { messages, loading: loadingMessages, error: messagesError, refetch } = useMessages(targetThreadId);
+  const [sendError, setSendError] = useState<string | null>(null);
+  const fetchError = messagesError || threadsError;
   const { agents } = useAgents();
 
   const [selectedConversationId, setSelectedConversationId] = useState<string>('all');
@@ -49,6 +52,7 @@ export const OperationalThreadView: React.FC<OperationalThreadViewProps> = ({
     if (!targetThreadId || !operatorText.trim() || isSending) return;
 
     setIsSending(true);
+    setSendError(null);
     try {
       await hermesApi.sendMessage(
         targetThreadId,
@@ -61,7 +65,8 @@ export const OperationalThreadView: React.FC<OperationalThreadViewProps> = ({
       setReplyToMessageId(null);
       refetch();
     } catch (err) {
-      console.error('Failed to send operator message:', err);
+      // The typed text is kept so the operator can retry.
+      setSendError(err instanceof Error ? err.message : String(err));
     } finally {
       setIsSending(false);
     }
@@ -125,10 +130,7 @@ export const OperationalThreadView: React.FC<OperationalThreadViewProps> = ({
           </div>
         )}
 
-        <span className="flex items-center gap-1.5 text-[#3FB950]">
-          <span className="w-1.5 h-1.5 rounded-full bg-[#3FB950] animate-pulse" />
-          live substrate
-        </span>
+        <span className="text-[#5C646E]">GET /threads/{'{id}'}/messages</span>
       </div>
 
       {/* Messages Feed */}
@@ -137,6 +139,8 @@ export const OperationalThreadView: React.FC<OperationalThreadViewProps> = ({
           <div className="py-6 text-center font-mono-code text-[11px] text-[#5C646E]">
             Loading operational messages...
           </div>
+        ) : fetchError && messages.length === 0 ? (
+          <ErrorState label="Operational messages" error={fetchError} onRetry={refetch} />
         ) : filteredMessages.length === 0 ? (
           <div className="py-6 text-center font-mono-code text-[11px] text-[#5C646E]">
             No operational messages or phase handoffs recorded for this job yet.
@@ -372,7 +376,12 @@ export const OperationalThreadView: React.FC<OperationalThreadViewProps> = ({
             </CyberButton>
           </div>
         </form>
-      )}
+        )}
+        {sendError && (
+          <div role="alert" className="mt-2 font-mono-code text-[11px] text-[#F2555A]">
+            Message not sent: {sendError}. Your text is kept.
+          </div>
+        )}
 
       {/* Artifact Inspection Modal */}
       {selectedArtifact && (

@@ -49,7 +49,7 @@ export const AgentRunsTable: React.FC<{ agent: AgentDetail }> = ({ agent }) => {
         ))}
         {agent.runs.length === 0 && (
           <div className="py-4 text-center font-mono-code text-[11px] text-[#5C646E]">
-            No recent execution runs logged for this agent.
+            Run history is not loaded. No runs endpoint is wired for agents yet, so this is unknown rather than empty.
           </div>
         )}
       </div>

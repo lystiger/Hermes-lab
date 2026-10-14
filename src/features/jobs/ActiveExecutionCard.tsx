@@ -2,7 +2,7 @@ import React from 'react';
 import { JobPipelineGraph } from './JobPipelineGraph';
 import { useJob, useJobs } from '../../api/hooks';
 import { ACTIVE_JOB_STATUSES } from '../../api/adapters/httpAdapter';
-import { ErrorState, LoadingState, StaleNotice, UnknownValue } from '../../components/DataStates';
+import { ErrorState, LoadingState, ResourceError, StaleNotice, UnknownValue } from '../../components/DataStates';
 import { Card } from '../../components/Card';
 import { CopyId } from '../../components/CopyId';
 import { HERMES_ART } from '../../theme/agentArt';
@@ -18,7 +18,9 @@ interface ActiveExecutionCardProps {
 export const ActiveExecutionCard: React.FC<ActiveExecutionCardProps> = ({ onOpenJob }) => {
   const { jobs, loading, error, stale, refetch } = useJobs();
   const activeJob = jobs.find((j) => ACTIVE_JOB_STATUSES.includes(j.status));
-  const { job: detail } = useJob(activeJob?.id ?? null);
+  // The phase graph is its own resource: its failures are shown here, not hidden behind the card.
+  const phases = useJob(activeJob?.id ?? null);
+  const detail = phases.job;
   const nowMs = useNow(1000);
 
   if (loading && jobs.length === 0) {
@@ -32,7 +34,9 @@ export const ActiveExecutionCard: React.FC<ActiveExecutionCardProps> = ({ onOpen
   if (!activeJob) {
     return (
       <Card label="Active execution">
-        <div className="p-5 flex items-center justify-between gap-6">
+        <div className="p-5 flex flex-col gap-3">
+          {stale && <StaleNotice label="Active execution" error={error} onRetry={refetch} />}
+        <div className="flex items-center justify-between gap-6">
           <div className="min-w-0">
             <div className="text-[11px] tracking-wider uppercase text-lys-faint">Active execution</div>
             <div className="mt-1 font-display text-[22px] font-semibold text-lys-muted">No active execution</div>
@@ -41,6 +45,7 @@ export const ActiveExecutionCard: React.FC<ActiveExecutionCardProps> = ({ onOpen
             </p>
           </div>
           <img src={HERMES_ART} alt="" aria-hidden="true" className="h-16 w-auto opacity-60 shrink-0" />
+        </div>
         </div>
       </Card>
     );
@@ -73,7 +78,16 @@ export const ActiveExecutionCard: React.FC<ActiveExecutionCardProps> = ({ onOpen
           <span>tokens <JobTokens jobId={activeJob.id} /></span>
         </div>
         <div>
-          <JobPipelineGraph steps={detail?.executionGraph ?? []} />
+          {phases.error && !detail ? (
+            <ErrorState label="Job phases" error={phases.error} onRetry={phases.refetch} />
+          ) : (
+            <>
+              {phases.error && detail && (
+                <ResourceError label="Job phases" error={phases.error} hasData updatedAt={phases.updatedAt} onRetry={phases.refetch} />
+              )}
+              <JobPipelineGraph steps={detail?.executionGraph ?? []} />
+            </>
+          )}
         </div>
         <div className="flex flex-wrap items-center gap-4 pt-3 border-t border-lys-subtle text-[12px] text-lys-muted">
           <span>

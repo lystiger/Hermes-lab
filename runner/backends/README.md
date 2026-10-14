@@ -321,9 +321,9 @@ them into `TaskExecutionResult.metadata["backend_runtime_metadata"]`.
 - The granted root is the worktree parent, so a seat can technically reach sibling worktrees of its job.
 - Cancel is wired only on the runtime path (`HermesActorAdapter`). The sprint runner has no cancel source,
   so a sprint-runner task still stops only at its timeout. Status polls are capped at
-  `POLL_QUERY_SECONDS` (10 s) each, so a hung daemon delays a cancel by at most that long. A cancel during
-  an in-flight `rig up` or `rig send` is honored only after that call returns (up to 30 s for send).
-  Killing the subprocess early is not done.
+  `POLL_QUERY_SECONDS` (10 s) each, so a hung daemon delays a cancel by at most that long. `rig send` runs as an
+  interruptible child that checks for cancel every 0.5 s and is killed on cancel. A cancel during an
+  in-flight `rig up` is still honored only after that call returns.
 - The result file relies on the agent following the protocol. An agent that skips it fails closed.
 - The backend is coupled to OpenRig 0.6.x JSON shapes (`up`, `ps --nodes --full`, `send`, `down`).
 - The sprint runner reuses one backend instance per sprint. That's safe, because each `execute()` leases

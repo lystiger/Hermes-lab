@@ -445,3 +445,14 @@ Fixed on fix/repair-task-routing. Four Codex rounds; MERGE OK with full agreemen
   an unblock task that could never clear them.
 Agreed limits: unlinked/general repairs and discovery work stay capability-routed on the default backend, because the
 sprint-level execution_backend does not reach them. Verifier fallbacks keep the no-mutation guard.
+
+## D-012: Runner visibility, sprint-level backend, cancel during send (2026-10-14)
+
+- **Sprint runner → Execution page.** `run-hermes-sprint.py` gives its backends a sink that posts `execution.*` to
+  `/internal/events`, with `taskId` set to the running phase and `actorId` to its agent. The API publishes runtime ids
+  on the bus and applies execution events to the registry, so `GET /execution` shows runner-owned resources.
+- **Sprint-level backend.** Job-level work (general repairs, discovery, unblocking) has no backend of its own. It now
+  uses the sprint's `execution_backend` when that backend supports the actor the scheduler chose (`supports_agent`;
+  OpenRig: claude only), else subprocess. An explicit task backend is never second-guessed.
+- **Cancel during `rig send`.** In production, send runs via Popen, polls the cancel event every 0.5 s, and is killed on
+  cancel (FAILED_OPENRIG_CANCELLED; the rig is then released by id). `rig up` remains uninterruptible.

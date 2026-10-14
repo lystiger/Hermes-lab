@@ -698,11 +698,14 @@ class OpenRigBackend(ExecutionBackend):
         return spec_path
 
     def _launch(self, spec_path, rig_name, deadline):
+        args = ["up", str(spec_path), "--json"]
         try:
-            payload = self._run_json(
-                ["up", str(spec_path), "--json"], deadline, "FAILED_OPENRIG_CREATE",
-                allow_failure_payload=True,
-            )
+            if self._popen is not None and self._cancel_event is not None:
+                # Interruptible: a cancel kills `rig up` mid-launch. Whatever it already created is
+                # found by the orphan recovery below and released by id like any lost response.
+                payload = self._run_json_interruptible(args, deadline, "FAILED_OPENRIG_CREATE")
+            else:
+                payload = self._run_json(args, deadline, "FAILED_OPENRIG_CREATE", allow_failure_payload=True)
         except SprintRunnerError:
             # The daemon may have created the rig even though its response was lost.
             self._adopt_orphan(rig_name)

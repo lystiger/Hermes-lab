@@ -1714,7 +1714,21 @@ def test_a_cancel_during_a_blocking_rig_send_stops_it_and_releases_the_rig(tmp_p
     event = threading.Event()
     send = BlockingSend(cancel_after_polls=2, event=event)
     backend = make_backend(tmp_path, clock, rig, pool=pool, cancel_event=event)
-    backend._popen = send
+
+    class Finished:
+        def __init__(self, result):
+            self.result = result
+
+        def communicate(self, timeout=None):
+            return self.result.stdout, ""
+
+        def kill(self):
+            pass
+
+    # `rig up` completes normally through the fake rig; only `rig send` blocks.
+    backend._popen = lambda argv, **kw: (
+        send(argv, **kw) if argv[1] == "send" else Finished(rig(argv, capture_output=True, text=True, timeout=30))
+    )
 
     with pytest.raises(SprintRunnerError) as excinfo:
         backend.execute(make_request(tmp_path))
@@ -1756,3 +1770,42 @@ def test_an_expired_deadline_never_spawns_a_send(tmp_path, clock, pool):
 
     assert excinfo.value.code == "FAILED_TIMEOUT"
     assert spawned == []
+
+
+def test_a_cancel_during_rig_up_kills_it_and_releases_what_it_created(tmp_path, clock, pool):
+    rig = FakeRig(clock)
+    event = threading.Event()
+
+    class BlockingUp(BlockingSend):
+        def __call__(self, argv, **kwargs):
+            assert argv[1] == "up"
+            # The daemon got as far as creating the rig before the cancel.
+            name = json.loads(Path(argv[2]).read_text())["name"]
+            rig.listed_rigs = [{"rigId": RIG_ID, "name": name, "status": "running"}]
+            return super().__call__(argv, **kwargs)
+
+    up = BlockingUp(cancel_after_polls=2, event=event)
+    backend = make_backend(tmp_path, clock, rig, pool=pool, cancel_event=event)
+    backend._popen = up
+
+    with pytest.raises(SprintRunnerError) as excinfo:
+        backend.execute(make_request(tmp_path))
+
+    assert excinfo.value.code == "FAILED_OPENRIG_CANCELLED"
+    assert up.killed
+    assert rig.rigs_down == [RIG_ID]  # adopted by exact id and released, never by name
+    assert pool.idle_rig_ids() == []
+
+
+def test_a_cancel_during_rig_up_before_anything_exists_releases_nothing(tmp_path, clock, pool):
+    rig = FakeRig(clock)
+    event = threading.Event()
+    up = BlockingSend(cancel_after_polls=1, event=event)
+    backend = make_backend(tmp_path, clock, rig, pool=pool, cancel_event=event)
+    backend._popen = up
+
+    with pytest.raises(SprintRunnerError) as excinfo:
+        backend.execute(make_request(tmp_path))
+
+    assert excinfo.value.code == "FAILED_OPENRIG_CANCELLED"
+    assert rig.rigs_down == []

@@ -1,4 +1,5 @@
 import asyncio
+import os
 import json
 import threading
 import time
@@ -77,21 +78,30 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="Hermes Runtime", version="0.1.0", lifespan=lifespan)
 
 # Allow local frontend origins
-origins = [
+# Browser origins allowed to call Hermes. Hermes has no authentication, so this is an explicit
+# list, not "any local port": any page on an allowed origin can read and drive the API.
+# Override with HERMES_CORS_ORIGINS="http://localhost:3000,http://localhost:3001".
+DEFAULT_CORS_ORIGINS = [
     "http://localhost:3000",
     "http://127.0.0.1:3000",
+    "http://localhost:3001",  # LysControl preview builds
+    "http://127.0.0.1:3001",
     "http://localhost:5173",
     "http://127.0.0.1:5173",
 ]
 
-# Hermes is a local API: allow any port on localhost/127.0.0.1 (dev servers, previews, the
-# LysControl web app), and nothing from other hosts.
-LOCAL_ORIGIN_REGEX = r"^http://(localhost|127\.0\.0\.1)(:\d{1,5})?$"
+
+def cors_origins():
+    configured = os.environ.get("HERMES_CORS_ORIGINS", "")
+    custom = [o.strip().rstrip("/") for o in configured.split(",") if o.strip()]
+    return custom or list(DEFAULT_CORS_ORIGINS)
+
+
+origins = cors_origins()
 
 app.add_middleware(
     CORSMiddleware,
     allow_origins=origins,
-    allow_origin_regex=LOCAL_ORIGIN_REGEX,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

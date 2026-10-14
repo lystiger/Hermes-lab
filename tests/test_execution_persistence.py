@@ -222,12 +222,22 @@ def test_jobs_recoverable_is_not_shadowed_by_the_job_id_route():
     assert "not found" not in response.text.lower()
 
 
-def test_cors_allows_any_local_port_and_nothing_else():
+def test_cors_allows_only_the_configured_origins():
     from fastapi.testclient import TestClient
     from main import app
 
     client = TestClient(app)
-    for origin in ("http://localhost:3001", "http://127.0.0.1:4173", "http://localhost:3000"):
+    for origin in ("http://localhost:3000", "http://localhost:3001", "http://127.0.0.1:5173"):
         assert client.get("/health", headers={"Origin": origin}).headers.get("access-control-allow-origin") == origin
-    for origin in ("http://evil.example", "http://localhost.evil.example", "https://localhost:3001"):
+    # Not every local page is trusted: Hermes has no authentication.
+    for origin in ("http://localhost:8080", "http://127.0.0.1:4173", "http://evil.example", "https://localhost:3001"):
         assert "access-control-allow-origin" not in client.get("/health", headers={"Origin": origin}).headers
+
+
+def test_cors_origins_can_be_configured(monkeypatch):
+    import main
+
+    monkeypatch.setenv("HERMES_CORS_ORIGINS", " http://localhost:4000/, http://127.0.0.1:4000 ")
+    assert main.cors_origins() == ["http://localhost:4000", "http://127.0.0.1:4000"]
+    monkeypatch.setenv("HERMES_CORS_ORIGINS", "")
+    assert "http://localhost:3001" in main.cors_origins()

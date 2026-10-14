@@ -1744,3 +1744,15 @@ def test_the_interruptible_send_delivers_normally(tmp_path, clock, pool):
     backend._popen = QuickSend()
     result = backend.execute(make_request(tmp_path))
     assert result.returncode == 0
+
+
+def test_an_expired_deadline_never_spawns_a_send(tmp_path, clock, pool):
+    spawned = []
+    backend = make_backend(tmp_path, clock, FakeRig(clock), pool=pool, cancel_event=threading.Event())
+    backend._popen = lambda argv, **kw: spawned.append(argv)
+
+    with pytest.raises(SprintRunnerError) as excinfo:
+        backend._run_json_interruptible(["send", "x"], clock.monotonic() - 1, "FAILED_OPENRIG_DELIVERY")
+
+    assert excinfo.value.code == "FAILED_TIMEOUT"
+    assert spawned == []

@@ -1023,6 +1023,9 @@ class OpenRigBackend(ExecutionBackend):
 
         Killing `rig send` is safe: a cancelled task's rig is torn down by id right after.
         """
+        if self._remaining(deadline) <= 0:
+            raise SprintRunnerError("FAILED_TIMEOUT", f"OpenRig task timed out before rig {args[0]}")
+        self._check_cancelled(f"before rig {args[0]}")
         try:
             proc = self._popen(
                 [self.rig_executable, *args], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,

@@ -15,18 +15,25 @@ RUNNER_MODULE = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(RUNNER_MODULE)
 
 
-class RecordingPublisher:
-    def __init__(self, enabled=True, explode=False):
-        self._enabled, self.explode, self.calls = enabled, explode, []
+def real_publisher(monkeypatch, delay=0.0, explode=False):
+    """The real RuntimeEventPublisher with only its HTTP transport stubbed."""
+    import time as _time
+    from control_plane.event_publisher import RuntimeEventPublisher
 
-    def enabled(self):
-        return self._enabled
+    publisher = RuntimeEventPublisher(control_url="http://hermes.test")
+    posts = []
 
-    def publish(self, **kwargs):
-        if self.explode:
+    def post(path, payload):
+        if delay:
+            _time.sleep(delay)
+        if explode:
             raise RuntimeError("api down")
-        self.calls.append(kwargs)
+        posts.append(payload)
         return True
+
+    monkeypatch.setattr(publisher, "_post_json", post)
+    monkeypatch.setattr(RUNNER_MODULE, "default_publisher", publisher)
+    return posts
 
 
 def make_runner():
@@ -37,35 +44,69 @@ def make_runner():
     )
 
 
-def seat_event(kind=events.RESOURCE_ACQUIRED):
+def seat_event(kind=events.RESOURCE_ACQUIRED, execution_id="exec-r1"):
     return ExecutionEvent(
-        kind=kind, job_id=None, detail="seat acquired",
-        metadata={"backend": "openrig", "executionId": "exec-r1",
+        kind=kind, job_id="lab-s03", detail="seat event",
+        metadata={"backend": "openrig", "executionId": execution_id,
                   "resource": {"kind": "seat", "id": "01SEAT", "label": "worker"}},
     )
 
 
-def test_runner_sink_posts_execution_events_tagged_with_the_running_phase(monkeypatch):
-    publisher = RecordingPublisher()
-    monkeypatch.setattr(RUNNER_MODULE, "default_publisher", publisher)
+def test_runner_sink_posts_through_the_real_publisher_with_the_runner_job_and_phase(monkeypatch):
+    posts = real_publisher(monkeypatch)
     runner = make_runner()
     runner._current_phase = {"name": "build", "agent": "claude"}
 
     runner._publish_execution_event(seat_event())
+    runner._flush_execution_events()
 
-    [call] = publisher.calls
-    assert call["kind"] == events.RESOURCE_ACQUIRED
-    assert call["source_kind"] == "runtime" and call["source_id"] == "openrig"
-    assert call["task_id"] == "build" and call["actor_id"] == "claude"
-    assert call["job_id"] == runner.job_id
-    assert call["metadata"]["resource"]["id"] == "01SEAT"
+    [payload] = posts
+    assert payload["kind"] == events.RESOURCE_ACQUIRED
+    assert payload["source"] == {"id": "openrig", "kind": "runtime", "displayName": "Openrig", "accentColor": None}
+    assert payload["jobId"] == runner.job_id and runner.job_id != "lab-s03"
+    assert (payload["taskId"], payload["actorId"]) == ("build", "claude")
 
 
-def test_runner_sink_never_fails_a_phase(monkeypatch):
-    monkeypatch.setattr(RUNNER_MODULE, "default_publisher", RecordingPublisher(explode=True))
-    make_runner()._publish_execution_event(seat_event())  # must not raise
-    monkeypatch.setattr(RUNNER_MODULE, "default_publisher", RecordingPublisher(enabled=False))
-    make_runner()._publish_execution_event(seat_event())
+def test_late_events_keep_the_phase_that_started_their_execution(monkeypatch):
+    posts = real_publisher(monkeypatch)
+    runner = make_runner()
+    runner._current_phase = {"name": "phase1", "agent": "claude"}
+    runner._publish_execution_event(seat_event(events.STARTED, "exec-1"))
+    runner._current_phase = {"name": "phase2", "agent": "codex"}
+    # Phase one's pooled seat expires while phase two runs.
+    runner._publish_execution_event(seat_event(events.RESOURCE_RELEASED, "exec-1"))
+    runner._publish_execution_event(seat_event(events.STARTED, "exec-2"))
+    runner._flush_execution_events()
+
+    assert [(p["taskId"], p["actorId"]) for p in posts] == [
+        ("phase1", "claude"), ("phase1", "claude"), ("phase2", "codex"),
+    ]
+
+
+def test_a_slow_or_failing_api_never_delays_or_fails_a_phase(monkeypatch):
+    import time as _time
+
+    real_publisher(monkeypatch, delay=0.5)
+    runner = make_runner()
+    started = _time.monotonic()
+    for _ in range(5):
+        runner._publish_execution_event(seat_event())
+    assert _time.monotonic() - started < 0.2  # queued, not posted inline
+
+    real_publisher(monkeypatch, explode=True)
+    failing = make_runner()
+    failing._publish_execution_event(seat_event())
+    failing._flush_execution_events(timeout=1)  # must not raise
+
+
+def test_a_disabled_publisher_is_a_no_op(monkeypatch):
+    from control_plane.event_publisher import RuntimeEventPublisher
+
+    monkeypatch.delenv("LYSSTACK_CONTROL_URL", raising=False)
+    monkeypatch.setattr(RUNNER_MODULE, "default_publisher", RuntimeEventPublisher(control_url=""))
+    runner = make_runner()
+    runner._publish_execution_event(seat_event())
+    assert runner.__dict__.get("_exec_event_q") is None
 
 
 def test_internal_execution_events_feed_the_snapshot_and_carry_task_ids():

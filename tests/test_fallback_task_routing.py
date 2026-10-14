@@ -251,3 +251,18 @@ def test_sprint_backend_is_skipped_when_it_cannot_run_the_chosen_actor(tmp_path)
     # An explicit task choice is never second-guessed (it fails closed in the backend instead).
     pinned = TaskNode(task_id="t", metadata={"execution_backend": "openrig"})
     assert adapter._resolve_backend_name(pinned, "antigravity", default_backend_registry) == "openrig"
+
+
+def test_a_factory_registration_is_never_assumed_compatible(tmp_path):
+    from runner.backends.openrig_backend import OpenRigBackend
+    from runner.backends.registry import BackendRegistry
+    from runtime.hermes_adapter import HermesActorAdapter
+
+    factory = lambda **kw: OpenRigBackend(**kw)  # noqa: E731 - how tests and wiring register backends
+    registry = BackendRegistry({"openrig": factory})
+    adapter = HermesActorAdapter(run_dir=tmp_path, spec={"execution_backend": "openrig"}, job_id="j")
+    assert adapter._resolve_backend_name(TaskNode(task_id="r"), "codex", registry) == "subprocess"
+
+    factory.supports_agent = OpenRigBackend.supports_agent  # declared compatibility is honoured
+    assert adapter._resolve_backend_name(TaskNode(task_id="r"), "claude", registry) == "openrig"
+    assert adapter._resolve_backend_name(TaskNode(task_id="r"), "codex", registry) == "subprocess"

@@ -29,8 +29,8 @@ from main import app
 
 class TestPhase6AgentProfileAndPersona(unittest.TestCase):
     def test_generic_agent_ids_supported_without_closed_unions(self):
-        """Verify open string agent IDs work dynamically (e.g. elysia, kimi, qwen, planner_01)."""
-        future_agents = ["elysia", "kimi", "qwen", "deepseek", "planner_01", "reviewer_02", "tool_git"]
+        """Verify open string agent IDs work dynamically (e.g. custom-agent, kimi, qwen, planner_01)."""
+        future_agents = ["custom-agent", "kimi", "qwen", "deepseek", "planner_01", "reviewer_02", "tool_git"]
         for aid in future_agents:
             profile = resolve_agent_profile(aid)
             self.assertEqual(profile.id, aid)
@@ -58,20 +58,20 @@ class TestPhase6AgentProfileAndPersona(unittest.TestCase):
     def test_persona_loader_safe_parsing_and_fallback(self):
         """Verify character card safe loading, ignoring cosmetic fields, and fallback on malformed."""
         valid_card = {
-            "name": "CustomElysia",
+            "name": "CustomAgent",
             "description": "High-throughput coordinator.",
             "personality": "meticulous, proactive",
             "speaking_style": "Clear concise instructions.\nDirect feedback.",
             "behavioral_rules": "Always check lint before commit.",
-            "avatar": "/agents/elysia.png",
+            "avatar": "/agents/custom-agent.png",
             "cosmetic_theme_color": "#FF00FF",  # unknown cosmetic field
         }
-        loaded = PersonaLoader.load_from_dict(valid_card, fallback_name="Elysia")
-        self.assertEqual(loaded.name, "CustomElysia")
+        loaded = PersonaLoader.load_from_dict(valid_card, fallback_name="Custom Agent")
+        self.assertEqual(loaded.name, "CustomAgent")
         self.assertEqual(loaded.summary, "High-throughput coordinator.")
         self.assertEqual(loaded.traits, ["meticulous", "proactive"])
         self.assertEqual(len(loaded.speakingStyle), 2)
-        self.assertEqual(loaded.visual.avatar, "/agents/elysia.png")
+        self.assertEqual(loaded.visual.avatar, "/agents/custom-agent.png")
 
         # Malformed input -> safe fallback without crash
         malformed = {"name": None, "traits": 12345}

@@ -53,7 +53,7 @@ def test_agents_endpoint_is_registry_driven():
     assert "gemini" in agent_ids
     assert "claude" in agent_ids
     assert "codex" in agent_ids
-    assert "elysia" not in agent_ids
+    assert "custom-agent" not in agent_ids
 
 
 def test_job_lifecycle_reduction_and_querying():

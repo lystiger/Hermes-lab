@@ -111,3 +111,40 @@ an opt-in backend; H5 (models into OpenRig seats) is dropped.
   with the intended word plus a `"sheetText"` note, never silently copied or silently changed.
 - Hermes' accent is measured from her amber Relay glow, not her crimson coat, so it stays distinct from the failure red
   (#F2555A) and Claude's caramel.
+
+
+## Revision 3 (2026-10-15): Codex review r2 (AGREE WITH CHANGES), all 13 changes accepted
+Full review: `docs/design/agent-model-review-r2.md`. Supersedes earlier text where they conflict (including the
+"no sheet" Hermes text and H5, which D-016 dropped).
+1. **IDs.** Canonical runtime IDs are the registry IDs `claude`, `codex`, `antigravity` (`agy`/`gemini` are aliases);
+   persona IDs are `claude`, `codex`, `gemini`, `hermes`. Hermes is a **system persona** with no launchable adapter.
+2. **Model has three fields per run:** `requestedModel` (task/route), `effectiveModel` (what the adapter actually
+   passed; null when the adapter ignores model selection, e.g. antigravity today), `reportedModel` (what the CLI
+   reported; codex reports none today). An ignored request is never shown as the model used.
+3. **Run persistence is new work:** copy adapter result metadata into AgentRun.metadata and completion events, project
+   it back, cover success/failure/cancel/restart, and add a bounded cross-job query for recent instances/models.
+4. **D-009 end to end:** event binding, registry detail copying, both execution paths, a stable run<->execution link;
+   an idle pooled resource carrying a previous identity is not an active instance; restored rows keep their rule.
+5. **One role normalizer** before every guard: aliases builder/hardener/verifier -> build/harden/verify; canonical roles
+   persisted; historical reads stay compatible indefinitely (input aliases for one release).
+6. **Migrate every role producer first** (sprint specs, phase-order defaults in job_launcher, planner contracts and
+   prompts, replanning, recovery) with explicit defaults for missing roles; only then reject unknown roles.
+7. **New guards:** research = findings-path allowlist; scaffold = named-path allowlist; integration checks cover
+   additions/deletions/renames. Post-hoc git checks are not a sandbox; "read-only" is documented as "no tracked changes
+   outside the allowlist" unless runtime isolation is added. Citation completeness gets its own validator.
+8. **Repair:** failed-task fallbacks inherit runtime/model/guard (D-011); task-linked verification repairs stay
+   `build`; unlinked repairs use the sprint route.
+9. **Routing lives in one shared resolver** (explicit task/phase > sprint > configured role defaults), used by
+   launcher, planner, scheduler and sprint runner; the resolved route is persisted before execution. The Herdr default
+   (D-016) must be implemented: current defaults are still subprocess.
+10. **Keep operational capabilities** separate from presentation and reconcile them with routing (Claude's profile
+    lacks `implementation`, so the build route would be re-routed today).
+11. **Client migration:** LysControl adapter, types, views and fixtures migrate together before legacy fields are
+    removed; the lysomarchy.hermes widget reads only /execution (additive fields are safe).
+12. **Persona restrictions are structural:** only `voice` fields reach the prompt; behaviouralRules/systemPromptFragment
+    from catalog data are not prompt-visible; provenance is validated by the loader; invented fallback prose and broken
+    fallback constructors are removed. "Voice, not content" is enforced by never styling results, only display text.
+13. **Order:** contracts (roles, routing, persona schema) -> H1 personas (may start once the schema restriction is in)
+    -> H3 runs/events persistence -> H4 capability + readiness discovery (supports_agent is compatibility, not
+    readiness) -> H2 /agents -> client migration -> remove legacy fields. Acceptance checks: restart/migration,
+    alias-guard, routing-capability, client compatibility.

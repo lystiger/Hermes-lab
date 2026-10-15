@@ -546,3 +546,21 @@ Decided with the user before implementation.
 - **D-015 approved (2026-10-15):** Codex AGREE after revisions 2, 3, 3a and 3b (reviews in docs/design/agent-model-review-*.md).
   Implementation order per revision 3 item 13: contracts -> H1 personas -> H3 run/event persistence -> H4 readiness -> H2 /agents
   -> client migration -> remove legacy fields.
+
+## D-018: Usability before experiments; then Hermes vs a single Herdr orchestrator (2026-10-15)
+
+Decided with the user.
+1. **LysControl usability milestone (M7) comes first,** on the current data model (the D-015 agent-model rebuild, M6,
+   follows later). Done means, and is checked automatically where possible:
+   - **No overlapping or clipped text** at 1280, 1440, 1920 px and a narrow 900 px window: an automated DOM check
+     (overlapping text boxes, horizontal overflow, clipped text without a tooltip) runs on every page, plus screenshots.
+   - **One consistent icon set** replacing ad-hoc glyphs and unorthodox symbols; every icon has an accessible label.
+   - **Sidebar collapses and expands** (button + keyboard), remembers its state, auto-collapses on narrow windows.
+   - **Smooth scrolling:** each page has one clear scroll container, no double scrollbars, no layout jumps on live
+     updates; reduced motion respected.
+   - **Real data sync:** pages update live from the event stream and the snapshot without manual refresh; a visible
+     "last updated" and clear stale/disconnected states.
+2. **Then an experiment, designed and recorded before running:** the same tasks done by (A) Hermes with its roles,
+   routing, guards and harness, and (B) "pure Herdr with one orchestrator agent spawning workers", the way the user
+   works today. Compare speed, task success, rework, operator effort and cost. Hypothesis to test, not assume:
+   Hermes' overhead (rules, guards, harness) pays for itself in reliability.

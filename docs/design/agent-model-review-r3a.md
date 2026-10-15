@@ -1,0 +1,3 @@
+7. OK — normalized allowlists cover final tracked and untracked changes, with ignored/transient/outside-worktree writes explicitly excluded from the guarantee (docs/design/agent-model.md:153).
+9. Still incomplete — ownership, precedence, explicit-choice protection, observability and adapter limits are addressed, but the schema provides only one route per role while fallback requires a “next configured option”; specify an ordered fallback list. Permit final subprocess fallback only when the selected runtime/model remain usable: subprocess cannot fix a missing runtime CLI. Fail clearly when no viable route remains (docs/design/agent-model.md:158, docs/design/agent-model.md:162).
+AGREE WITH CHANGES

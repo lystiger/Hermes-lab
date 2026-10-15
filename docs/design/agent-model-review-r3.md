@@ -1,0 +1,15 @@
+1. OK — canonical runtime/persona IDs and Hermes system-persona distinction are explicit (docs/design/agent-model.md:119, at eaaeef3).
+2. OK — requested/effective/reported fields distinguish selection from observation and ignored requests (docs/design/agent-model.md:121); effectiveModel must record Claude’s adapter default `sonnet` when no model was requested (runner/agents/claude.py:70).
+3. OK — live/durable run metadata, projection, failure/cancel/restart and bounded cross-job history are accepted as new work (docs/design/agent-model.md:124).
+4. OK — event binding, registry copying, both execution paths, run/execution linkage and pooled/restored-resource semantics are covered (docs/design/agent-model.md:126).
+5. OK — shared normalization before guards, canonical persistence and indefinite historical-read compatibility address the alias hazard (docs/design/agent-model.md:128).
+6. OK — all identified role producers and explicit missing-role defaults migrate before unknown-role rejection (docs/design/agent-model.md:130).
+7. Still wrong — “no tracked changes” excludes newly created untracked files, contradicting the promised additions check; require no final tracked or untracked changes outside normalized allowlisted paths, explicitly excluding ignored/transient/outside-worktree writes unless isolation is added (docs/design/agent-model.md:132; runtime/hermes_adapter.py:468).
+8. OK — fallback inheritance, build-authorized verification repairs and unlinked repairs are distinguished (docs/design/agent-model.md:135); interpret “sprint route” through the shared resolver’s defaults when no sprint override exists.
+9. Incomplete — name the configuration owner/path and override schema, and specify unsupported/unavailable runtime/backend/model and scheduler-reroute behavior, including preserving fail-closed explicit choices; precedence alone does not define fallback policy (docs/design/agent-model.md:137; runtime/hermes_adapter.py:1119). Herdr hosts all three adapters, but only Claude/Codex currently pass model selections; retain that limitation explicitly (runner/backends/herdr_backend.py:223; runner/agents/antigravity.py:14).
+10. OK — operational capability profiles remain separate and must be reconciled with routing (docs/design/agent-model.md:140).
+11. OK — coordinated client migration precedes legacy-field removal; preserve /execution resource/state semantics for the widget (docs/design/agent-model.md:142; ../LysOmarchy/plugins/lysomarchy.hermes/HermesModel.js:15).
+12. OK as a design requirement — voice-only prompt fields, provenance validation, fallback repairs and separate unstyled results address the request (docs/design/agent-model.md:144); this promises artifact/display separation, not a guarantee that prompt-injected voice cannot influence generated content.
+13. OK — dependency order, readiness distinction, migration checks and explicit supersession of obsolete Hermes/H5 text address the request (docs/design/agent-model.md:117, docs/design/agent-model.md:147).
+
+AGREE WITH CHANGES

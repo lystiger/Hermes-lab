@@ -527,3 +527,22 @@ Decision rule (pre-registered):
   backend for every role; OpenRig stays as an optional backend, unused by default; H5 is dropped.** Limits: n=3 per arm,
   short tasks; hung or interactive sessions (where hook-based completion could matter) were not tested. Revisit only if a
   real failure shows Herdr's exit-code completion is insufficient.
+
+## D-017: LysStack as a company; four core employees; portraits with state-driven expressions (2026-10-15)
+
+Decided with the user before implementation.
+- **LysStack is the company.** Hermes, Claude, Codex and Gemini are its **four core employees**: personas with character
+  sheets, art and a voice. Other providers/runtimes or models with no character are **staff without a card**: a neutral
+  badge (name, runtime, role), never invented lore. A model is an employee's working mode, not a new person
+  ("Claude (Haiku 5.5) as Scaffolder").
+- **Cards are not regenerated.** Each sheet's affiliation (The Collective, The Eternal Library, The Starlit Network,
+  LYS Stack) is recorded as that employee's department/home team inside LysStack; the persona's company is LysStack.
+  Optional polish only: fix "Attalysis" and change Codex "Execute" to "Verify" on the Hermes card.
+- **UI shows a portrait with state-driven expressions, not whole cards.** Each sheet's three Expressions tiles are
+  extracted (never generated or AI-upscaled) and mapped to real Hermes state: idle -> calm/neutral, running -> focused,
+  succeeded -> happy, failed/blocked -> surprised. 160 ms crossfade; instant swap under reduced motion. The full sheet is
+  an optional "view character sheet" link. Expression tiles are small (~170 px): avatar use (96-128 px) only; the large
+  dossier pane keeps the cutout portrait.
+- **D-015 approved (2026-10-15):** Codex AGREE after revisions 2, 3, 3a and 3b (reviews in docs/design/agent-model-review-*.md).
+  Implementation order per revision 3 item 13: contracts -> H1 personas -> H3 run/event persistence -> H4 readiness -> H2 /agents
+  -> client migration -> remove legacy fields.

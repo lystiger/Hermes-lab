@@ -489,3 +489,26 @@ sprint-level execution_backend does not reach them. Verifier fallbacks keep the 
 - **Open follow-up (security):** control endpoints (`POST /jobs`, `/messages`, `/jobs/{id}/cancel|resume`,
   `/internal/*`) are unauthenticated, and bodyless POSTs are reachable cross-site as simple requests (CSRF), whatever
   the CORS setting. Needs a local auth token or a CSRF guard before Hermes is exposed beyond a single-user machine.
+
+## D-016: A/B test, Herdr vs OpenRig as Hermes' Claude backend (decided 2026-10-15, before running)
+
+Why: OpenRig is the most complex part of Hermes (backend, ledger, pending launches, ID-only teardown; ~1,550 lines
+vs 376 for Herdr), only runs claude-code, and its seats are invisible in the Herdr cockpit. The user has never used
+OpenRig outside this project. Question: does it earn that complexity?
+
+Design (fixed before any run):
+- Same sprint spec, same scratch repo with real tests and verification_steps, 4 builder tasks, Claude only (the only
+  runtime both backends support). 3 runs per arm, alternating H, O, H, O, H, O.
+- Model: Haiku 5.5 in both arms. Herdr passes `--model claude-haiku-5-5`; OpenRig cannot pass a model yet (H5), so the
+  OpenRig daemon is started with ANTHROPIC_MODEL=claude-haiku-5-5. The model actually used is checked per task from
+  the run output; a run whose model differs is invalid and re-run.
+- Measured per task from execution events and run summaries: success, wall time, startup overhead
+  (resource_acquired -> running), completion errors (false done / missed done), leftovers after the run (rigs, panes,
+  processes), context isolation. Subjective: the user watches one run per arm (Herdr cockpit vs `rig tui` / `rig ui`)
+  and rates how easy it is to follow.
+
+Decision rule (pre-registered):
+- OpenRig stays a Hermes backend only if it is clearly more reliable (fewer failed or mis-detected tasks), or more than
+  20% faster per sprint, with cleanup no worse than Herdr.
+- Otherwise Herdr becomes the default backend for every role, OpenRig becomes optional and unused by default, and H5
+  (passing models into OpenRig seats) is dropped.

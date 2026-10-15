@@ -71,3 +71,43 @@ recent instances; Execution = instances; Queue loses fixed BUILD/HARDEN/VERIFY c
 1. Persona text for Hermes (no sheet): leave minimal, or will you write one?
 2. Should one persona ever speak for several runtimes (e.g. Claude persona for both `claude` CLI and an OpenRig
    claude-code seat — yes by default; for other providers — no)?
+
+## Revision 2 (2026-10-15): roles, routing, persona rules, Hermes card
+
+### Role catalog (task field; guards attach here)
+| Role | Display title | Purpose | Guard |
+|---|---|---|---|
+| `research` | Analyst | gather facts, compare options | read-only except its findings file; every claim cites a source |
+| `scaffold` | Scaffolder | stubs, wiring, boilerplate from a clear spec | builder rights, scoped to named files |
+| `build` | Engineer | implementation | builder |
+| `harden` | Hardener | review, refactor, security, edge cases | builder |
+| `verify` | Verifier | tests, static analysis, regressions | no mutations (existing verifier rule) |
+| `repair` | Fixer | fix a failed task | inherits the failed task's runtime, model and guard (D-011) |
+Unknown roles are rejected (no silent builder fallback). Optional task **focus tags** (`security`, `performance`,
+`docs`) refine a role without new roles; e.g. DevSec work = `harden` + `security`. Display titles are cosmetic only.
+The existing `builder`/`hardener`/`verifier` values are accepted as aliases of `build`/`harden`/`verify` for one release.
+
+### Default routing table (configurable; per-sprint and per-phase overrides allowed)
+| Role | Runtime | Model | Backend |
+|---|---|---|---|
+| research | agy | Gemini (runtime default) | herdr |
+| scaffold | claude | claude-haiku-5-5 | herdr |
+| build | claude | claude-sonnet-5-5 | herdr |
+| harden | claude | claude-opus-5-5 | herdr |
+| verify | codex | runtime default | herdr |
+| repair | (from failed task) | (from failed task) | (from failed task) |
+Herdr is the default backend for every role (D-016 A/B: equal reliability, ~2.4x faster than OpenRig). OpenRig remains
+an opt-in backend; H5 (models into OpenRig seats) is dropped.
+
+### Persona rules (decided with the user)
+- Personas belong to **provider runtimes** (and Hermes itself). Several concurrent instances of one runtime share its
+  persona. Subagents spawned inside a CLI are invisible to Hermes and get no persona; sub-workers Hermes spawns inherit
+  the parent's persona. The Claude persona speaks for both the `claude` CLI and OpenRig claude-code seats.
+- **Voice, not content:** a persona shapes the tone of handoffs, messages and summaries only. Code, diffs, test results,
+  result files, verification status and errors are recorded exactly as produced; nothing is rewritten "in character".
+- **Hermes** now has a character sheet (LysControl `design-reference/cards/hermes.png`, "Hermes: The Threadkeeper",
+  pronouns she/her). Transcribe it like the others. The sheet's per-agent labels (Claude "Analyze", Gemini "Synthesize",
+  Codex "Execute") are artistic flavour, not roles or routing. AI-garbled text on a sheet (e.g. "Attalysis") is recorded
+  with the intended word plus a `"sheetText"` note, never silently copied or silently changed.
+- Hermes' accent is measured from her amber Relay glow, not her crimson coat, so it stays distinct from the failure red
+  (#F2555A) and Claude's caramel.

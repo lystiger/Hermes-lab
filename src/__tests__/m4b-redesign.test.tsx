@@ -107,8 +107,8 @@ describe('M4b agent art: focal crops of the existing files', () => {
 
 describe('M4b queue columns by real status', () => {
   it('maps each status to one column with a shape glyph as well as a colour', () => {
-    expect(groupOf({ ...LIVE_JOB_SUMMARY, status: 'RUNNING' } as any).glyph).toBe('◆');
-    expect(groupOf({ ...LIVE_JOB_SUMMARY, status: 'FAILED' } as any).glyph).toBe('✕');
+    expect(groupOf({ ...LIVE_JOB_SUMMARY, status: 'RUNNING' } as any).icon).toBeDefined();
+    expect(groupOf({ ...LIVE_JOB_SUMMARY, status: 'FAILED' } as any).icon).not.toBe(groupOf({ ...LIVE_JOB_SUMMARY, status: 'COMPLETED' } as any).icon);
     expect(groupOf({ ...LIVE_JOB_SUMMARY, status: 'COMPLETED' } as any).id).toBe('COMPLETED');
   });
 

@@ -67,7 +67,19 @@ interface ResourceState<T> {
 export function useResource<T>(key: string | null, load: (() => Promise<T>) | null, deps: unknown[]) {
   const [state, setState] = useState<ResourceState<T>>({ key, data: null, error: null, updatedAt: null, loading: load !== null });
   const [attempt, setAttempt] = useState(0);
+  // Tokens increase with each request. A response is applied only if it is newer than the last one applied, so a
+  // request that is superseded by a refresh still lands when it is the newest to finish. Live events can restart a
+  // load many times a second; requiring the very latest request to finish would starve the screen (M7).
   const latest = useRef(0);
+  const applied = useRef(0);
+  // A response that arrives after the component has unmounted has nowhere to go; it is dropped.
+  const alive = useRef(true);
+  useEffect(() => {
+    alive.current = true;
+    return () => {
+      alive.current = false;
+    };
+  }, []);
   const refetch = useCallback(() => setAttempt((n) => n + 1), []);
 
   useEffect(() => {
@@ -82,11 +94,13 @@ export function useResource<T>(key: string | null, load: (() => Promise<T>) | nu
     });
     load().then(
       (result) => {
-        if (token !== latest.current) return;
+        if (!alive.current || token <= applied.current) return;
+        applied.current = token;
         setState({ key, data: result, error: null, updatedAt: Date.now(), loading: false });
       },
       (err) => {
-        if (token !== latest.current) return;
+        if (!alive.current || token <= applied.current) return;
+        applied.current = token;
         setState((prev) => ({ key, data: prev.key === key ? prev.data : null, error: err as Error, updatedAt: prev.key === key ? prev.updatedAt : null, loading: false }));
       }
     );

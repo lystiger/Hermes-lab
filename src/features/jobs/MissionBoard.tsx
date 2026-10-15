@@ -1,4 +1,5 @@
 import React, { useRef } from 'react';
+import { Activity, Ban, CircleHelp, CircleSlash, Clock, X, Check, OctagonAlert } from 'lucide-react';
 import { AgentSummary, Job } from '../../api/types';
 import { ACTIVE_JOB_STATUSES } from '../../api/adapters/httpAdapter';
 import { useAgents } from '../../api/hooks';
@@ -15,12 +16,12 @@ import { formatDateTime } from '../time/format';
  * and by shape (research §2.1): every column header carries a glyph as well as its tone.
  */
 export const BOARD_GROUPS = [
-  { id: 'RUNNING', label: 'Running', glyph: '◆', statuses: ACTIVE_JOB_STATUSES, tone: 'var(--lys-status-success)' },
-  { id: 'BLOCKED', label: 'Blocked', glyph: '■', statuses: ['BLOCKED'], tone: 'var(--lys-status-warning)' },
-  { id: 'QUEUED', label: 'Queued', glyph: '○', statuses: ['QUEUED', 'CLAIMED'], tone: 'var(--lys-text-muted)' },
-  { id: 'FAILED', label: 'Failed', glyph: '✕', statuses: ['FAILED'], tone: 'var(--lys-status-danger)' },
-  { id: 'COMPLETED', label: 'Completed', glyph: '✓', statuses: ['COMPLETED'], tone: 'var(--lys-text-faint)' },
-  { id: 'CANCELLED', label: 'Cancelled', glyph: '⊘', statuses: ['CANCELLED'], tone: 'var(--lys-text-faint)' }
+  { id: 'RUNNING', label: 'Running', icon: Activity, statuses: ACTIVE_JOB_STATUSES, tone: 'var(--lys-status-success)' },
+  { id: 'BLOCKED', label: 'Blocked', icon: OctagonAlert, statuses: ['BLOCKED'], tone: 'var(--lys-status-warning)' },
+  { id: 'QUEUED', label: 'Queued', icon: Clock, statuses: ['QUEUED', 'CLAIMED'], tone: 'var(--lys-text-muted)' },
+  { id: 'FAILED', label: 'Failed', icon: X, statuses: ['FAILED'], tone: 'var(--lys-status-danger)' },
+  { id: 'COMPLETED', label: 'Completed', icon: Check, statuses: ['COMPLETED'], tone: 'var(--lys-text-faint)' },
+  { id: 'CANCELLED', label: 'Cancelled', icon: CircleSlash, statuses: ['CANCELLED'], tone: 'var(--lys-text-faint)' }
 ];
 
 const PRIORITY_COLOR: Record<string, string> = {
@@ -31,9 +32,9 @@ const PRIORITY_COLOR: Record<string, string> = {
 };
 
 /** The board column a job belongs to. Unrecognised statuses get their own column, never a guessed one. */
-export function groupOf(job: Job): { id: string; label: string; tone: string; glyph: string } {
+export function groupOf(job: Job): { id: string; label: string; tone: string; icon: typeof Ban } {
   const known = BOARD_GROUPS.find((g) => g.statuses.includes(job.status));
-  return known ?? { id: `OTHER:${job.status}`, label: `Other · ${job.status}`, tone: 'var(--lys-text-muted)', glyph: '?' };
+  return known ?? { id: `OTHER:${job.status}`, label: `Other · ${job.status}`, tone: 'var(--lys-text-muted)', icon: CircleHelp };
 }
 
 export const MissionBoard: React.FC<{
@@ -79,7 +80,7 @@ export const MissionBoard: React.FC<{
             <div key={c.id} role="list" aria-label={`${c.label} jobs`} className="flex flex-col gap-3 min-w-0">
               <div className="bg-lys-surface-1 border-t-[3px] px-3 py-2.5 flex items-center justify-between" style={{ borderTopColor: c.tone }}>
                 <span className="flex items-center gap-2 text-[12px] tracking-wider uppercase" style={{ color: c.tone }}>
-                  <span aria-hidden="true">{c.glyph}</span>
+                  <c.icon size={14} strokeWidth={2} aria-hidden="true" className="shrink-0" focusable="false" />
                   {c.label}
                 </span>
                 <span className="font-display text-[20px] font-semibold text-lys-primary lys-metric">{n}</span>
@@ -131,8 +132,8 @@ const JobCard: React.FC<{
         </button>
 
         <div className="flex flex-col gap-0.5 text-[12px] text-lys-muted">
-          <span className="truncate">{job.repository || UNKNOWN}{job.branch ? <span className="text-lys-gold"> · {job.branch}</span> : null}</span>
-          <span className="truncate">assigned {assigned.length ? assigned.join(' → ') : UNKNOWN}</span>
+          <span className="break-words">{job.repository || UNKNOWN}{job.branch ? <span className="text-lys-gold"> · {job.branch}</span> : null}</span>
+          <span className="break-words">assigned {assigned.length ? assigned.join(' → ') : UNKNOWN}</span>
           <span>started <span className="font-mono-code text-lys-faint">{formatDateTime(job.startedAt)}</span></span>
         </div>
 

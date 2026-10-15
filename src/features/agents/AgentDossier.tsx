@@ -1,6 +1,6 @@
 import React from 'react';
 import { AgentDetail } from '../../api/types';
-import { UnknownValue } from '../../components/DataStates';
+import { Freshness, UnknownValue } from '../../components/DataStates';
 import { CopyId } from '../../components/CopyId';
 import { Card } from '../../components/Card';
 import { FocalImage } from '../../components/FocalImage';
@@ -28,7 +28,7 @@ const NOT_REPORTED: NotReportedItem[] = [
  * Agent dossier (research §5.1, brief item 2): a large art pane on the left, cropped to the face with the agent's
  * accent edge, and the real specs on the right. Fields Hermes does not report stay unknown inside their panel.
  */
-export const AgentDossier: React.FC<{ agent: AgentDetail }> = ({ agent }) => {
+export const AgentDossier: React.FC<{ agent: AgentDetail; updatedAt?: number | null }> = ({ agent, updatedAt }) => {
   const { setActiveDossierAgent } = useConsoleStore();
   const accent = presenceAccent(agent);
   const art = agentArt(agent.id);
@@ -52,7 +52,8 @@ export const AgentDossier: React.FC<{ agent: AgentDetail }> = ({ agent }) => {
             <CopyId value={agent.id} className="text-lys-faint text-[11px]" />
           </div>
         </div>
-        <div className="flex flex-wrap items-center gap-2">
+        <div className="flex flex-wrap items-center gap-3">
+          <Freshness at={updatedAt} />
           <button
             type="button"
             disabled

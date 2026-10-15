@@ -30,11 +30,11 @@ export const AgentPresence: React.FC<{ agent: AgentSummary; selected?: boolean; 
         )}
         <div className="min-w-0 flex-1">
           <div className="flex items-center justify-between gap-2">
-            <span className="text-[15px] font-semibold text-lys-primary truncate">{agent.displayName}</span>
+            <span className="text-[15px] font-semibold text-lys-primary break-words min-w-0">{agent.displayName}</span>
             <span className={`text-[10px] tracking-wider uppercase ${running ? 'text-lys-success' : 'text-lys-muted'}`}>{agent.status}</span>
           </div>
-          <div className="mt-0.5 text-[12px] text-lys-muted truncate">{agent.role || UNKNOWN}</div>
-          <div className="mt-0.5 text-[12px] text-lys-faint truncate">{agent.currentTask || 'no current task reported'}</div>
+          <div className="mt-0.5 text-[12px] text-lys-muted break-words">{agent.role || UNKNOWN}</div>
+          <div className="mt-0.5 text-[12px] text-lys-faint break-words">{agent.currentTask || 'no current task reported'}</div>
         </div>
       </div>
     </>

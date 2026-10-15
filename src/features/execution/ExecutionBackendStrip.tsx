@@ -32,7 +32,7 @@ export const ExecutionBackendStrip: React.FC<ExecutionBackendStripProps> = ({ ba
                 {b.available ? 'AVAILABLE' : 'UNAVAILABLE'}
               </span>
             </div>
-            <div className="mt-1.5 text-lys-muted truncate" title={b.detail}>{b.detail || '—'}</div>
+            <div className="mt-1.5 text-lys-muted break-words" title={b.detail}>{b.detail || '—'}</div>
           </div>
         );
       })}
@@ -49,7 +49,7 @@ export const ExecutionBackendStrip: React.FC<ExecutionBackendStripProps> = ({ ba
               {openrig.daemon}
             </span>
           </div>
-          <div className="mt-1.5 text-lys-muted truncate" title={openrig.ledger.rigIds.join(', ')}>
+          <div className="mt-1.5 text-lys-muted break-words" title={openrig.ledger.rigIds.join(', ')}>
             {openrig.ledger.owners} ledger owners · {openrig.ledger.rigIds.length} rigs
           </div>
         </div>

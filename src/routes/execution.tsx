@@ -44,6 +44,7 @@ export const ExecutionRoute: React.FC = () => {
   return (
     <div className="flex flex-col min-h-full">
       <PageHeader
+        updatedAt={snapshotLoadedAt ? Date.parse(snapshotLoadedAt) : null}
         title="Execution"
         subtitle={
           <span>

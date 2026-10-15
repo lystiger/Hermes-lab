@@ -7,7 +7,7 @@ import { useConsoleStore } from '../stores/useConsoleStore';
 import { useAgents, useCapacityTelemetry, useJobs, useTelemetry } from '../api/hooks';
 import { resolveActorPresentation } from '../api/actors';
 import { eventKindColor } from '../features/events/eventKinds';
-import { ErrorState, LoadingState, EmptyState, StaleNotice, UNKNOWN } from '../components/DataStates';
+import { ErrorState, LoadingState, EmptyState, StaleNotice, UNKNOWN, Freshness } from '../components/DataStates';
 import { Card } from '../components/Card';
 import { PageHeader, HeaderCount } from '../components/PageHeader';
 import { NotReported, NotReportedItem } from '../components/NotReported';
@@ -25,9 +25,9 @@ const NOT_REPORTED: NotReportedItem[] = [
 export const OverviewRoute: React.FC = () => {
   const navigate = useNavigate();
   const { allEvents, setActiveModalJobId } = useConsoleStore();
-  const { agents, loading: agentsLoading, error: agentsError, refetch: refetchAgents } = useAgents();
-  const { jobs, loading: jobsLoading, error: jobsError, stale: jobsStale, refetch: refetchJobs } = useJobs();
-  const { telemetry, error: telemetryError, refetch: refetchTelemetry } = useTelemetry();
+  const { agents, loading: agentsLoading, error: agentsError, refetch: refetchAgents, updatedAt: agentsUpdatedAt } = useAgents();
+  const { jobs, loading: jobsLoading, error: jobsError, stale: jobsStale, refetch: refetchJobs, updatedAt: jobsUpdatedAt } = useJobs();
+  const { telemetry, error: telemetryError, refetch: refetchTelemetry, updatedAt: telemetryUpdatedAt } = useTelemetry();
   const { capacity } = useCapacityTelemetry();
 
   const recentTrace = allEvents.slice(0, 8);
@@ -58,6 +58,7 @@ export const OverviewRoute: React.FC = () => {
   return (
     <div className="flex flex-col min-h-full">
       <PageHeader
+        updatedAt={telemetryUpdatedAt}
         title="Overview"
         subtitle={telemetry ? `Hermes runtime · counts from the latest ${telemetry.sampleSize} jobs (GET /jobs)` : 'Hermes runtime'}
         counts={counts}
@@ -78,12 +79,15 @@ export const OverviewRoute: React.FC = () => {
           ) : agentsError && agents.length === 0 ? (
             <Card><ErrorState label="Agent registry" error={agentsError} onRetry={refetchAgents} /></Card>
           ) : (
-            <section aria-label="Agents" className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <section aria-label="Agents" className="flex flex-col gap-3">
+              <div className="flex items-center justify-between text-[11px] tracking-wider uppercase text-lys-faint"><span>Agents · {agents.length}</span><Freshness at={agentsUpdatedAt} /></div>
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
               {agents.slice(0, 3).map((ag, i) => (
                 <Card key={ag.id} accent={`var(--lys-agent-${ag.id.toLowerCase()}, var(--lys-text-muted))`}>
                   <AgentPresence agent={ag} index={i} onClick={() => navigate(`/agents/${ag.id}`)} />
                 </Card>
               ))}
+              </div>
             </section>
           )}
 
@@ -91,6 +95,7 @@ export const OverviewRoute: React.FC = () => {
             <div className="p-5">
               <div className="flex items-center justify-between mb-3">
                 <span className="text-[11px] tracking-wider uppercase text-lys-faint">Live trace</span>
+                <Freshness at={allEvents[0] ? allEvents[0].rawTs * 1000 : null} />
                 <button onClick={() => navigate('/events')} className="text-[12px] text-lys-gold hover:underline cursor-pointer">
                   open events →
                 </button>
@@ -100,14 +105,15 @@ export const OverviewRoute: React.FC = () => {
               ) : (
                 <div className="flex flex-col">
                   {recentTrace.map((e) => (
-                    <div key={e.id} className="flex items-center gap-4 py-1.5 text-[12px] border-b border-lys-subtle last:border-b-0 hover:bg-lys-surface-2 px-1">
-                      <span className="w-28 shrink-0 font-mono-code text-lys-faint">{eventTime(e)}</span>
-                      <span className="w-28 shrink-0 font-semibold truncate" style={{ color: e.source.accentColor || 'var(--lys-text-muted)' }}>
-                        {e.source.displayName}
+                    <div key={e.id} className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-4 py-1.5 px-1 text-[12px] border-b border-lys-subtle last:border-b-0 hover:bg-lys-surface-2">
+                      <span className="font-mono-code text-lys-faint whitespace-nowrap pt-0.5">{eventTime(e)}</span>
+                      <span className="min-w-0 flex flex-col gap-0.5">
+                        <span className="flex flex-wrap items-baseline gap-x-3">
+                          <span className="font-semibold break-words" style={{ color: e.source.accentColor || 'var(--lys-text-muted)' }}>{e.source.displayName}</span>
+                          <span className="break-all" style={{ color: eventKindColor(e.kind) }}>{e.kind}</span>
+                        </span>
+                        <span className="text-lys-secondary break-words">{e.detail}</span>
                       </span>
-                      <span className="w-40 shrink-0 truncate" style={{ color: eventKindColor(e.kind) }}>{e.kind}</span>
-                      <span className="flex-1 min-w-0 text-lys-secondary truncate">{e.detail}</span>
-                      <span className="w-16 shrink-0 text-right text-lys-faint">{e.dur}</span>
                     </div>
                   ))}
                 </div>
@@ -120,7 +126,7 @@ export const OverviewRoute: React.FC = () => {
           <Card label="Queue">
             <div className="p-4 flex flex-col gap-3">
               <div className="flex items-center justify-between">
-                <span className="text-[11px] tracking-wider uppercase text-lys-faint">Queue · {jobsLoading && jobs.length === 0 ? '…' : jobs.length}</span>
+                <span className="flex items-center gap-3 text-[11px] tracking-wider uppercase text-lys-faint">Queue · {jobsLoading && jobs.length === 0 ? '…' : jobs.length} <Freshness at={jobsUpdatedAt} /></span>
                 <button onClick={() => navigate('/queue')} className="text-[12px] text-lys-gold hover:underline cursor-pointer">
                   all →
                 </button>
@@ -141,8 +147,8 @@ export const OverviewRoute: React.FC = () => {
                     <span className="text-lys-faint font-mono-code">{q.id}</span>
                     <span className="ml-auto text-lys-muted tracking-wider">{q.status}</span>
                   </div>
-                  <div className="mt-1 text-[13px] text-lys-primary truncate">{q.title}</div>
-                  <div className="mt-0.5 text-[11px] text-lys-faint truncate">
+                  <div className="mt-1 text-[13px] text-lys-primary break-words">{q.title}</div>
+                  <div className="mt-0.5 text-[11px] text-lys-faint break-words">
                     {q.assignedAgentIds.map((id) => resolveActorPresentation(id, agents).displayName).join(' → ') || UNKNOWN_TIME}
                   </div>
                 </button>

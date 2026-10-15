@@ -15,7 +15,7 @@ const NOT_REPORTED: NotReportedItem[] = [
 
 /** Usage (research §5.5): meters from capacity telemetry, each labelled with the window it covers. */
 export const UsageRoute: React.FC = () => {
-  const { capacity, loading, error, refetch } = useCapacityTelemetry();
+  const { capacity, loading, error, refetch, updatedAt } = useCapacityTelemetry();
 
   const providers = capacity?.providers ?? [];
   const requests = providers.reduce((sum, p) => sum + p.totalRequests, 0);
@@ -34,7 +34,7 @@ export const UsageRoute: React.FC = () => {
 
   return (
     <div className="flex flex-col min-h-full">
-      <PageHeader title="Usage" subtitle={`Every total covers ${PROCESS_WINDOW}. Unknown values are shown as — and are never zero.`} counts={counts} />
+      <PageHeader updatedAt={updatedAt} title="Usage" subtitle={`Every total covers ${PROCESS_WINDOW}. Unknown values are shown as — and are never zero.`} counts={counts} />
 
       <div className="flex-1 flex flex-col gap-6 p-6">
         {loading && !capacity && <Card><LoadingState label="Loading capacity telemetry…" /></Card>}

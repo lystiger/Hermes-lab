@@ -1,4 +1,5 @@
 import React from 'react';
+import { X } from 'lucide-react';
 import { useConsoleStore } from '../stores/useConsoleStore';
 import { JobDetailView } from '../features/jobs/JobDetailView';
 import { useEscape } from './keyboard';
@@ -30,7 +31,7 @@ export const JobModal: React.FC = () => {
             onClick={() => setActiveModalJobId(null)}
             className="font-sans text-[12px] text-lys-muted hover:text-lys-primary px-2 py-0.5 border border-transparent hover:border-lys-default cursor-pointer transition-colors"
           >
-            ✕ CLOSE
+            <X size={12} strokeWidth={2} aria-hidden="true" className="inline-block mr-1 -mt-0.5" /> CLOSE
           </button>
         </div>
 

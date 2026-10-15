@@ -1,4 +1,5 @@
 import React from 'react';
+import { Freshness } from './DataStates';
 
 export interface HeaderCount {
   label: string;
@@ -15,14 +16,19 @@ export const PageHeader: React.FC<{
   subtitle?: React.ReactNode;
   counts?: HeaderCount[];
   actions?: React.ReactNode;
-}> = ({ title, subtitle, counts = [], actions }) => (
-  <header className="px-6 pt-6 pb-5 border-b border-lys-subtle bg-lys-surface-0 flex flex-col gap-4">
+  /** When the page's data was last updated from Hermes (epoch ms). Shown as "updated HH:MM:SS". */
+  updatedAt?: number | null;
+}> = ({ title, subtitle, counts = [], actions, updatedAt }) => (
+  <header className="sticky top-0 z-20 px-6 pt-6 pb-5 border-b border-lys-subtle bg-lys-surface-0 flex flex-col gap-4">
     <div className="flex flex-wrap items-end justify-between gap-4">
       <div className="min-w-0">
-        <h1 className="font-display text-[30px] leading-none font-semibold text-lys-primary">{title}</h1>
-        {subtitle && <p className="mt-2 text-[13px] text-lys-muted">{subtitle}</p>}
+        <h1 className="font-display text-[30px] leading-none font-semibold text-lys-primary break-words">{title}</h1>
+        {subtitle && <p className="mt-2 text-[13px] text-lys-muted break-words">{subtitle}</p>}
       </div>
-      {actions && <div className="flex items-center gap-2">{actions}</div>}
+      <div className="flex flex-wrap items-center gap-3">
+        {updatedAt !== undefined && <Freshness at={updatedAt} />}
+        {actions && <div className="flex items-center gap-2">{actions}</div>}
+      </div>
     </div>
     {counts.length > 0 && (
       <dl className="flex flex-wrap gap-x-10 gap-y-3">

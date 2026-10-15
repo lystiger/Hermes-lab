@@ -34,6 +34,7 @@ export const QueueRoute: React.FC = () => {
   return (
     <div className="flex flex-col min-h-full">
       <PageHeader
+        updatedAt={jobsUpdatedAt}
         title="Queue"
         subtitle={`Mission board · grouped by the status Hermes reports · ${jobs.length} jobs in the latest sample`}
         counts={counts}

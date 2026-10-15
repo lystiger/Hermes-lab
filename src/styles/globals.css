@@ -250,6 +250,17 @@
   outline-offset: 2px;
 }
 
+/* The page's single scroll container (M7). Smooth scrolling only where motion is allowed. */
+.lys-scroll {
+  overscroll-behavior: contain;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .lys-scroll {
+    scroll-behavior: smooth;
+  }
+}
+
 /* Reduced motion (research §7): animations and transitions collapse to their end state. */
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {

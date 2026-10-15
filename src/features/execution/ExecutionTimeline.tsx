@@ -36,11 +36,11 @@ export const ExecutionTimeline: React.FC<ExecutionTimelineProps> = ({ events, li
           <span className="w-24 flex-shrink-0 font-semibold" style={{ color: e.source.accentColor || 'var(--lys-text-muted)' }}>
             {e.source.id}
           </span>
-          <span className="w-44 flex-shrink-0 font-medium" style={{ color: eventColor(e.kind) }}>
+          <span className="w-full md:w-44 flex-shrink-0 font-medium break-all" style={{ color: eventColor(e.kind) }}>
             {e.kind.replace('execution.', '')}
           </span>
-          <span className="flex-1 min-w-0 truncate font-sans text-lys-secondary">{e.detail}</span>
-          <span className="w-28 flex-shrink-0 text-lys-muted truncate">
+          <span className="flex-1 min-w-0 break-words font-sans text-lys-secondary">{e.detail}</span>
+          <span className="flex-shrink-0 max-w-full font-mono-code text-[11px] text-lys-muted break-all">
             {e.jobId || '—'}{e.taskId ? ` · ${e.taskId}` : ''}
           </span>
         </div>

@@ -109,12 +109,12 @@ export const QueueTable: React.FC<QueueTableProps> = ({
               </span>
 
               {/* Task Name */}
-              <span className="flex-1 min-w-[220px] text-[13px] text-lys-primary truncate">
+              <span className="flex-1 min-w-[220px] text-[13px] text-lys-primary break-words">
                 {q.title}
               </span>
 
               {/* Repo */}
-              <span className="w-36 flex-shrink-0 hidden md:block font-sans text-[11px] text-lys-muted truncate">
+              <span className="w-36 flex-shrink-0 hidden md:block font-sans text-[11px] text-lys-muted break-words">
                 {q.repository}
               </span>
 

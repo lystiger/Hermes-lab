@@ -162,8 +162,8 @@ describe('Phase 6 Generic Agent Identity, Personas & A2A Conversations UI', () =
     expect(screen.getAllByText('conv_planning_sync').length).toBeGreaterThan(0);
 
     // Reply-To badges
-    expect(screen.getByText('↳ reply: msg_p6_001')).toBeInTheDocument();
-    expect(screen.getByText('↳ reply: msg_p6_002')).toBeInTheDocument();
+    expect(screen.getByText('reply: msg_p6_001')).toBeInTheDocument();
+    expect(screen.getByText('reply: msg_p6_002')).toBeInTheDocument();
 
     // Correlation ID
     expect(screen.getAllByText('corr:corr_review_01').length).toBe(2);

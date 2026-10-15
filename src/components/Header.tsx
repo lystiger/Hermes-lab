@@ -76,9 +76,9 @@ export const Header: React.FC = () => {
             ← {crumb}
           </button>
         ) : (
-          <span className="text-[12px] text-lys-faint truncate">{subtitle}</span>
+          <span className="text-[12px] text-lys-faint break-words" title={subtitle}>{subtitle}</span>
         )}
-        {crumb && <span className="text-[12px] text-lys-muted truncate">{title}</span>}
+        {crumb && <span className="text-[12px] text-lys-muted break-words" title={title}>{title}</span>}
       </div>
 
       <div className="flex items-center gap-4 text-[12px] text-lys-muted">

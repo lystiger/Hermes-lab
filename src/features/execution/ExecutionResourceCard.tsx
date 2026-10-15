@@ -33,10 +33,10 @@ export const ExecutionResourceCard: React.FC<ExecutionResourceCardProps> = ({ re
     >
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0">
-          <div className="text-[13px] font-sans text-lys-primary truncate" title={resource.label}>{resource.label}</div>
+          <div className="text-[13px] font-sans text-lys-primary break-words">{resource.label}</div>
           <div className="text-lys-faint flex items-center gap-2 min-w-0">
             {seat !== undefined && <span className="text-lys-muted">SEAT {String(seat).padStart(2, '0')}</span>}
-            <span className="truncate" title={`${resource.kind} · ${resource.id}`}>{resource.kind}</span>
+            <span className="break-words">{resource.kind}</span>
             <CopyId value={resource.id} className="text-[10px]" />
           </div>
         </div>
@@ -51,12 +51,12 @@ export const ExecutionResourceCard: React.FC<ExecutionResourceCardProps> = ({ re
       </div>
 
       <div className="flex flex-col gap-0.5 text-lys-muted">
-        <span className="truncate">
+        <span className="break-words">
           job <span className="text-lys-primary">{resource.jobId || '—'}</span>
           {resource.taskId ? <> · task <span className="text-lys-primary">{resource.taskId}</span></> : null}
         </span>
         {resource.executionId && (
-          <span className="truncate text-lys-faint" title={resource.executionId}>exec {resource.executionId}</span>
+          <span className="break-all text-lys-faint">exec {resource.executionId}</span>
         )}
       </div>
 

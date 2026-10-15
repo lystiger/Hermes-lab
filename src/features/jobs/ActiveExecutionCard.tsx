@@ -2,7 +2,7 @@ import React from 'react';
 import { JobPipelineGraph } from './JobPipelineGraph';
 import { useJob, useJobs } from '../../api/hooks';
 import { ACTIVE_JOB_STATUSES } from '../../api/adapters/httpAdapter';
-import { ErrorState, LoadingState, ResourceError, StaleNotice, UnknownValue } from '../../components/DataStates';
+import { ErrorState, Freshness, LoadingState, ResourceError, StaleNotice, UnknownValue } from '../../components/DataStates';
 import { Card } from '../../components/Card';
 import { CopyId } from '../../components/CopyId';
 import { HERMES_ART } from '../../theme/agentArt';
@@ -16,7 +16,7 @@ interface ActiveExecutionCardProps {
 
 /** The job that is active right now, from the real job list. With none active, the card says so and stays short. */
 export const ActiveExecutionCard: React.FC<ActiveExecutionCardProps> = ({ onOpenJob }) => {
-  const { jobs, loading, error, stale, refetch } = useJobs();
+  const { jobs, loading, error, stale, refetch, updatedAt } = useJobs();
   const activeJob = jobs.find((j) => ACTIVE_JOB_STATUSES.includes(j.status));
   // The phase graph is its own resource: its failures are shown here, not hidden behind the card.
   const phases = useJob(activeJob?.id ?? null);
@@ -57,6 +57,7 @@ export const ActiveExecutionCard: React.FC<ActiveExecutionCardProps> = ({ onOpen
         {stale && <StaleNotice label="Active execution" error={error} onRetry={refetch} />}
         <div className="flex flex-wrap items-center gap-3">
           <span className="text-[11px] tracking-wider uppercase text-lys-faint">Active execution</span>
+          <span className="ml-auto"><Freshness at={updatedAt} /></span>
           <span className="text-[10px] tracking-wider uppercase text-lys-success border border-lys-success/35 px-1.5 py-0.5">{activeJob.status}</span>
         </div>
         <div className="flex flex-col gap-1">

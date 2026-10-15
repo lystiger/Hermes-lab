@@ -1,4 +1,5 @@
 import React, { useState, useMemo } from 'react';
+import { Cog, CornerDownRight, Layers, X, GitCommit, FileText, ChartColumn, ClipboardList, List, type LucideIcon } from 'lucide-react';
 import { useThreads, useMessages, useAgents } from '../../api/hooks';
 import { resolveActorPresentation } from '../../api/actors';
 import { hermesApi } from '../../api/client';
@@ -82,21 +83,21 @@ export const OperationalThreadView: React.FC<OperationalThreadViewProps> = ({
 
   const formatTime = (isoString?: string) => formatTimeOfDay(isoString);
 
-  const getArtifactIcon = (type: string) => {
+  const getArtifactIcon = (type: string): LucideIcon => {
     switch (type) {
       case 'git_commit':
-        return '⎇';
+        return GitCommit;
       case 'handoff':
-        return '🗎';
+        return FileText;
       case 'test_report':
       case 'verification_report':
-        return '📊';
+        return ChartColumn;
       case 'run_summary':
-        return '📋';
+        return ClipboardList;
       case 'log':
-        return '≡';
+        return List;
       default:
-        return '◈';
+        return Layers;
     }
   };
 
@@ -223,7 +224,7 @@ export const OperationalThreadView: React.FC<OperationalThreadViewProps> = ({
                     {/* Tool Actor Indicator (Phase 7) */}
                     {msg.from.kind === 'tool' || msg.kind === 'tool_result' ? (
                       <span className="px-1 py-0.2 border border-lys-agent-gemini/40 bg-lys-agent-gemini/10 text-lys-info text-[9.5px] font-bold">
-                        ⚙ TOOL
+                        <Cog size={10} strokeWidth={2} aria-hidden="true" className="inline-block mr-1 -mt-px" /> TOOL
                       </span>
                     ) : null}
 
@@ -263,7 +264,7 @@ export const OperationalThreadView: React.FC<OperationalThreadViewProps> = ({
                     {/* Reply-To Badge */}
                     {msg.replyTo && (
                       <span className="text-[9.5px] text-lys-muted bg-lys-surface-2 px-1.5 py-0.2 border border-lys-default">
-                        ↳ reply: {msg.replyTo}
+                        <CornerDownRight size={10} strokeWidth={2} aria-hidden="true" className="inline-block mr-1 -mt-px" /> reply: {msg.replyTo}
                       </span>
                     )}
 
@@ -308,7 +309,7 @@ export const OperationalThreadView: React.FC<OperationalThreadViewProps> = ({
                         onClick={() => setSelectedArtifact(art)}
                         className="flex items-center gap-1 px-2 py-0.5 bg-lys-surface-1 hover:bg-lys-surface-2 border border-lys-default hover:border-lys-gold text-lys-muted hover:text-lys-primary font-sans text-[10.5px] transition-colors cursor-pointer"
                       >
-                        <span className="text-lys-gold">{getArtifactIcon(art.type)}</span>
+                        {(() => { const ArtIcon = getArtifactIcon(art.type); return <ArtIcon size={12} strokeWidth={2} aria-hidden="true" className="text-lys-gold" />; })()}
                         <span>{art.label || art.type}</span>
                         {art.type === 'git_commit' && (
                           <span className="text-lys-faint">{art.ref.slice(0, 7)}</span>
@@ -350,9 +351,11 @@ export const OperationalThreadView: React.FC<OperationalThreadViewProps> = ({
                 <button
                   type="button"
                   onClick={() => setReplyTarget(null)}
+                  aria-label="Cancel reply"
+                  title="Cancel reply"
                   className="text-lys-faint hover:text-lys-danger ml-1 cursor-pointer"
                 >
-                  ✕
+                  <X size={12} strokeWidth={2} aria-hidden="true" />
                 </button>
               </div>
             )}
@@ -396,7 +399,7 @@ export const OperationalThreadView: React.FC<OperationalThreadViewProps> = ({
           >
             <div className="flex items-center justify-between pb-2 mb-3 border-b border-lys-subtle">
               <div className="flex items-center gap-2">
-                <span className="text-lys-gold text-[14px]">◈</span>
+                <Layers size={14} strokeWidth={2} aria-hidden="true" className="text-lys-gold" />
                 <span className="text-[12px] font-semibold text-lys-primary">
                   ARTIFACT METADATA INSPECTION
                 </span>
@@ -404,9 +407,11 @@ export const OperationalThreadView: React.FC<OperationalThreadViewProps> = ({
               <button
                 type="button"
                 onClick={() => setSelectedArtifact(null)}
+                aria-label="Close artifact"
+                title="Close artifact"
                 className="text-lys-faint hover:text-lys-primary text-[14px] cursor-pointer"
               >
-                ✕
+                <X size={14} strokeWidth={2} aria-hidden="true" />
               </button>
             </div>
 

@@ -54,7 +54,7 @@ export const AgentWorkspace: React.FC<{ selectedId?: string }> = ({ selectedId }
             <ResourceError label={`Agent ${detail.agent.displayName}`} error={detail.error} hasData updatedAt={detail.updatedAt} onRetry={detail.refetch} />
           </div>
         )}
-        {detail.agent && <AgentDossier agent={detail.agent} />}
+        {detail.agent && <AgentDossier agent={detail.agent} updatedAt={detail.updatedAt} />}
       </div>
     </div>
   );

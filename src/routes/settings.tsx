@@ -1,5 +1,6 @@
 import React from 'react';
 import { PageHeader } from '../components/PageHeader';
+import { Freshness } from '../components/DataStates';
 import { useNavigate } from 'react-router-dom';
 import { Link } from 'react-router-dom';
 import { ExecutionBackendStrip } from '../features/execution/ExecutionBackendStrip';
@@ -19,7 +20,7 @@ export const SettingsRoute: React.FC = () => {
 
   const { agents } = useAgents();
   const { settings } = useSettings();
-  const { view, snapshotStatus } = useExecution();
+  const { view, snapshotStatus, snapshotLoadedAt } = useExecution();
 
   return (
     <div className="flex flex-col min-h-full select-none bg-lys-base">
@@ -117,7 +118,7 @@ export const SettingsRoute: React.FC = () => {
                     <span style={{ color: accentColor }} className="w-16 font-sans text-[11px] tracking-wider font-semibold">
                       {ag.phase || 'IDLE'}
                     </span>
-                    <span className="flex-1 min-w-0 font-sans text-[11px] text-lys-muted truncate">
+                    <span className="flex-1 min-w-0 font-sans text-[11px] text-lys-muted break-words">
                       {ag.model}
                     </span>
                     <span className="w-24 text-right font-sans text-[11px] text-lys-faint">
@@ -137,6 +138,7 @@ export const SettingsRoute: React.FC = () => {
           <span className="tracking-wider text-lys-faint">EXECUTION BACKENDS</span>
           <Link to="/execution" className="text-lys-gold hover:underline">open execution →</Link>
         </div>
+        <div className="flex justify-end pb-2"><Freshness at={snapshotLoadedAt ? Date.parse(snapshotLoadedAt) : null} /></div>
         <ExecutionBackendStrip backends={view.backends} openrig={view.openrig} loaded={snapshotStatus === 'ready'} />
       </div>
 

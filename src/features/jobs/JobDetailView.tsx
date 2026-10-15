@@ -1,4 +1,5 @@
 import React from 'react';
+import { Check, X, CircleDot, Circle } from 'lucide-react';
 import { useConsoleStore } from '../../stores/useConsoleStore';
 import { useJob, useAgents, useJobEvents } from '../../api/hooks';
 import { resolveActorPresentation } from '../../api/actors';
@@ -142,7 +143,7 @@ export const JobDetailView: React.FC<JobDetailViewProps> = ({ jobId = '' }) => {
                         }}
                         className="w-4.5 h-4.5 flex-shrink-0 flex items-center justify-center font-sans text-[11px] clip-hex"
                       >
-                        {isDone ? '✓' : isFailed ? '✕' : isActive ? '●' : '○'}
+                        {isDone ? <Check size={11} strokeWidth={2.5} aria-hidden="true" /> : isFailed ? <X size={11} strokeWidth={2.5} aria-hidden="true" /> : isActive ? <CircleDot size={9} strokeWidth={2.5} aria-hidden="true" /> : <Circle size={9} strokeWidth={2.5} aria-hidden="true" />}
                       </div>
 
                       <div className="flex-1 min-w-0">
@@ -240,7 +241,7 @@ export const JobDetailView: React.FC<JobDetailViewProps> = ({ jobId = '' }) => {
                     {e.source.displayName}
                   </span>
                   <span className="w-28 text-lys-muted">{e.kind}</span>
-                  <span className="flex-1 min-w-0 text-lys-secondary truncate font-sans">
+                  <span className="flex-1 min-w-0 text-lys-secondary break-words font-sans">
                     {e.detail}
                   </span>
                   <span className="w-16 text-right text-lys-muted">{e.dur}</span>

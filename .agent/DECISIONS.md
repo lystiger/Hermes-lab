@@ -489,3 +489,41 @@ sprint-level execution_backend does not reach them. Verifier fallbacks keep the 
 - **Open follow-up (security):** control endpoints (`POST /jobs`, `/messages`, `/jobs/{id}/cancel|resume`,
   `/internal/*`) are unauthenticated, and bodyless POSTs are reachable cross-site as simple requests (CSRF), whatever
   the CORS setting. Needs a local auth token or a CSRF guard before Hermes is exposed beyond a single-user machine.
+
+## D-016: A/B test, Herdr vs OpenRig as Hermes' Claude backend (decided 2026-10-15, before running)
+
+Why: OpenRig is the most complex part of Hermes (backend, ledger, pending launches, ID-only teardown; ~1,550 lines
+vs 376 for Herdr), only runs claude-code, and its seats are invisible in the Herdr cockpit. The user has never used
+OpenRig outside this project. Question: does it earn that complexity?
+
+Design (fixed before any run):
+- Same sprint spec, same scratch repo with real tests and verification_steps, 4 builder tasks, Claude only (the only
+  runtime both backends support). 3 runs per arm, alternating H, O, H, O, H, O.
+- Model: Haiku 5.5 in both arms. Herdr passes `--model claude-haiku-5-5`; OpenRig cannot pass a model yet (H5), so the
+  OpenRig daemon is started with ANTHROPIC_MODEL=claude-haiku-5-5. The model actually used is checked per task from
+  the run output; a run whose model differs is invalid and re-run.
+- Measured per task from execution events and run summaries: success, wall time, startup overhead
+  (resource_acquired -> running), completion errors (false done / missed done), leftovers after the run (rigs, panes,
+  processes), context isolation. Subjective: the user watches one run per arm (Herdr cockpit vs `rig tui` / `rig ui`)
+  and rates how easy it is to follow.
+
+Decision rule (pre-registered):
+- OpenRig stays a Hermes backend only if it is clearly more reliable (fewer failed or mis-detected tasks), or more than
+  20% faster per sprint, with cleanup no worse than Herdr.
+- Otherwise Herdr becomes the default backend for every role, OpenRig becomes optional and unused by default, and H5
+  (passing models into OpenRig seats) is dropped.
+- Run log: herdr-1 invalid (setup bug, not backend): the seed repo had no .gitignore, so __pycache__ got committed and
+  Claude tried `git checkout`, a denied git mutation that fails the Herdr path fast. Fixed for both arms: .gitignore in the
+  seed, and every prompt says "Do not run any git commands; Hermes commits your changes for you." Runs restart at herdr-1.
+- Run log: herdr-1 (second attempt) invalid (harness, not backend): the spec used `verification_steps` but the runner
+  reads `verification`, so the runner's pytest-less venv step ran and failed. The integrated code passed all 9 tests
+  when checked manually. Fixed the key for both arms, and the harness now runs the tests itself after every run (same
+  independent verdict for both arms). Runs restart at herdr-1 again.
+- **Result (2026-10-15):** 6 valid runs, all Haiku 5.5 (379/379 logged messages). Herdr: 3/3 READY_FOR_REVIEW, 3/3
+  independent tests pass, 0 completion errors, no leftovers, sprint 62.0 / 61.8 / 68.5 s (mean 64.1 s). OpenRig: 3/3,
+  3/3, 0 errors, no leftovers (rig released each time), sprint 158.3 / 162.4 / 149.3 s (mean 156.7 s). OpenRig is ~2.4x
+  slower, a fixed ~20-25 s per task from the seat lifecycle (new rig, then fresh-context relaunch per reuse).
+- **Decision (per the pre-registered rule):** OpenRig is neither more reliable nor faster, so **Herdr is the default
+  backend for every role; OpenRig stays as an optional backend, unused by default; H5 is dropped.** Limits: n=3 per arm,
+  short tasks; hung or interactive sessions (where hook-based completion could matter) were not tested. Revisit only if a
+  real failure shows Herdr's exit-code completion is insufficient.

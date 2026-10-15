@@ -170,3 +170,15 @@ Full review: `docs/design/agent-model-review-r2.md`. Supersedes earlier text whe
 - **Note on 2.** When no model is requested, `effectiveModel` records the adapter's default (Claude: `sonnet`).
 - **Note on 12.** Voice-only prompt fields keep artifacts, results and records unstyled and separate from display text;
   they do not guarantee that a persona's tone never influences generated content. That limit is accepted and stated.
+
+### Revision 3b (Codex r3a: item 9)
+- **Routes are ordered lists.** Config schema: `{"roles": {"<role>": [{"runtime": "...", "model": "...",
+  "backend": "..."}, ...]}}`; the first entry is the default, later entries are fallbacks in order. A sprint `routing`
+  object or a task/phase field replaces the list for its scope.
+- **Fallback walks the list:** the resolver takes the first entry whose runtime CLI is ready, whose backend is available
+  and supports that runtime (`supports_agent`), and, if a model is set, whose adapter can apply it. Each skipped entry is
+  recorded in `routeFallback` with its reason.
+- **`subprocess` is a fallback backend only, never a fix for a missing runtime:** it is tried for an entry only when that
+  entry's runtime CLI is ready and only the requested backend is unavailable.
+- **No viable route: fail clearly** with `FAILED_NO_ROUTE` and the list of reasons; nothing runs.
+- Explicit task/sprint choices still fail closed without walking any fallback list.

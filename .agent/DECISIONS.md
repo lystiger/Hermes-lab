@@ -543,3 +543,6 @@ Decided with the user before implementation.
   succeeded -> happy, failed/blocked -> surprised. 160 ms crossfade; instant swap under reduced motion. The full sheet is
   an optional "view character sheet" link. Expression tiles are small (~170 px): avatar use (96-128 px) only; the large
   dossier pane keeps the cutout portrait.
+- **D-015 approved (2026-10-15):** Codex AGREE after revisions 2, 3, 3a and 3b (reviews in docs/design/agent-model-review-*.md).
+  Implementation order per revision 3 item 13: contracts -> H1 personas -> H3 run/event persistence -> H4 readiness -> H2 /agents
+  -> client migration -> remove legacy fields.

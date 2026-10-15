@@ -512,3 +512,6 @@ Decision rule (pre-registered):
   20% faster per sprint, with cleanup no worse than Herdr.
 - Otherwise Herdr becomes the default backend for every role, OpenRig becomes optional and unused by default, and H5
   (passing models into OpenRig seats) is dropped.
+- Run log: herdr-1 invalid (setup bug, not backend): the seed repo had no .gitignore, so __pycache__ got committed and
+  Claude tried `git checkout`, a denied git mutation that fails the Herdr path fast. Fixed for both arms: .gitignore in the
+  seed, and every prompt says "Do not run any git commands; Hermes commits your changes for you." Runs restart at herdr-1.

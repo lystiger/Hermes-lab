@@ -148,3 +148,25 @@ Full review: `docs/design/agent-model-review-r2.md`. Supersedes earlier text whe
     -> H3 runs/events persistence -> H4 capability + readiness discovery (supports_agent is compatibility, not
     readiness) -> H2 /agents -> client migration -> remove legacy fields. Acceptance checks: restart/migration,
     alias-guard, routing-capability, client compatibility.
+
+### Revision 3a (Codex r3: AGREE WITH CHANGES; items 7 and 9 tightened, notes on 2 and 12 accepted)
+- **7. Guards.** For `research` and `scaffold`, the final worktree must have **no tracked or untracked changes outside
+  the normalized allowlist** (git status including untracked files). Ignored, transient and outside-worktree writes are
+  explicitly *not* covered unless runtime isolation is added; the guard is documented as such, not as a sandbox.
+- **9. Routing configuration and fallback.**
+  - Owner and location: Hermes, file `config/routing.json` in Hermes-lab (versioned); override schema
+    `{"roles": {"<role>": {"runtime": "...", "model": "...", "backend": "..."}}}` at three levels: the config file
+    defaults, a sprint spec `routing` object, and per-phase/task fields. Precedence: task/phase > sprint > config.
+  - **Explicit choices fail closed:** if a task or sprint names a runtime/backend/model that is unsupported or
+    unavailable, the task fails with a clear error; it is never silently rerouted.
+  - **Defaults may fall back, visibly:** if a *config default* is unavailable (CLI missing, backend down), the resolver
+    falls back to the next configured option for that role, else `subprocess`, and records `routeFallback` with the reason
+    on the run and in events.
+  - The scheduler may reroute only unassigned work; an explicitly assigned actor is kept or the task fails (consistent
+    with D-011).
+  - **Known limitation, recorded:** Herdr hosts all three runtimes, but only `claude` and `codex` pass a model selection;
+    `antigravity` ignores `options.model` today, so its `effectiveModel` is null and the research route uses its runtime
+    default model.
+- **Note on 2.** When no model is requested, `effectiveModel` records the adapter's default (Claude: `sonnet`).
+- **Note on 12.** Voice-only prompt fields keep artifacts, results and records unstyled and separate from display text;
+  they do not guarantee that a persona's tone never influences generated content. That limit is accepted and stated.

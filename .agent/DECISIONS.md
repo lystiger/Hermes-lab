@@ -519,3 +519,11 @@ Decision rule (pre-registered):
   reads `verification`, so the runner's pytest-less venv step ran and failed. The integrated code passed all 9 tests
   when checked manually. Fixed the key for both arms, and the harness now runs the tests itself after every run (same
   independent verdict for both arms). Runs restart at herdr-1 again.
+- **Result (2026-10-15):** 6 valid runs, all Haiku 5.5 (379/379 logged messages). Herdr: 3/3 READY_FOR_REVIEW, 3/3
+  independent tests pass, 0 completion errors, no leftovers, sprint 62.0 / 61.8 / 68.5 s (mean 64.1 s). OpenRig: 3/3,
+  3/3, 0 errors, no leftovers (rig released each time), sprint 158.3 / 162.4 / 149.3 s (mean 156.7 s). OpenRig is ~2.4x
+  slower, a fixed ~20-25 s per task from the seat lifecycle (new rig, then fresh-context relaunch per reuse).
+- **Decision (per the pre-registered rule):** OpenRig is neither more reliable nor faster, so **Herdr is the default
+  backend for every role; OpenRig stays as an optional backend, unused by default; H5 is dropped.** Limits: n=3 per arm,
+  short tasks; hung or interactive sessions (where hook-based completion could matter) were not tested. Revisit only if a
+  real failure shows Herdr's exit-code completion is insufficient.

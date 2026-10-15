@@ -515,3 +515,7 @@ Decision rule (pre-registered):
 - Run log: herdr-1 invalid (setup bug, not backend): the seed repo had no .gitignore, so __pycache__ got committed and
   Claude tried `git checkout`, a denied git mutation that fails the Herdr path fast. Fixed for both arms: .gitignore in the
   seed, and every prompt says "Do not run any git commands; Hermes commits your changes for you." Runs restart at herdr-1.
+- Run log: herdr-1 (second attempt) invalid (harness, not backend): the spec used `verification_steps` but the runner
+  reads `verification`, so the runner's pytest-less venv step ran and failed. The integrated code passed all 9 tests
+  when checked manually. Fixed the key for both arms, and the harness now runs the tests itself after every run (same
+  independent verdict for both arms). Runs restart at herdr-1 again.

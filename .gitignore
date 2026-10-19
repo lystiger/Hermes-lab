@@ -7,3 +7,4 @@ hermes-runs/
 config/agent_models.json
 config/agent_models.lock
 config/agent_models.last_used.json
+config/agent_models.seen.json

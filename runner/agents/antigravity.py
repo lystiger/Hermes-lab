@@ -23,14 +23,19 @@ class AntigravityAdapter(AgentAdapter):
             options.get("output_format", "stream-json"),
         ]
         if options.get("model"):
-            command.extend(["--model", str(options["model"])])
-        if options.get("effort"):
-            command.extend(["--effort", str(options["effort"])])
+            from agent_models import agy_cli_model
+            command.extend(["--model", agy_cli_model(options["model"], options.get("effort"))])
         if options.get("print_timeout"):
             command.extend(["--print-timeout", str(options["print_timeout"])])
         if options.get("dangerously_skip_permissions", False):
             command.append("--dangerously-skip-permissions")
         return command
+
+    def reported_model(self, result, command):
+        from agent_models import model_registry
+        if "--model" in command:
+            return model_registry.split_agy_model(command[command.index("--model") + 1])
+        return None, None
 
     def execute(self, context):
         permissions = context.phase.get("permissions", {})

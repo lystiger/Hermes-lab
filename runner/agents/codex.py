@@ -26,6 +26,11 @@ class CodexAdapter(AgentAdapter):
         command.append(argv_safe_prompt(prompt))
         return command
 
+    def reported_model(self, result, command):
+        model = re.search(r"^model:\s*(\S+)\s*$", result.stdout or "", re.MULTILINE)
+        effort = re.search(r"^reasoning effort:\s*(\S+)\s*$", result.stdout or "", re.MULTILINE)
+        return (model.group(1), effort.group(1) if effort else None) if model else (None, None)
+
     def validate_result(self, result, context):
         denials = [line for line in (result.stderr or "").splitlines()
                    if "permission denied" in line.lower()]

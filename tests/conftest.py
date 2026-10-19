@@ -43,5 +43,6 @@ def _isolated_openrig_ledger(tmp_path_factory, monkeypatch):
 @pytest.fixture(autouse=True)
 def _isolated_model_registry(tmp_path, monkeypatch):
     import agent_models
+    monkeypatch.setenv("HERMES_CODEX_MODELS_CACHE", str(tmp_path / "models_cache.json"))
     monkeypatch.setattr(agent_models, "model_registry", agent_models.ModelRegistry(
         tmp_path / "agent_models.json", tmp_path / "codex.toml"))

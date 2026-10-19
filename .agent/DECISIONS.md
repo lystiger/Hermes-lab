@@ -620,3 +620,18 @@ free seat, one agent at a time per seat, with one reserved "hot seat" for priori
    that run setting separately. A CLI-selected model remains null when its identity is unknown.
 5. **Effort is part of the setting.** Codex reasoning effort and agy effort persist alongside the model;
    Codex receives `model_reasoning_effort`, agy receives `--effort`. Claude has no effort setting here.
+
+### D-020a
+
+Model descriptors add `models: [{id, label, efforts}]` while preserving `configured`, `allowed`,
+and `lastUsed`. Efforts are validated per model. Codex reads the CLI models cache on every request
+(including mtime changes), includes the CLI config model, and uses static low/medium/high fallbacks
+when the cache is missing or invalid. Claude aliases remain available; reported full IDs persist in
+ignored `config/agent_models.seen.json`.
+
+agy groups low/medium/high CLI IDs into base models; launch encodes effort in the ID, choosing medium
+or the first offered effort when unspecified. Existing full CLI IDs pass through. PUT normalizes them.
+After execution, Claude modelUsage (largest input plus output token total), Codex header, or the agy
+CLI ID records `source: reported`. Requested model/effort/source remain alongside the report;
+`reportedModel` is included in runtime and completion/failure event metadata. Missing reports preserve
+the resolved launch setting, including null with `cli-default`.

@@ -2,6 +2,7 @@
 import fcntl
 import json
 import os
+import re
 from pathlib import Path
 import subprocess
 import tempfile
@@ -72,47 +73,107 @@ class ModelRegistry:
             return {"default": cli.get("model"), "effort": data.get("effort", cli.get("model_reasoning_effort"))}
         return {"default": data.get("default"), "effort": data.get("effort")}
 
-    def allowed(self, agent):
+    @staticmethod
+    def _agy_models(output):
+        grouped = {}
+        for line in output.splitlines():
+            parts = line.split("\t", 1)
+            model = parts[0].strip()
+            if not model or model.lower() in {"id", "model", "model id"}:
+                continue
+            label = parts[1].strip() if len(parts) > 1 else model
+            match = re.fullmatch(r"(.*)-(low|medium|high)", model)
+            base, effort = match.groups() if match else (model, None)
+            if effort:
+                label = re.sub(r" \((?:High|Medium|Low)\)$", "", label)
+            item = grouped.setdefault(base, {"id": base, "label": label, "efforts": []})
+            if effort and effort not in item["efforts"]:
+                item["efforts"].append(effort)
+        for item in grouped.values():
+            item["efforts"].sort(key=["low", "medium", "high"].index)
+        return list(grouped.values())
+
+    def models(self, agent):
         agent = canonical(agent)
         examples = self._read(ROOT / "config/agent_models.example.json")
+        values = examples.get(agent, {}).get("allowed", [])
         if agent == "claude":
-            return ["sonnet", "opus", "haiku"]
-        values = self._read(self.path).get(agent, {}).get("allowed", examples.get(agent, {}).get("allowed", []))
+            seen = self._read(self.path.with_name("agent_models.seen.json")).get("claude", [])
+            return [{"id": m, "label": m.title() + " (latest)", "efforts": []}
+                    for m in ("sonnet", "opus", "haiku")] + [
+                        {"id": m, "label": m, "efforts": []} for m in seen
+                        if m not in {"sonnet", "opus", "haiku"}]
         if agent == "codex":
+            # Read on every request: mtime changes (including atomic replacement) cannot go stale.
+            path = Path(os.environ.get("HERMES_CODEX_MODELS_CACHE", Path.home() / ".codex/models_cache.json"))
             try:
-                model = tomllib.loads(self.codex_path.read_text()).get("model")
+                entries = json.loads(path.read_text())["models"]
+                if not isinstance(entries, list) or any(not isinstance(e, dict) or not isinstance(e.get("slug"), str)
+                        or not isinstance(e.get("supported_reasoning_levels", []), list)
+                        or any(not isinstance(level, dict) or not isinstance(level.get("effort"), str)
+                               for level in e.get("supported_reasoning_levels", [])) for e in entries):
+                    raise ValueError("Invalid models cache")
+                def descriptor(e):
+                    return {"id": e["slug"], "label": e.get("display_name") or e["slug"],
+                            "efforts": [level["effort"] for level in e.get("supported_reasoning_levels", [])]}
+                models = [descriptor(e) for e in entries if e.get("visibility") == "list"]
+            except (OSError, ValueError, KeyError, TypeError):
+                entries = []
+                models = [{"id": m, "label": m, "efforts": ["low", "medium", "high"]} for m in values]
+            try:
+                configured = tomllib.loads(self.codex_path.read_text()).get("model")
             except (OSError, ValueError):
-                model = None
-            return list(dict.fromkeys([*values, *([model] if model else [])]))
+                configured = None
+            if configured and configured not in [m["id"] for m in models]:
+                entry = next((e for e in entries if e["slug"] == configured), None)
+                models.append(descriptor(entry) if entry else {"id": configured, "label": configured, "efforts": []})
+            return models
         if agent == "antigravity":
             with self._lock:
                 now = time.monotonic()
                 if self._cache is None or now - self._cache[0] >= self._cache[2]:
                     try:
-                        output = subprocess.run(
-                            ["agy", "models"], capture_output=True, text=True, timeout=20, check=True,
-                            stdin=subprocess.DEVNULL,
-                        ).stdout
-                        models = [line.split("\t", 1)[0].strip() for line in output.splitlines() if line.strip()]
-                        models = [m for m in models if m.lower() not in {"id", "model", "model id"}]
-                        ttl = 60
+                        output = subprocess.run(["agy", "models"], capture_output=True, text=True,
+                            timeout=20, check=True, stdin=subprocess.DEVNULL).stdout
+                        models, ttl = self._agy_models(output), 60
                     except (OSError, subprocess.SubprocessError):
-                        models, ttl = [], 10  # retry soon; a cold first call can be slow
+                        models, ttl = [], 10
                     if models:
                         self._last_good = models
                     self._cache = (now, models, ttl)
-                # A failed refresh keeps the last good list; the example list is only the first-run fallback.
-                return list(dict.fromkeys(self._cache[1] or self._last_good or values))
-        return values
+                return self._cache[1] or self._last_good or self._agy_models("\n".join(values))
+        return []
+
+    def allowed(self, agent):
+        return [m["id"] for m in self.models(agent)]
+
+    def split_agy_model(self, model, effort=None):
+        for item in self.models("antigravity"):
+            for level in item["efforts"]:
+                if model == item["id"] + "-" + level:
+                    return item["id"], level
+        match = re.fullmatch(r"(.*)-(low|medium|high)", model or "")
+        return match.groups() if match else (model, effort)
+
+    def agy_cli_model(self, model, effort=None):
+        base, level = self.split_agy_model(model, effort)
+        if base != model:
+            return model
+        item = next((m for m in self.models("antigravity") if m["id"] == model), None)
+        if item and item["efforts"]:
+            level = effort or ("medium" if "medium" in item["efforts"] else item["efforts"][0])
+            return model + "-" + level
+        return model
 
     def set(self, agent, model, effort):
         agent = canonical(agent)
-        if model not in self.allowed(agent):
+        if agent == "antigravity":
+            model, effort = self.split_agy_model(model, effort)
+        item = next((m for m in self.models(agent) if m["id"] == model), None)
+        if item is None:
             raise ValueError("Model is not in the agent allowlist")
-        efforts = {"codex": {None, "minimal", "low", "medium", "high", "xhigh"},
-                   "antigravity": {None, "low", "medium", "high"}, "claude": {None}}
-        if effort not in efforts.get(agent, {None}):
-            raise ValueError("Unsupported reasoning effort for agent")
+        if effort is not None and effort not in item["efforts"]:
+            raise ValueError("Unsupported reasoning effort for model")
         with self._writing():
             data = self._read(self.path)
             data[agent] = {"default": model, "effort": effort, "allowed": self.allowed(agent)}
@@ -131,12 +192,25 @@ class ModelRegistry:
             path = self.path.with_name(self.path.stem + ".last_used.json")
             data = self._read(path)
             data[canonical(agent)] = {k: metadata.get(k) for k in ("model", "effort", "source")}
+            if metadata.get("source") == "reported":
+                data[canonical(agent)].update({k: metadata.get(k) for k in
+                    ("requestedModel", "requestedEffort", "requestedSource")})
+                if canonical(agent) == "claude" and metadata.get("model"):
+                    seen_path = self.path.with_name("agent_models.seen.json")
+                    seen = self._read(seen_path)
+                    seen["claude"] = list(dict.fromkeys([*seen.get("claude", []), metadata["model"]]))
+                    self._atomic(seen_path, seen)
             self._atomic(path, data)
 
     def describe(self, agent):
         last = self._read(self.path.with_name(self.path.stem + ".last_used.json"))
-        return {"configured": self.configured(agent), "allowed": self.allowed(agent),
-                "lastUsed": last.get(canonical(agent))}
+        models = self.models(agent)
+        return {"configured": self.configured(agent), "allowed": [m["id"] for m in models],
+                "lastUsed": last.get(canonical(agent)), "models": models}
 
 
 model_registry = ModelRegistry()
+
+
+def agy_cli_model(model, effort=None):
+    return model_registry.agy_cli_model(model, effort)

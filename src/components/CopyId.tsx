@@ -14,7 +14,8 @@ export const CopyId: React.FC<{ value: string; className?: string; truncate?: bo
     return () => clearTimeout(id);
   }, [state]);
 
-  const copy = async () => {
+  const copy = async (e: React.MouseEvent) => {
+    e.stopPropagation();
     try {
       await navigator.clipboard.writeText(value);
       setState('copied');

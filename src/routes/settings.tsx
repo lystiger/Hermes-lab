@@ -19,12 +19,12 @@ export const SettingsRoute: React.FC = () => {
   } = useConsoleStore();
 
   const { agents } = useAgents();
-  const { settings } = useSettings();
+  const { settings, updatedAt } = useSettings();
   const { view, snapshotStatus, snapshotLoadedAt } = useExecution();
 
   return (
     <div className="flex flex-col min-h-full select-none bg-lys-base">
-      <PageHeader title="Settings" subtitle="Runtime and presentation" />
+      <PageHeader title="Settings" subtitle="Runtime and presentation" updatedAt={updatedAt} />
       {/* Top Split: Runtime vs Budget/Policy */}
       <div className="flex flex-col lg:flex-row items-stretch border-b border-lys-subtle">
         {/* Left Column: Runtime & Environment */}

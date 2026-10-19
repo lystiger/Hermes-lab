@@ -88,9 +88,9 @@ export const AgentDossier: React.FC<{ agent: AgentDetail; updatedAt?: number | n
           <Card accent={accent} label="Specs">
             <div className="p-6 flex flex-col gap-6">
               <div className="grid grid-cols-2 md:grid-cols-3 gap-x-6 gap-y-5">
-                <Spec label="Provider">{agent.provider || <UnknownValue reason="Not reported by Hermes" />}</Spec>
-                <Spec label="Model">{agent.model || <UnknownValue reason="Not reported by Hermes" />}</Spec>
-                <Spec label="Role">{agent.role || <UnknownValue reason="Not reported by Hermes" />}</Spec>
+                <Spec label="Provider">{agent.provider || <UnknownValue reason="Hermes did not report a provider" />}</Spec>
+                <Spec label="Model">{agent.model || <UnknownValue reason="Hermes did not report a model" />}</Spec>
+                <Spec label="Role">{agent.role || <UnknownValue reason="Hermes did not report a role" />}</Spec>
                 <Spec label="Phase">{agent.phase || <UnknownValue reason="Hermes reports no phase for this agent" />}</Spec>
                 <Spec label="Current task">{agent.currentTask || <UnknownValue reason="Hermes reports no current task for this agent" />}</Spec>
                 <Spec label="Active tool">{agent.activeTool || <UnknownValue reason="Hermes reports no active tool for this agent" />}</Spec>

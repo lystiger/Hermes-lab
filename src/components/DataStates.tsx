@@ -35,14 +35,14 @@ export const ErrorState: React.FC<{ label: string; error: unknown; onRetry?: () 
       {unreachable ? (
         <>
           <div className="text-lys-danger">Can&apos;t reach Hermes</div>
-          <div className="mt-1 text-lys-secondary break-words">
+          <div className="mt-1 text-lys-secondary break-words line-clamp-2" title={`${label} is not loading. Check that the Hermes runtime API is running at ${(error as HermesUnreachableError).url}.`}>
             {label} is not loading. Check that the Hermes runtime API is running at {(error as HermesUnreachableError).url}.
           </div>
         </>
       ) : (
         <>
           <div className="text-lys-danger">{label} failed</div>
-          <div className="mt-1 text-lys-secondary break-words">{message}</div>
+          <div className="mt-1 text-lys-secondary break-words line-clamp-2" title={message}>{message}</div>
         </>
       )}
       {onRetry && (
@@ -67,10 +67,12 @@ export const StaleNotice: React.FC<{ label: string; error: unknown; onRetry?: ()
   if (!error) return null;
   const message = error instanceof Error ? error.message : String(error);
   return (
-    <div role="alert" className="mb-2 px-3 py-2 border border-lys-warning/35 bg-lys-warning/6 font-sans text-[11px] text-lys-warning">
-      {label} refresh failed, showing last loaded data: {message}
+    <div role="alert" className="mb-2 px-3 py-2 border border-lys-warning/35 bg-lys-warning/6 font-sans text-[11px] text-lys-warning flex items-baseline justify-between gap-2">
+      <span className="line-clamp-2 break-words min-w-0" title={`${label} refresh failed, showing last loaded data: ${message}`}>
+        {label} refresh failed, showing last loaded data: {message}
+      </span>
       {onRetry && (
-        <button type="button" onClick={onRetry} className="ml-3 underline cursor-pointer">
+        <button type="button" onClick={onRetry} className="ml-3 underline cursor-pointer shrink-0">
           retry
         </button>
       )}

@@ -118,7 +118,7 @@ export const OverviewRoute: React.FC = () => {
                           <span className="font-semibold break-words" style={{ color: e.source.accentColor || 'var(--lys-text-muted)' }}>{traceSourceName(e.source)}</span>
                           <span className="break-all font-medium" style={{ color: eventKindColor(e.kind) }}>{e.kind}</span>
                         </span>
-                        <span className="text-lys-secondary break-words">{e.detail}</span>
+                        <span className="text-lys-secondary break-words line-clamp-2" title={e.detail}>{e.detail}</span>
                       </span>
                     </div>
                   ))}

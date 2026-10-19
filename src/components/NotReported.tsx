@@ -22,7 +22,7 @@ export const HeaderNotReported: React.FC<{ items: NotReportedItem[] }> = ({ item
         onClick={() => setOpen((prev) => !prev)}
         onMouseEnter={() => setOpen(true)}
         onMouseLeave={() => setOpen(false)}
-        aria-label="Not reported by Hermes"
+        aria-label="Unreported metrics"
         className="p-1 text-lys-faint hover:text-lys-primary cursor-pointer transition-colors rounded"
         title="What Hermes does not report"
       >
@@ -35,7 +35,7 @@ export const HeaderNotReported: React.FC<{ items: NotReportedItem[] }> = ({ item
         }`}
       >
         <p className="text-lys-faint">
-          <span className="text-lys-muted font-medium">Not reported by Hermes:</span>{' '}
+          <span className="text-lys-muted font-medium">Unreported metrics:</span>{' '}
           {items.map((item, i) => (
             <React.Fragment key={item.label}>
               {i > 0 && ' · '}

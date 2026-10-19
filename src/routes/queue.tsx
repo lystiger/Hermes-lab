@@ -112,11 +112,23 @@ const RecoverableJobs: React.FC<{ onSelect: (jobId: string) => void }> = ({ onSe
         {error && <ErrorState label="Recoverable jobs" error={error} onRetry={refetch} />}
         <div className="flex flex-col gap-1.5">
           {jobs.map((j) => (
-            <button key={j.id} type="button" onClick={() => onSelect(j.id)} className="flex flex-wrap justify-between gap-2 p-2.5 bg-lys-surface-2 hover:bg-lys-surface-interactive text-left text-[12px] cursor-pointer">
+            <div
+              key={j.id}
+              role="button"
+              tabIndex={0}
+              onClick={() => onSelect(j.id)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                  e.preventDefault();
+                  onSelect(j.id);
+                }
+              }}
+              className="flex flex-wrap justify-between gap-2 p-2.5 bg-lys-surface-2 hover:bg-lys-surface-interactive text-left text-[12px] cursor-pointer"
+            >
               <CopyId value={j.id} truncate className="text-lys-faint" />
               <span className="text-lys-primary truncate max-w-[300px]" title={j.title}>{j.title}</span>
               <span className="text-lys-muted uppercase font-mono-code text-[11px]">{j.status}</span>
-            </button>
+            </div>
           ))}
         </div>
       </div>

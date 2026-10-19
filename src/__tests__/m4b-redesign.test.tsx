@@ -32,7 +32,7 @@ describe('M4b noise rule: unknown-only panels are not rendered', () => {
         <OverviewRoute />
       </MemoryRouter>
     );
-    const line = await screen.findByText(/Not reported by Hermes/);
+    const line = await screen.findByText(/Unreported metrics/);
     const container = line.parentElement!;
     for (const label of ['estimated spend', 'sprint budget', 'queue projection', 'remaining budget']) {
       const item = within(container).getByText(label);
@@ -121,6 +121,7 @@ describe('M4b queue columns by real status', () => {
     );
     const failed = await screen.findByRole('list', { name: 'Failed jobs' });
     expect(within(failed).getByText('Live runner end-to-end')).toBeInTheDocument();
-    expect(screen.getByRole('list', { name: 'Running jobs' })).toBeInTheDocument();
+    const emptyStrip = screen.getByLabelText('Empty status groups');
+    expect(within(emptyStrip).getByText('Running')).toBeInTheDocument();
   });
 });

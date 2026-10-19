@@ -59,6 +59,9 @@ export const MissionBoard: React.FC<{
     .map((g) => ({ ...g, statuses: [] as string[] }));
   const columns = [...BOARD_GROUPS, ...otherColumns];
 
+  const activeColumns = columns.filter((c) => (counts.get(c.id) ?? 0) > 0);
+  const emptyColumns = columns.filter((c) => (counts.get(c.id) ?? 0) === 0);
+
   return (
     <section aria-label="Mission board" className="flex flex-col gap-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -72,27 +75,43 @@ export const MissionBoard: React.FC<{
       {loading && jobs.length === 0 && <Card><LoadingState label="Loading jobs…" /></Card>}
       {Boolean(error) && jobs.length === 0 && <Card><ErrorState label="Job queue" error={error} onRetry={onRetry} /></Card>}
 
-      <div ref={listRef} className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-5 items-start">
-        {columns.map((c) => {
-          const n = counts.get(c.id) ?? 0;
-          const colJobs = jobs.filter((j) => groupOf(j).id === c.id);
-          return (
-            <div key={c.id} role="list" aria-label={`${c.label} jobs`} className="flex flex-col gap-3 min-w-0">
-              <div className="bg-lys-surface-1 border-t-[3px] px-3.5 py-2.5 flex items-center justify-between rounded-t-sm" style={{ borderTopColor: c.tone }}>
-                <span className="flex items-center gap-2 text-[12px] font-medium tracking-wider uppercase" style={{ color: c.tone }}>
-                  <c.icon size={14} strokeWidth={2} aria-hidden="true" className="shrink-0" focusable="false" />
-                  {c.label}
-                </span>
-                <span className="font-display text-[20px] font-semibold text-lys-primary lys-metric">{n}</span>
-              </div>
-              {colJobs.length === 0 ? (
-                <div className="h-16 flex items-center justify-center text-[14px] text-lys-faint/60 select-none">—</div>
-              ) : (
-                colJobs.map((j) => <JobCard key={j.id} job={j} tone={c.tone} agentsList={agents} onOpen={onOpen} />)
-              )}
-            </div>
-          );
-        })}
+      <div ref={listRef} className="flex flex-col gap-5">
+        {activeColumns.length > 0 && (
+          <div className={`grid gap-5 items-stretch ${activeColumns.length === 1 ? 'grid-cols-1' : activeColumns.length === 2 ? 'grid-cols-1 md:grid-cols-2' : 'grid-cols-1 md:grid-cols-2 xl:grid-cols-3'}`}>
+            {activeColumns.map((c) => {
+              const n = counts.get(c.id) ?? 0;
+              const colJobs = jobs.filter((j) => groupOf(j).id === c.id);
+              return (
+                <div key={c.id} role="list" aria-label={`${c.label} jobs`} className="flex flex-col gap-3 min-w-0 h-full">
+                  <div className="bg-lys-surface-1 border-t-[3px] px-3.5 py-2.5 flex items-center justify-between rounded-t-sm" style={{ borderTopColor: c.tone }}>
+                    <span className="flex items-center gap-2 text-[12px] font-medium tracking-wider uppercase" style={{ color: c.tone }}>
+                      <c.icon size={14} strokeWidth={2} aria-hidden="true" className="shrink-0" focusable="false" />
+                      {c.label}
+                    </span>
+                    <span className="font-display text-[20px] font-semibold text-lys-primary lys-metric">{n}</span>
+                  </div>
+                  {colJobs.map((j) => <JobCard key={j.id} job={j} tone={c.tone} agentsList={agents} onOpen={onOpen} />)}
+                </div>
+              );
+            })}
+          </div>
+        )}
+
+        {emptyColumns.length > 0 && (
+          <div aria-label="Empty status groups" className="p-3 bg-lys-surface-1 border border-lys-subtle flex flex-wrap items-center gap-2 text-[11px]">
+            <span className="text-[10px] font-medium tracking-wider uppercase text-lys-faint mr-1">Empty:</span>
+            {emptyColumns.map((c) => (
+              <span
+                key={c.id}
+                className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-lys-surface-2 border border-lys-subtle rounded-sm"
+              >
+                <c.icon size={13} strokeWidth={2} style={{ color: c.tone }} aria-hidden="true" className="shrink-0" focusable="false" />
+                <span className="text-lys-secondary font-medium">{c.label}</span>
+                <span className="font-display font-semibold text-lys-muted lys-metric">0</span>
+              </span>
+            ))}
+          </div>
+        )}
       </div>
 
       {jobs.length === 0 && !loading && !error && (

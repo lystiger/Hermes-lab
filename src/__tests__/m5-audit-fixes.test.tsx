@@ -280,7 +280,7 @@ describe('M5 F4: verification, retry history and repair/replan counts render fro
         <JobDetailView jobId={LIVE_JOB_ID} />
       </MemoryRouter>
     );
-    expect(await screen.findByText('Hermes recorded no verification result for this job.')).toBeInTheDocument();
+    expect(await screen.findByText('No verification recorded')).toBeInTheDocument();
     expect(screen.getByText('not reported by Hermes for this job')).toBeInTheDocument();
     expect(screen.getByTitle('Hermes did not report a repair count')).toBeInTheDocument();
     expect(screen.getByTitle('Hermes did not report a replan count')).toBeInTheDocument();

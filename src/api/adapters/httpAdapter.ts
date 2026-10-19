@@ -231,7 +231,7 @@ export class HttpHermesApi implements HermesApi {
   }
 
   // --------------------------------------------------------------------------
-  // Real Job & Queue endpoints (Phase 4)
+  // Real Job & Queue endpoints
   // --------------------------------------------------------------------------
 
   async getJobs(status?: string): Promise<Job[]> {

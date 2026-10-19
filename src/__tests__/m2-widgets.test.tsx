@@ -76,9 +76,9 @@ describe('M2 job detail: failure, tasks, runs, observations and trace', () => {
     installLiveHermes();
     renderIn(<JobDetailView jobId={LIVE_JOB_ID} />);
 
-    expect(await screen.findByText('Hermes recorded no tasks for this job.')).toBeInTheDocument();
-    expect(screen.getByText('Hermes recorded no runs for this job.')).toBeInTheDocument();
-    expect(screen.getByText('Hermes recorded no observations for this job.')).toBeInTheDocument();
+    expect(await screen.findByText('No tasks recorded')).toBeInTheDocument();
+    expect(screen.getByText('No runs recorded')).toBeInTheDocument();
+    expect(screen.getByText('No observations recorded')).toBeInTheDocument();
   });
 
   it('shows a failed task list as an error with retry, not as no tasks', async () => {
@@ -86,7 +86,7 @@ describe('M2 job detail: failure, tasks, runs, observations and trace', () => {
     renderIn(<JobDetailView jobId={LIVE_JOB_ID} />);
 
     expect(await screen.findByText('Tasks failed')).toBeInTheDocument();
-    expect(screen.queryByText('Hermes recorded no tasks for this job.')).not.toBeInTheDocument();
+    expect(screen.queryByText('No tasks recorded')).not.toBeInTheDocument();
   });
 
   it('shows the job token total with its window and says when none was tracked', async () => {

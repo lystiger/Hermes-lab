@@ -118,7 +118,7 @@ describe('M1 truth sweep: HTTP-mode screens render only real data', () => {
     expect(metricValue('TOKENS')).toMatch(/^0/);
     // Spend and budget are unknown-only, so they are listed on the not-reported line instead of a panel.
     expect(screen.getByText('estimated spend')).toBeInTheDocument();
-    expect(screen.getByText(/Not reported by Hermes/)).toBeInTheDocument();
+    expect(screen.getByText(/Unreported metrics/)).toBeInTheDocument();
 
     expect(await screen.findByText('provider usage')).toBeInTheDocument();
     expectNoFabrication(container);
@@ -154,7 +154,7 @@ describe('M1 truth sweep: HTTP-mode screens render only real data', () => {
 
     expect(await screen.findByText(/Since runtime start/i)).toBeInTheDocument();
     expect(screen.getByText('run budget')).toBeInTheDocument();
-    expect(screen.getByText(/Not reported by Hermes/)).toBeInTheDocument();
+    expect(screen.getByText(/Unreported metrics/)).toBeInTheDocument();
     expectNoFabrication(container);
   });
 

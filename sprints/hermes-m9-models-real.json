@@ -1,0 +1,47 @@
+{
+  "sprint_id": "hermes-m9-models-real",
+  "name": "Hermes M9: real model lists and per-model effort",
+  "target_repo": "../",
+  "base_ref": "8fb6d89010bca9de7a667df5c97feba002535672",
+  "target_branch": "hermes/m9/integration",
+  "worktree_root": "/home/lystiger/hermes-worktrees/hermes-m9",
+  "runs_root": "/home/lystiger/hermes-runs",
+  "execution_backend": "subprocess",
+  "limits": {
+    "max_changed_files": 60,
+    "timeout_seconds": 3000
+  },
+  "verification": [
+    {
+      "name": "pytest",
+      "command": [
+        "/home/lystiger/Projects/Hermes-lab/.venv/bin/python",
+        "-m",
+        "pytest",
+        "tests",
+        "-q",
+        "--ignore=tests/smoke",
+        "-p",
+        "no:cacheprovider"
+      ],
+      "timeout_seconds": 900
+    }
+  ],
+  "phases": [
+    {
+      "name": "m9_models_real",
+      "role": "builder",
+      "agent": "codex",
+      "execution_backend": "subprocess",
+      "worktree_dir": "models",
+      "branch": "hermes/m9/models",
+      "prompt_file": "prompts/hermes-m9-models-real.md",
+      "expected_handoff": "HANDOFF_M9_MODELS.md",
+      "commit_message": "feat(models): real Codex/agy model lists, per-model effort, reported model",
+      "cmd_options": {
+        "sandbox": "workspace-write",
+        "ephemeral": true
+      }
+    }
+  ]
+}

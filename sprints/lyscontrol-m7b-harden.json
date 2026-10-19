@@ -1,0 +1,91 @@
+{
+  "sprint_id": "lyscontrol-m7b-harden",
+  "name": "LysControl M7b: harden and verify the polish",
+  "target_repo": "../../LysControl",
+  "base_ref": "3fe86599694b86e6919599df6376317a8cc9dfd5",
+  "target_branch": "hermes/lyscontrol-m7b/integration",
+  "worktree_root": "/home/lystiger/hermes-worktrees/lyscontrol-m7b",
+  "runs_root": "/home/lystiger/hermes-runs",
+  "execution_backend": "subprocess",
+  "limits": {
+    "max_changed_files": 90,
+    "timeout_seconds": 3000
+  },
+  "verification": [
+    {
+      "name": "npm-ci",
+      "command": [
+        "npm",
+        "ci"
+      ],
+      "timeout_seconds": 600
+    },
+    {
+      "name": "typecheck",
+      "command": [
+        "npm",
+        "run",
+        "typecheck"
+      ],
+      "timeout_seconds": 300
+    },
+    {
+      "name": "lint",
+      "command": [
+        "npm",
+        "run",
+        "lint"
+      ],
+      "timeout_seconds": 300
+    },
+    {
+      "name": "test",
+      "command": [
+        "npm",
+        "test"
+      ],
+      "timeout_seconds": 600
+    },
+    {
+      "name": "build",
+      "command": [
+        "npm",
+        "run",
+        "build"
+      ],
+      "timeout_seconds": 600
+    }
+  ],
+  "phases": [
+    {
+      "name": "m7_hardening",
+      "role": "hardener",
+      "agent": "codex",
+      "execution_backend": "subprocess",
+      "worktree_dir": "hardener",
+      "branch": "hermes/lyscontrol-m7b/hardener",
+      "prompt_file": "prompts/lyscontrol-m7-hardener.md",
+      "expected_handoff": "HANDOFF_HARDENER.md",
+      "commit_message": "fix(ui): alignment, copy, accessibility and empty states",
+      "cmd_options": {
+        "sandbox": "workspace-write",
+        "ephemeral": true
+      }
+    },
+    {
+      "name": "m7_verification",
+      "role": "verifier",
+      "agent": "codex",
+      "execution_backend": "subprocess",
+      "worktree_dir": "verifier",
+      "branch": "hermes/lyscontrol-m7b/verifier",
+      "prompt_file": "prompts/lyscontrol-m7-verifier.md",
+      "expected_handoff": "HANDOFF_CODEX.md",
+      "commit_message": "test(ui): placeholder guard and layout checks",
+      "cmd_options": {
+        "sandbox": "workspace-write",
+        "ephemeral": true
+      }
+    }
+  ]
+}

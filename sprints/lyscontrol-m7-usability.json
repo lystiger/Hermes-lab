@@ -1,0 +1,75 @@
+{
+  "sprint_id": "lyscontrol-m7-usability",
+  "name": "LysControl M7 polish: fewer words, aligned cards",
+  "target_repo": "../../LysControl",
+  "base_ref": "a84d660d2810407a9f7e94c08ba9d19eaf57fef4",
+  "target_branch": "hermes/lyscontrol-m7/integration",
+  "worktree_root": "/home/lystiger/hermes-worktrees/lyscontrol-m7",
+  "runs_root": "/home/lystiger/hermes-runs",
+  "execution_backend": "subprocess",
+  "limits": {
+    "max_changed_files": 90,
+    "timeout_seconds": 2400
+  },
+  "verification": [
+    {"name": "npm-ci", "command": ["npm", "ci"], "timeout_seconds": 600},
+    {"name": "typecheck", "command": ["npm", "run", "typecheck"], "timeout_seconds": 300},
+    {"name": "lint", "command": ["npm", "run", "lint"], "timeout_seconds": 300},
+    {"name": "test", "command": ["npm", "test"], "timeout_seconds": 600},
+    {"name": "build", "command": ["npm", "run", "build"], "timeout_seconds": 600}
+  ],
+  "phases": [
+    {
+      "name": "m7_design_system_and_pages",
+      "role": "builder",
+      "agent": "antigravity",
+      "execution_backend": "subprocess",
+      "worktree_dir": "builder",
+      "branch": "hermes/lyscontrol-m7/builder",
+      "prompt_file": "prompts/lyscontrol-m7-builder.md",
+      "expected_handoff": "HANDOFF_AGY.md",
+      "commit_message": "feat(ui): shared design system, aligned pages, no placeholder data",
+      "permissions": {
+        "commands": [
+          "npm ci",
+          "npm install",
+          "npm run typecheck",
+          "npm run lint",
+          "npm run test",
+          "npm test",
+          "npm run build",
+          "npx tsc --noEmit",
+          "npx vitest run",
+          "npx eslint .",
+          "npm run typecheck && npm run lint && npm test",
+          "npm run typecheck && npm run lint && npm test && npm run build"
+        ]
+      },
+      "cmd_options": {"output_format": "stream-json", "print_timeout": "35m", "dangerously_skip_permissions": true}
+    },
+    {
+      "name": "m7_hardening",
+      "role": "hardener",
+      "agent": "claude",
+      "execution_backend": "subprocess",
+      "worktree_dir": "hardener",
+      "branch": "hermes/lyscontrol-m7/hardener",
+      "prompt_file": "prompts/lyscontrol-m7-hardener.md",
+      "expected_handoff": "HANDOFF_CLAUDE.md",
+      "commit_message": "fix(ui): alignment, copy, accessibility and empty states",
+      "cmd_options": {"model": "sonnet", "max_turns": 80, "permission_mode": "dontAsk", "output_format": "json"}
+    },
+    {
+      "name": "m7_verification",
+      "role": "verifier",
+      "agent": "codex",
+      "execution_backend": "subprocess",
+      "worktree_dir": "verifier",
+      "branch": "hermes/lyscontrol-m7/verifier",
+      "prompt_file": "prompts/lyscontrol-m7-verifier.md",
+      "expected_handoff": "HANDOFF_CODEX.md",
+      "commit_message": "test(ui): placeholder guard and layout checks",
+      "cmd_options": {"sandbox": "workspace-write", "ephemeral": true}
+    }
+  ]
+}

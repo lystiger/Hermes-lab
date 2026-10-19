@@ -1,0 +1,107 @@
+{
+  "sprint_id": "lyscontrol-m7c-fix",
+  "name": "LysControl M7c: fix review findings, verify",
+  "target_repo": "../../LysControl",
+  "base_ref": "a00d27730c67b918e04afab5b6297849e5fcde61",
+  "target_branch": "hermes/lyscontrol-m7c/integration",
+  "worktree_root": "/home/lystiger/hermes-worktrees/lyscontrol-m7c",
+  "runs_root": "/home/lystiger/hermes-runs",
+  "execution_backend": "subprocess",
+  "limits": {
+    "max_changed_files": 90,
+    "timeout_seconds": 3000
+  },
+  "verification": [
+    {
+      "name": "npm-ci",
+      "command": [
+        "npm",
+        "ci"
+      ],
+      "timeout_seconds": 600
+    },
+    {
+      "name": "typecheck",
+      "command": [
+        "npm",
+        "run",
+        "typecheck"
+      ],
+      "timeout_seconds": 300
+    },
+    {
+      "name": "lint",
+      "command": [
+        "npm",
+        "run",
+        "lint"
+      ],
+      "timeout_seconds": 300
+    },
+    {
+      "name": "test",
+      "command": [
+        "npm",
+        "test"
+      ],
+      "timeout_seconds": 600
+    },
+    {
+      "name": "build",
+      "command": [
+        "npm",
+        "run",
+        "build"
+      ],
+      "timeout_seconds": 600
+    }
+  ],
+  "phases": [
+    {
+      "name": "m7c_fix_findings",
+      "role": "builder",
+      "agent": "antigravity",
+      "execution_backend": "subprocess",
+      "worktree_dir": "fixer",
+      "branch": "hermes/lyscontrol-m7c/fixer",
+      "prompt_file": "prompts/lyscontrol-m7c-fix.md",
+      "expected_handoff": "HANDOFF_FIX.md",
+      "commit_message": "fix(ui): clamp event text, dedupe usage, compact queue, copy limits, guards",
+      "permissions": {
+        "commands": [
+          "npm ci",
+          "npm install",
+          "npm run typecheck",
+          "npm run lint",
+          "npm run test",
+          "npm test",
+          "npm run build",
+          "npx tsc --noEmit",
+          "npx vitest run",
+          "npx eslint .",
+          "npm run typecheck && npm run lint && npm test",
+          "npm run typecheck && npm run lint && npm test && npm run build"
+        ]
+      },
+      "cmd_options": {
+        "output_format": "stream-json",
+        "print_timeout": "40m",
+        "dangerously_skip_permissions": true,
+        "model": "gemini-3.8-flash-high"
+      }
+    },
+    {
+      "name": "m7c_verify",
+      "role": "verifier",
+      "agent": "codex",
+      "execution_backend": "subprocess",
+      "worktree_dir": "verifier",
+      "branch": "hermes/lyscontrol-m7c/verifier",
+      "prompt_file": "prompts/lyscontrol-m7c-verify.md",
+      "cmd_options": {
+        "sandbox": "workspace-write",
+        "ephemeral": true
+      }
+    }
+  ]
+}

@@ -34,6 +34,18 @@ class AgentContext:
     backend: Any
 
 
+def argv_safe_prompt(prompt):
+    """Keep a prompt from being parsed as a CLI option.
+
+    The persona block starts with "--- ...", and the agent CLIs reject a
+    positional or flag value that begins with "-" (claude: unknown option,
+    codex: unexpected argument). Lead with a plain line in that case.
+    """
+    if prompt.startswith("-"):
+        return "Instructions:\n" + prompt
+    return prompt
+
+
 class AgentAdapter(ABC):
     """Small boundary around one agent CLI and its result contract."""
 

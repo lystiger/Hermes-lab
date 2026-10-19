@@ -1,6 +1,6 @@
 import json
 
-from .base import AgentAdapter
+from .base import AgentAdapter, argv_safe_prompt
 from .errors import SprintRunnerError
 from .permissions import scoped_antigravity_permissions
 
@@ -16,7 +16,7 @@ class AntigravityAdapter(AgentAdapter):
             "agy",
             "--new-project",
             "-p",
-            prompt,
+            argv_safe_prompt(prompt),
             "--output-format",
             options.get("output_format", "stream-json"),
         ]

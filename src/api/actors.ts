@@ -66,6 +66,14 @@ export const SYSTEM_ACTORS: Record<string, ActorRef> = {
 };
 
 /**
+ * Name shown for an event's source: the registered name for a known actor (for example "OpenRig" rather than the
+ * raw id "openrig"), otherwise the name the event itself carries.
+ */
+export function traceSourceName(source: { id: string; displayName: string }): string {
+  return SYSTEM_ACTORS[source.id.toLowerCase()]?.displayName ?? source.displayName;
+}
+
+/**
  * Resolves an actor presentation reference from dynamic agent registry, known system actors, or generic fallback.
  */
 export function resolveActorPresentation(

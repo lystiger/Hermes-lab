@@ -10,6 +10,7 @@ import { FilterPills } from '../components/FilterPills';
 import { CopyId } from '../components/CopyId';
 import { useArrowNavigation, useEscape } from '../components/keyboard';
 import { formatMillis } from '../features/time/format';
+import { traceSourceName } from '../api/actors';
 
 /** Time of an event in local time, from its epoch seconds when the bus gives them. */
 export function eventTime(e: TraceEvent): string {
@@ -56,7 +57,7 @@ export const EventsRoute: React.FC = () => {
     for (const e of allEvents) {
       const c = eventCategory(e.kind);
       byCategory.set(c, (byCategory.get(c) ?? 0) + 1);
-      bySource.set(e.source.displayName, (bySource.get(e.source.displayName) ?? 0) + 1);
+      bySource.set(traceSourceName(e.source), (bySource.get(traceSourceName(e.source)) ?? 0) + 1);
     }
     return { byCategory, bySource };
   }, [allEvents]);
@@ -64,7 +65,7 @@ export const EventsRoute: React.FC = () => {
   const visible = allEvents.filter(
     (e) =>
       (category === 'ALL' || eventCategory(e.kind) === category) &&
-      (source === 'ALL' || e.source.displayName === source)
+      (source === 'ALL' || traceSourceName(e.source) === source)
   );
 
   const shown = frozen ? visible.filter((e) => frozen.has(e.id)) : visible;
@@ -137,7 +138,7 @@ export const EventsRoute: React.FC = () => {
                       </span>
                       <span className="min-w-0 flex flex-col gap-0.5">
                         <span className="flex flex-wrap items-baseline gap-x-3">
-                          <span className="font-semibold break-words" style={{ color: e.source.accentColor || 'var(--lys-text-muted)' }}>{e.source.displayName}</span>
+                          <span className="font-semibold break-words" style={{ color: e.source.accentColor || 'var(--lys-text-muted)' }}>{traceSourceName(e.source)}</span>
                           <span className="font-medium break-all" style={{ color: eventKindColor(e.kind) }}>{e.kind}</span>
                         </span>
                         <span className="text-lys-secondary break-words">{e.detail}</span>

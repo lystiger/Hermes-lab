@@ -7,6 +7,14 @@ function pad(n: number, w: number): string {
   return String(n).padStart(w, '0');
 }
 
+/** Event list order everywhere in the console: newest first (by epoch time, then arrival). */
+export function sortNewestFirst(events: TraceEvent[]): TraceEvent[] {
+  return events
+    .map((event, index) => ({ event, index }))
+    .sort((a, b) => b.event.rawTs - a.event.rawTs || a.index - b.index)
+    .map(({ event }) => event);
+}
+
 export function fmtTs(sec: number): string {
   const h = Math.floor(sec / 3600);
   const m = Math.floor(sec / 60) % 60;
@@ -120,7 +128,8 @@ export const useConsoleStore = create<ConsoleUIState>((set, get) => ({
 
   setInitialEvents: (events) =>
     set((state) => ({
-      allEvents: state.allEvents.length === 0 ? events : state.allEvents
+      // History arrives oldest first from the API; the console shows newest first.
+      allEvents: state.allEvents.length === 0 ? sortNewestFirst(events) : state.allEvents
     })),
 
   addTraceEvent: (event) =>
@@ -129,7 +138,7 @@ export const useConsoleStore = create<ConsoleUIState>((set, get) => ({
       const alreadyExists = state.allEvents.some((e) => e.id === event.id);
       const nextEvents = alreadyExists
         ? state.allEvents
-        : [event, ...state.allEvents].slice(0, 150);
+        : sortNewestFirst([event, ...state.allEvents]).slice(0, 150);
 
       // 2. Reactively reduce agent status from live runtime events
       let nextStatuses = state.agentRuntimeStatuses;

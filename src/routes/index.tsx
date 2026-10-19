@@ -5,7 +5,7 @@ import { AgentPresence } from '../features/agents/AgentPresence';
 import { ProviderTelemetryList } from '../features/telemetry/ProviderTelemetryList';
 import { useConsoleStore } from '../stores/useConsoleStore';
 import { useAgents, useCapacityTelemetry, useJobs, useTelemetry } from '../api/hooks';
-import { resolveActorPresentation } from '../api/actors';
+import { resolveActorPresentation, traceSourceName } from '../api/actors';
 import { eventKindColor } from '../features/events/eventKinds';
 import { ErrorState, LoadingState, EmptyState, StaleNotice, UNKNOWN, Freshness } from '../components/DataStates';
 import { Card } from '../components/Card';
@@ -109,7 +109,7 @@ export const OverviewRoute: React.FC = () => {
                       <span className="font-mono-code text-lys-faint whitespace-nowrap pt-0.5">{eventTime(e)}</span>
                       <span className="min-w-0 flex flex-col gap-0.5">
                         <span className="flex flex-wrap items-baseline gap-x-3">
-                          <span className="font-semibold break-words" style={{ color: e.source.accentColor || 'var(--lys-text-muted)' }}>{e.source.displayName}</span>
+                          <span className="font-semibold break-words" style={{ color: e.source.accentColor || 'var(--lys-text-muted)' }}>{traceSourceName(e.source)}</span>
                           <span className="break-all" style={{ color: eventKindColor(e.kind) }}>{e.kind}</span>
                         </span>
                         <span className="text-lys-secondary break-words">{e.detail}</span>

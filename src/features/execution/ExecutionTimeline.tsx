@@ -1,6 +1,7 @@
 import React from 'react';
 import { TraceEvent } from '../../api/types';
 import { eventColor } from './executionFormat';
+import { traceSourceName } from '../../api/actors';
 
 interface ExecutionTimelineProps {
   events: TraceEvent[];
@@ -34,7 +35,7 @@ export const ExecutionTimeline: React.FC<ExecutionTimelineProps> = ({ events, li
         >
           <span className="w-24 flex-shrink-0 text-lys-faint">{e.ts}</span>
           <span className="w-24 flex-shrink-0 font-semibold" style={{ color: e.source.accentColor || 'var(--lys-text-muted)' }}>
-            {e.source.id}
+            {traceSourceName(e.source)}
           </span>
           <span className="w-full md:w-44 flex-shrink-0 font-medium break-all" style={{ color: eventColor(e.kind) }}>
             {e.kind.replace('execution.', '')}

@@ -209,7 +209,7 @@ DEFAULT_PERSONAS: Dict[str, PersonaProfile] = {
         ],
         behavioralRules=[
             "Verify edge cases, regression suites, and invariants rigorously",
-            "Never modify source files in verifier role",
+            "When your role is verifier, never modify source files; in any other role, follow the phase instructions",
             "Report exact failure output and reproduction steps",
             "CRITICAL: Controller rules, operator instructions, and workspace constraints strictly override persona style.",
             "CRITICAL: Remain technically truthful; never misrepresent code state or test outcomes.",

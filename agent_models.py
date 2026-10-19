@@ -22,6 +22,7 @@ class ModelRegistry:
         self.path = Path(path or os.environ.get("HERMES_AGENT_MODELS", ROOT / "config/agent_models.json"))
         self.codex_path = Path(codex_path or Path.home() / ".codex/config.toml")
         self._cache = None
+        self._last_good = []
         self._lock = threading.RLock()
 
     @staticmethod
@@ -85,15 +86,23 @@ class ModelRegistry:
             return list(dict.fromkeys([*values, *([model] if model else [])]))
         if agent == "antigravity":
             with self._lock:
-                if self._cache is None or time.monotonic() - self._cache[0] >= 60:
+                now = time.monotonic()
+                if self._cache is None or now - self._cache[0] >= self._cache[2]:
                     try:
-                        output = subprocess.run(["agy", "models"], capture_output=True, text=True, timeout=5, check=True).stdout
+                        output = subprocess.run(
+                            ["agy", "models"], capture_output=True, text=True, timeout=20, check=True,
+                            stdin=subprocess.DEVNULL,
+                        ).stdout
                         models = [line.split("\t", 1)[0].strip() for line in output.splitlines() if line.strip()]
                         models = [m for m in models if m.lower() not in {"id", "model", "model id"}]
+                        ttl = 60
                     except (OSError, subprocess.SubprocessError):
-                        models = []
-                    self._cache = (time.monotonic(), models)
-                return list(dict.fromkeys(self._cache[1] or values))
+                        models, ttl = [], 10  # retry soon; a cold first call can be slow
+                    if models:
+                        self._last_good = models
+                    self._cache = (now, models, ttl)
+                # A failed refresh keeps the last good list; the example list is only the first-run fallback.
+                return list(dict.fromkeys(self._cache[1] or self._last_good or values))
         return values
 
     def set(self, agent, model, effort):

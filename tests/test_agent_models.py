@@ -81,7 +81,12 @@ def test_agy_fake_cli_and_cache(tmp_path, monkeypatch):
     assert registry.allowed('gemini') == ['model-a', 'model-b']
     cli.unlink()
     assert registry.allowed('antigravity') == ['model-a', 'model-b']
-    registry._cache = (0, [])
+    registry._cache = (0, [], 60)
+    # a failed refresh keeps the last good list
+    assert registry.allowed('antigravity') == ['model-a', 'model-b']
+    # with no good list yet, the example list is the fallback
+    registry._last_good = []
+    registry._cache = (0, [], 60)
     assert registry.allowed('antigravity') == ['gemini-2.5-pro', 'gemini-2.5-flash']
 
 
@@ -112,7 +117,7 @@ def test_adapters_commands_and_event_metadata(tmp_path, monkeypatch):
     assert '--model' not in ClaudeAdapter().build_command('work', {})
     registry.set('claude', 'haiku', None)
     assert 'haiku' in ClaudeAdapter().build_command('work', {})
-    registry._cache = (agent_models.time.monotonic(), ['fake-agy'])
+    registry._cache = (agent_models.time.monotonic(), ['fake-agy'], 60)
     registry.set('antigravity', 'fake-agy', 'low')
     assert '--effort' in AntigravityAdapter().build_command('work', {})
     publisher = Mock()

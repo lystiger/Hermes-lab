@@ -62,6 +62,9 @@ class AgentAdapter(ABC):
         resolved = model_registry.resolve(self.name, options)
         return {**options, "model": resolved["model"], "effort": resolved["effort"], "_model_resolved": True}
 
+    def reported_model(self, result, command):
+        return None, None
+
     def prepare(self, context):
         pass
 
@@ -132,6 +135,18 @@ class AgentAdapter(ABC):
         finally:
             self.cleanup(context)
 
+        reported, effort = self.reported_model(result, command)
+        report_metadata = {"reportedModel": reported}
+        if reported:
+            model_metadata = {"model": reported, "effort": effort, "source": "reported",
+                "requestedModel": model_metadata["model"], "requestedEffort": model_metadata["effort"],
+                "requestedSource": model_metadata["source"]}
+            model_registry.record(self.name, model_metadata)
+        report_metadata.update(model_metadata)
+        runtime = dict(getattr(result, "runtime_metadata", None) or {})
+        runtime.update(report_metadata)
+        object.__setattr__(result, "runtime_metadata", runtime)
+
         duration_s = f"{time.monotonic() - start_time:.2f}s"
         context.runner.logger.info(
             "Agent %s process completed via %s with exit code %s",
@@ -150,7 +165,7 @@ class AgentAdapter(ABC):
                     detail=f"Agent {self.name} exited with code {result.returncode}",
                     duration=duration_s,
                     job_id=sprint_id,
-                    metadata={"phase": phase_name, "returncode": result.returncode},
+                    metadata={"phase": phase_name, "returncode": result.returncode, **report_metadata},
                 )
 
             if "permission denied" in stderr.lower():
@@ -173,7 +188,7 @@ class AgentAdapter(ABC):
                     detail=f"Agent {self.name} validation failed: {str(exc)}",
                     duration=duration_s,
                     job_id=sprint_id,
-                    metadata={"phase": phase_name, "error": str(exc)},
+                    metadata={"phase": phase_name, "error": str(exc), **report_metadata},
                 )
             raise
 
@@ -185,7 +200,7 @@ class AgentAdapter(ABC):
                 detail=f"Phase {phase_name or self.name} completed successfully",
                 duration=duration_s,
                 job_id=sprint_id,
-                metadata={"phase": phase_name, "returncode": 0},
+                metadata={"phase": phase_name, "returncode": 0, **report_metadata},
             )
 
         return result

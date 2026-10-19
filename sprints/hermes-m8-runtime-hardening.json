@@ -1,0 +1,86 @@
+{
+  "sprint_id": "hermes-m8-runtime-hardening",
+  "name": "Hermes M8: cancel kills agents, tolerate denials, seat pool, model registry",
+  "target_repo": "../",
+  "base_ref": "c3ecbee4da41ede29e568a385d524e8964f50bc6",
+  "target_branch": "hermes/m8/integration",
+  "worktree_root": "/home/lystiger/hermes-worktrees/hermes-m8",
+  "runs_root": "/home/lystiger/hermes-runs",
+  "execution_backend": "subprocess",
+  "limits": {
+    "max_changed_files": 60,
+    "timeout_seconds": 4800
+  },
+  "verification": [
+    {
+      "name": "pytest",
+      "command": [
+        "/home/lystiger/Projects/Hermes-lab/.venv/bin/python",
+        "-m",
+        "pytest",
+        "tests",
+        "-q",
+        "--ignore=tests/smoke",
+        "-p",
+        "no:cacheprovider"
+      ],
+      "timeout_seconds": 900
+    }
+  ],
+  "phases": [
+    {
+      "name": "m8_cancel_and_denials",
+      "role": "builder",
+      "agent": "codex",
+      "execution_backend": "subprocess",
+      "worktree_dir": "runtime",
+      "branch": "hermes/m8/runtime",
+      "prompt_file": "prompts/hermes-m8-runtime.md",
+      "expected_handoff": "HANDOFF_M8_RUNTIME.md",
+      "commit_message": "fix(runtime): cancel stops agent processes; a denied command no longer fails the phase",
+      "cmd_options": {
+        "sandbox": "workspace-write",
+        "ephemeral": true
+      }
+    },
+    {
+      "name": "m8_seat_pool",
+      "role": "builder",
+      "agent": "antigravity",
+      "execution_backend": "subprocess",
+      "worktree_dir": "seats",
+      "branch": "hermes/m8/seats",
+      "prompt_file": "prompts/hermes-m8-seats.md",
+      "expected_handoff": "HANDOFF_M8_SEATS.md",
+      "commit_message": "feat(herdr): seat pool with exclusive leases (D-019)",
+      "permissions": {
+        "commands": [
+          "/home/lystiger/Projects/Hermes-lab/.venv/bin/python -m pytest tests -q --ignore=tests/smoke",
+          "/home/lystiger/Projects/Hermes-lab/.venv/bin/python -m pytest tests/test_backends.py -q",
+          "/home/lystiger/Projects/Hermes-lab/.venv/bin/python -m pytest tests/test_backend_contract.py -q"
+        ]
+      },
+      "cmd_options": {
+        "output_format": "stream-json",
+        "print_timeout": "45m",
+        "dangerously_skip_permissions": true,
+        "model": "gemini-3.8-flash-high"
+      }
+    },
+    {
+      "name": "m8_model_registry",
+      "role": "builder",
+      "agent": "codex",
+      "execution_backend": "subprocess",
+      "worktree_dir": "models",
+      "branch": "hermes/m8/models",
+      "prompt_file": "prompts/hermes-m8-models.md",
+      "expected_handoff": "HANDOFF_M8_MODELS.md",
+      "commit_message": "feat(api): model registry endpoints and recorded model per run (D-020)",
+      "cmd_options": {
+        "sandbox": "workspace-write",
+        "ephemeral": true
+      }
+    }
+  ]
+}

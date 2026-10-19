@@ -135,6 +135,27 @@ class ClaudeAdapter(AgentAdapter):
             )
         return data
 
+    def reported_model(self, result, command):
+        text = (result.stdout or "").strip()
+        try:
+            data = json.loads(text)
+        except ValueError:
+            data = None
+            for line in reversed(text.splitlines()):
+                try:
+                    candidate = json.loads(line)
+                except ValueError:
+                    continue
+                if isinstance(candidate, dict) and candidate.get("type") == "result":
+                    data = candidate
+                    break
+        usage = data.get("modelUsage", {}) if isinstance(data, dict) else {}
+        usage = {model: tokens for model, tokens in usage.items() if isinstance(tokens, dict)} if isinstance(usage, dict) else {}
+        if not usage:
+            return None, None
+        return max(usage, key=lambda model: sum(usage[model].get(k, 0) or 0
+            for k in ("inputTokens", "outputTokens"))), None
+
     def validate_result(self, result, context):
         data = self.parse_json(result.stdout or "", result.stderr or "",
                                getattr(context, "options", {}), getattr(result, "runtime_metadata", None),

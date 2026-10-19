@@ -365,7 +365,7 @@ class TestAgentRegistryAndCommands(unittest.TestCase):
             command,
             [
                 "agy", "--new-project", "-p", "do work", "--output-format", "stream-json",
-                "--model", "gemini-3.8-flash-high", "--effort", "high",
+                "--model", "gemini-3.8-flash-high",
             ],
         )
 
@@ -421,7 +421,8 @@ class TestAgentRegistryAndCommands(unittest.TestCase):
         self.assertNotIn("Bash(git branch --show-current)", denials)
         self.assertNotIn("Bash(git rev-parse:*)", denials)
 
-    @unittest.skipUnless(shutil.which("claude"), "Claude Code CLI is not installed")
+    @unittest.skipUnless(os.environ.get("HERMES_TEST_LIVE_AGENTS") == "1" and shutil.which("claude"),
+                         "Live CLI check requires HERMES_TEST_LIVE_AGENTS=1")
     def test_installed_claude_supports_disallowed_tools_flag(self):
         result = subprocess.run(
             ["claude", "--help"],

@@ -117,9 +117,10 @@ def test_adapters_commands_and_event_metadata(tmp_path, monkeypatch):
     assert '--model' not in ClaudeAdapter().build_command('work', {})
     registry.set('claude', 'haiku', None)
     assert 'haiku' in ClaudeAdapter().build_command('work', {})
-    registry._cache = (agent_models.time.monotonic(), ['fake-agy'], 60)
+    registry._cache = (agent_models.time.monotonic(), [{'id': 'fake-agy', 'label': 'Fake', 'efforts': ['low']}], 60)
     registry.set('antigravity', 'fake-agy', 'low')
-    assert '--effort' in AntigravityAdapter().build_command('work', {})
+    assert 'fake-agy-low' in AntigravityAdapter().build_command('work', {})
+    assert '--effort' not in AntigravityAdapter().build_command('work', {})
     publisher = Mock()
     monkeypatch.setattr(base, 'default_publisher', publisher)
     backend = Mock()
@@ -178,3 +179,127 @@ def test_phase_setting_is_frozen_during_launch(tmp_path, monkeypatch):
     assert 'gpt-5-codex' in backend.execute.call_args.args[0].command
     assert 'gpt-5.4' in adapter.build_command('next phase', {})
     assert registry.describe('codex')['lastUsed']['model'] == 'gpt-5-codex'
+
+AGY_SAMPLE = '''gemini-3.8-flash-high\tGemini 3.8 Flash (High)
+gemini-3.8-flash-medium\tGemini 3.8 Flash (Medium)
+gemini-3.8-flash-low\tGemini 3.8 Flash (Low)
+claude-sonnet-4-6\tClaude Sonnet 4.6 (Thinking)
+claude-opus-4-6-thinking\tClaude Opus 4.6 (Thinking)
+gpt-oss-120b-medium\tGPT-OSS 120B (Medium)'''
+
+
+def test_codex_cache_descriptors_reload_and_fallback(tmp_path, monkeypatch):
+    import json
+    registry = agent_models.model_registry
+    path = tmp_path / 'cache.json'
+    monkeypatch.setenv('HERMES_CODEX_MODELS_CACHE', str(path))
+    entries = [dict(slug='gpt-6.1-sol', display_name='GPT-6.1-Sol', visibility='list',
+                    supported_reasoning_levels=[{'effort': e} for e in ['low', 'max', 'ultra']]),
+               dict(slug='hidden', display_name='Hidden', visibility='hide',
+                    supported_reasoning_levels=[{'effort': 'high'}])]
+    path.write_text(json.dumps({'models': entries}))
+    assert registry.models('codex') == [{'id': 'gpt-6.1-sol', 'label': 'GPT-6.1-Sol',
+                                        'efforts': ['low', 'max', 'ultra']}]
+    registry.codex_path.write_text('model = "hidden"\n')
+    assert registry.models('codex')[-1]['efforts'] == ['high']
+    registry.codex_path.write_text('model = "uncached"\n')
+    assert registry.models('codex')[-1] == {'id': 'uncached', 'label': 'uncached', 'efforts': []}
+    entries[0]['supported_reasoning_levels'] = [{'effort': 'medium'}]
+    path.write_text(json.dumps({'models': entries}))
+    assert registry.models('codex')[0]['efforts'] == ['medium']
+    client = TestClient(app)
+    assert client.put('/agents/codex/model', json={'model': 'gpt-6.1-sol', 'effort': 'ultra'}).status_code == 400
+    assert client.put('/agents/codex/model', json={'model': 'gpt-6.1-sol', 'effort': 'medium'}).status_code == 200
+    for content in ['invalid', '{"models": {}}', '{"models": [{"slug": "bad", "supported_reasoning_levels": [null]}]}']:
+        path.write_text(content)
+        assert registry.models('codex')[0]['efforts'] == ['low', 'medium', 'high']
+    path.unlink()
+    assert 'gpt-5-codex' in registry.allowed('codex')
+
+
+def test_agy_descriptors_mapping_and_put(monkeypatch):
+    registry = agent_models.model_registry
+    run = Mock(return_value=SimpleNamespace(stdout=AGY_SAMPLE))
+    monkeypatch.setattr(agent_models.subprocess, 'run', run)
+    models = registry.models('agy')
+    assert models == [
+        {'id': 'gemini-3.8-flash', 'label': 'Gemini 3.8 Flash', 'efforts': ['low', 'medium', 'high']},
+        {'id': 'claude-sonnet-4-6', 'label': 'Claude Sonnet 4.6 (Thinking)', 'efforts': []},
+        {'id': 'claude-opus-4-6-thinking', 'label': 'Claude Opus 4.6 (Thinking)', 'efforts': []},
+        {'id': 'gpt-oss-120b', 'label': 'GPT-OSS 120B', 'efforts': ['medium']}]
+    assert run.call_args.kwargs['timeout'] == 20
+    assert run.call_args.kwargs['stdin'] == agent_models.subprocess.DEVNULL
+    assert registry.agy_cli_model('gemini-3.8-flash') == 'gemini-3.8-flash-medium'
+    assert registry.agy_cli_model('gemini-3.8-flash', 'low') == 'gemini-3.8-flash-low'
+    assert registry.agy_cli_model('gemini-3.8-flash-high', 'low') == 'gemini-3.8-flash-high'
+    assert registry.agy_cli_model('gpt-oss-120b') == 'gpt-oss-120b-medium'
+    assert registry.agy_cli_model('claude-sonnet-4-6') == 'claude-sonnet-4-6'
+    client = TestClient(app)
+    assert client.put('/agents/agy/model', json={'model': 'gpt-oss-120b', 'effort': 'high'}).status_code == 400
+    response = client.put('/agents/agy/model', json={'model': 'gemini-3.8-flash-high'})
+    assert response.json() == {'default': 'gemini-3.8-flash', 'effort': 'high'}
+    result = client.get('/agents/models').json()
+    for agent in result.values():
+        assert {'configured', 'allowed', 'lastUsed', 'models'} <= agent.keys()
+    assert result['gemini']['models'] == models
+
+
+@pytest.mark.parametrize('agent,stdout,model,effort', [
+    ('claude', '{"type":"result","subtype":"success","is_error":false,"result":"done",'
+     '"modelUsage":{"claude-small":{"inputTokens":10,"outputTokens":1},'
+     '"claude-large":{"inputTokens":2,"outputTokens":20}}}', 'claude-large', None),
+    ('codex', 'model: gpt-6.1-sol\nreasoning effort: ultra\ndone', 'gpt-6.1-sol', 'ultra'),
+])
+def test_reported_model_recording(tmp_path, monkeypatch, agent, stdout, model, effort):
+    from agents import base
+    from agents.claude import ClaudeAdapter
+    from agents.codex import CodexAdapter
+    publisher = Mock()
+    monkeypatch.setattr(base, 'default_publisher', publisher)
+    backend = Mock()
+    backend.execute.return_value = SimpleNamespace(backend='fake', returncode=0, stdout=stdout, stderr='')
+    context = SimpleNamespace(prompt='work', options={}, worktree=tmp_path, phase={'name': 'build'},
+        runner=SimpleNamespace(logger=Mock(), sprint_id='job'), backend=backend, timeout_seconds=1,
+        stdout_file=tmp_path/'out', stderr_file=tmp_path/'err')
+    adapter = ClaudeAdapter() if agent == 'claude' else CodexAdapter()
+    result = adapter.execute(context)
+    last = agent_models.model_registry.describe(agent)['lastUsed']
+    assert last == dict(model=model, effort=effort, source='reported', requestedModel=None,
+                        requestedEffort=None, requestedSource='cli-default')
+    assert result.runtime_metadata['reportedModel'] == model
+    assert publisher.publish.call_args.kwargs['metadata']['reportedModel'] == model
+    if agent == 'claude':
+        fresh = ModelRegistry(agent_models.model_registry.path, agent_models.model_registry.codex_path)
+        assert model in fresh.allowed('claude')
+        assert fresh.models('claude')[-1] == {'id': model, 'label': model, 'efforts': []}
+    assert adapter.reported_model(SimpleNamespace(stdout='no model here'), []) == (None, None)
+
+
+def test_agy_reported_model_and_first_effort(monkeypatch):
+    from agents.antigravity import AntigravityAdapter
+    registry = agent_models.model_registry
+    monkeypatch.setattr(agent_models.subprocess, 'run', Mock(return_value=SimpleNamespace(
+        stdout='only-low\tOnly (Low)\n' + AGY_SAMPLE)))
+    adapter = AntigravityAdapter()
+    assert registry.agy_cli_model('only') == 'only-low'
+    command = adapter.build_command('work', {'model': 'gemini-3.8-flash', 'effort': 'high'})
+    assert command[command.index('--model') + 1] == 'gemini-3.8-flash-high'
+    assert '--effort' not in command
+    assert adapter.reported_model(None, command) == ('gemini-3.8-flash', 'high')
+    assert adapter.reported_model(None, ['agy']) == (None, None)
+    assert adapter.reported_model(None, ['agy', '--model', 'old-high']) == ('old', 'high')
+
+
+def test_no_report_keeps_cli_default(tmp_path, monkeypatch):
+    from agents import base
+    from agents.codex import CodexAdapter
+    monkeypatch.setattr(base, 'default_publisher', Mock())
+    backend = Mock()
+    backend.execute.return_value = SimpleNamespace(backend='fake', returncode=0, stdout='done', stderr='')
+    context = SimpleNamespace(prompt='work', options={}, worktree=tmp_path, phase={},
+        runner=SimpleNamespace(logger=Mock()), backend=backend, timeout_seconds=1,
+        stdout_file=tmp_path/'out', stderr_file=tmp_path/'err')
+    result = CodexAdapter().execute(context)
+    assert result.runtime_metadata['reportedModel'] is None
+    assert agent_models.model_registry.describe('codex')['lastUsed'] == {
+        'model': None, 'effort': None, 'source': 'cli-default'}

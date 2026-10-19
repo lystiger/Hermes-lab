@@ -1,0 +1,89 @@
+{
+  "sprint_id": "lyscontrol-m8-model-select",
+  "name": "LysControl M8: model and effort selector",
+  "target_repo": "../../LysControl",
+  "base_ref": "39a77abd9f5879ffb1d9a7c3512f85bfb6bcff1e",
+  "target_branch": "hermes/lyscontrol-m8/integration",
+  "worktree_root": "/home/lystiger/hermes-worktrees/lyscontrol-m8",
+  "runs_root": "/home/lystiger/hermes-runs",
+  "execution_backend": "subprocess",
+  "limits": {
+    "max_changed_files": 90,
+    "timeout_seconds": 3600
+  },
+  "verification": [
+    {
+      "name": "npm-ci",
+      "command": [
+        "npm",
+        "ci"
+      ],
+      "timeout_seconds": 600
+    },
+    {
+      "name": "typecheck",
+      "command": [
+        "npm",
+        "run",
+        "typecheck"
+      ],
+      "timeout_seconds": 300
+    },
+    {
+      "name": "lint",
+      "command": [
+        "npm",
+        "run",
+        "lint"
+      ],
+      "timeout_seconds": 300
+    },
+    {
+      "name": "test",
+      "command": [
+        "npm",
+        "test"
+      ],
+      "timeout_seconds": 600
+    },
+    {
+      "name": "build",
+      "command": [
+        "npm",
+        "run",
+        "build"
+      ],
+      "timeout_seconds": 600
+    }
+  ],
+  "phases": [
+    {
+      "name": "m8_model_selector",
+      "role": "builder",
+      "agent": "antigravity",
+      "execution_backend": "subprocess",
+      "worktree_dir": "builder",
+      "branch": "hermes/lyscontrol-m8/builder",
+      "prompt_file": "prompts/lyscontrol-m8-models.md",
+      "expected_handoff": "HANDOFF_MODELS.md",
+      "commit_message": "feat(agents): model and effort selector backed by Hermes /agents/models",
+      "cmd_options": {
+        "output_format": "stream-json",
+        "print_timeout": "40m",
+        "dangerously_skip_permissions": true,
+        "model": "gemini-3.8-flash-high"
+      },
+      "permissions": {
+        "commands": [
+          "npm ci",
+          "npm run typecheck",
+          "npm run lint",
+          "npm test",
+          "npm run test",
+          "npm run build",
+          "npx vitest run"
+        ]
+      }
+    }
+  ]
+}

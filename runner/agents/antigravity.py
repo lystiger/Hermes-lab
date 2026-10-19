@@ -20,6 +20,10 @@ class AntigravityAdapter(AgentAdapter):
             "--output-format",
             options.get("output_format", "stream-json"),
         ]
+        if options.get("model"):
+            command.extend(["--model", str(options["model"])])
+        if options.get("effort"):
+            command.extend(["--effort", str(options["effort"])])
         if options.get("print_timeout"):
             command.extend(["--print-timeout", str(options["print_timeout"])])
         if options.get("dangerously_skip_permissions", False):

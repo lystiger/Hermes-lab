@@ -356,6 +356,24 @@ class TestAgentRegistryAndCommands(unittest.TestCase):
         for adapter in (AntigravityAdapter(), ClaudeAdapter(), CodexAdapter()):
             self.assertIn("do work", adapter.build_command("do work", {}))
 
+    def test_antigravity_command_with_model_and_effort(self):
+        command = AntigravityAdapter().build_command(
+            "do work",
+            {"output_format": "stream-json", "model": "gemini-3.8-flash-high", "effort": "high"},
+        )
+        self.assertEqual(
+            command,
+            [
+                "agy", "--new-project", "-p", "do work", "--output-format", "stream-json",
+                "--model", "gemini-3.8-flash-high", "--effort", "high",
+            ],
+        )
+
+    def test_antigravity_command_without_model_keeps_cli_default(self):
+        command = AntigravityAdapter().build_command("do work", {})
+        self.assertNotIn("--model", command)
+        self.assertNotIn("--effort", command)
+
     def test_antigravity_command_with_print_timeout(self):
         command = AntigravityAdapter().build_command(
             "do work",

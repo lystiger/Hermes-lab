@@ -20,7 +20,9 @@ import {
   JobTokenTelemetry,
   TaskNode,
   AgentRun,
-  JobObservation
+  JobObservation,
+  AgentModelsMap,
+  SetAgentModelResponse
 } from '../types';
 import { resolveActorPresentation } from '../actors';
 import { HermesUnreachableError, recordContact, recordUnreachable } from '../connection';
@@ -757,6 +759,44 @@ export class HttpHermesApi implements HermesApi {
       metadata: m.metadata || {},
       createdAt: m.createdAt
     };
+  }
+
+  // --------------------------------------------------------------------------
+  // M8 Agent Model Registry
+  // --------------------------------------------------------------------------
+
+  async getAgentModels(): Promise<AgentModelsMap> {
+    const res = await this.request(`${this.baseUrl}/agents/models`);
+    if (!res.ok) {
+      throw new Error(`Hermes /agents/models returned HTTP ${res.status}: ${res.statusText}`);
+    }
+    return res.json();
+  }
+
+  async setAgentModel(agentId: string, model: string, effort?: string | null): Promise<SetAgentModelResponse> {
+    const id = encodeURIComponent(agentId);
+    const body: { model: string; effort?: string | null } = {
+      model,
+      effort: effort !== undefined ? effort : null
+    };
+    const res = await this.request(`${this.baseUrl}/agents/${id}/model`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body)
+    });
+    if (!res.ok) {
+      let detail = res.statusText || `HTTP ${res.status}`;
+      try {
+        const data = await res.json();
+        if (data && typeof data === 'object' && 'detail' in data) {
+          detail = typeof data.detail === 'string' ? data.detail : JSON.stringify(data.detail);
+        }
+      } catch {
+        /* Body was not JSON; use default status text */
+      }
+      throw new Error(detail);
+    }
+    return res.json();
   }
 }
 

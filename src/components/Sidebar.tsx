@@ -7,6 +7,7 @@ import { useConsoleStore } from '../stores/useConsoleStore';
 import { useExecutionStore } from '../stores/useExecutionStore';
 import { useAgents, useJobs } from '../api/hooks';
 import { ConnectionStatus } from '../api/types';
+import { TERMINAL_JOB_STATUSES } from '../api/adapters/httpAdapter';
 import { isEditableTarget, readSidebarCollapsed, SIDEBAR_NARROW_QUERY, writeSidebarCollapsed } from './sidebarState';
 import { useMediaQuery } from './useMediaQuery';
 
@@ -19,7 +20,6 @@ interface NavItem {
 }
 
 // Jobs that have not reached a terminal state: the work the queue still holds.
-const TERMINAL_JOB_STATUSES = ['COMPLETED', 'FAILED', 'CANCELLED'];
 
 const NAV_ITEMS: NavItem[] = [
   { to: '/', label: 'Overview', icon: LayoutDashboard },

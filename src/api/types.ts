@@ -6,6 +6,9 @@ export type AgentStatus = 'RUNNING' | 'WAITING' | 'IDLE' | 'OFFLINE' | 'BUSY' | 
 export type Priority = 'P0' | 'P1' | 'P2' | 'P3';
 
 export type JobStatus =
+  | 'CREATED'
+  | 'EXECUTING'
+  | 'WAITING_FOR_CAPACITY'
   | 'QUEUED'
   | 'PLANNING'
   | 'PREPARING'

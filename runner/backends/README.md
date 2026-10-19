@@ -163,13 +163,31 @@ The endpoint runs the probe in a worker thread (`asyncio.to_thread`). Each reque
   so it emits no events. Its runs are not visible on `/execution`.
 - **Subprocess resource id.** The resource id remains the executionId and the label is the agent name.
   The live registry separately holds the `Popen` handle; handles are never serialized.
-- **Herdr panes.** A pane is freed (`resource_released`) when its command finishes. The pane itself stays in the
-  workspace when `keep_workspace` is set, and the registry drops it.
+- **Herdr panes and seats.** When seat pooling is disabled, a pane is freed (`resource_released`) when its command finishes, and the pane stays in the workspace when `keep_workspace` is set. When seat pooling is enabled (D-019), seats (`seat-1` … `seat-N`, `hot`) are leased exclusively and returned to the pool on completion, timeout, or cancellation.
 - **`task_id` is not set.** Backends do not know the runtime task. Events carry `job_id` and `executionId`.
 - **In-process registry.** The snapshot covers this process only. For openrig, the ledger summary covers rigs
   left behind by earlier processes. Other backends have no equivalent.
 - **Drain lifetime.** Events are persisted only while the adapter's loop runs. Events emitted after the loop
   closes (for example an `atexit` drain) reach the registry but not the store.
+
+### Herdr Seat Pool (D-019)
+
+Herdr backend supports pooling a fixed set of named seats (`seat-1` … `seat-N`, plus optional `hot` seat) in a single
+runner workspace, reusing panes across commands rather than splitting a new pane per phase.
+
+Configured via `seat_pool` in the sprint spec or backend settings (default off):
+```json
+"seat_pool": {"size": 5, "hot": true, "acquire_timeout_seconds": 600}
+```
+
+- **Seats:** Created on first use by splitting downward from the root pane and renaming to their seat label (`seat-1`, `hot`).
+- **Assignment:** Normal pool seats (`seat-1` … `seat-N`) are fungible and leased exclusively to any agent for the command duration.
+- **Hot seat:** Dedicated to phases with `"priority": "hot"`. Normal phases never acquire the hot seat; hot phases only use the hot seat, which may run even when all pool seats are busy.
+- **Queueing / Timeout:** When no eligible seat is free, callers wait up to `acquire_timeout_seconds` before raising `SprintRunnerError("FAILED_SEAT_TIMEOUT")`.
+- **Banner:** Each run in a seat prints a visible banner at startup (`=== [seat:<label>] job:<sprint_id> phase:<phase> agent:<agent_name> ===`).
+- **State:** Seat mappings and workspace survive across backend instances for a run via `runtime.json`.
+- **Visibility:** When seat pool is active, resource events report `kind="seat"`, `id="<label>"`, `label="<label>"`.
+
 
 ## Selection
 

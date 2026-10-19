@@ -85,6 +85,14 @@ class AgentAdapter(ABC):
 
         try:
             self.prepare(context)
+            phase_metadata = {"phase": phase_name, "prompt": context.prompt}
+            if isinstance(context.phase, dict):
+                if "priority" in context.phase:
+                    phase_metadata["priority"] = context.phase["priority"]
+                if "persona" in context.phase:
+                    phase_metadata["persona"] = context.phase["persona"]
+                elif "role" in context.phase:
+                    phase_metadata["persona"] = context.phase["role"]
             result = context.backend.execute(
                 ExecutionRequest(
                     agent_name=self.name,
@@ -94,7 +102,7 @@ class AgentAdapter(ABC):
                     stdout_file=context.stdout_file,
                     stderr_file=context.stderr_file,
                     # Sessionful backends deliver the prompt directly instead of via argv.
-                    metadata={"phase": phase_name, "prompt": context.prompt},
+                    metadata=phase_metadata,
                 )
             )
         except Exception as exc:

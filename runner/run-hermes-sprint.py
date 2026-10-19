@@ -998,15 +998,23 @@ class HermesSprintRunner:
 
     def _get_backend(self, backend_name):
         if backend_name not in self._backend_cache:
+            backend_kwargs = {
+                "run_dir": self.run_dir,
+                "sprint_id": self.sprint_id,
+                "logger": self.logger,
+                "keep_workspace": self.spec.get("keep_herdr_workspace", True),
+                "event_sink": self._publish_execution_event,
+                "cancel_event": self._cancel_event,
+                "cancel_grace_seconds": float(os.environ.get("HERMES_CANCEL_GRACE_SECONDS", "5")),
+            }
+            if "seat_pool" in self.spec:
+                backend_kwargs["seat_pool"] = self.spec["seat_pool"]
+            elif "backend_settings" in self.spec and isinstance(self.spec["backend_settings"], dict) and "seat_pool" in self.spec["backend_settings"]:
+                backend_kwargs["seat_pool"] = self.spec["backend_settings"]["seat_pool"]
+
             self._backend_cache[backend_name] = self.backend_registry.get(
                 backend_name,
-                run_dir=self.run_dir,
-                sprint_id=self.sprint_id,
-                logger=self.logger,
-                keep_workspace=self.spec.get("keep_herdr_workspace", True),
-                event_sink=self._publish_execution_event,
-                cancel_event=self._cancel_event,
-                cancel_grace_seconds=float(os.environ.get("HERMES_CANCEL_GRACE_SECONDS", "5")),
+                **backend_kwargs,
             )
         return self._backend_cache[backend_name]
 

@@ -834,13 +834,21 @@ class HermesActorAdapter(ActorAdapter):
 
             agent_adapter = reg.get(actor_id)
             backend_name = self._resolve_backend_name(task, actor_id, backend_reg)
+            seat_pool_cfg = task.metadata.get("seat_pool") or (
+                self.spec.get("seat_pool") if hasattr(self, "spec") and isinstance(self.spec, dict) else None
+            )
+            backend_kwargs = {
+                "run_dir": self.run_dir,
+                "sprint_id": task.job_id,
+                "logger": logger,
+                "cancel_event": cancel_event,
+                "event_sink": self._task_event_sink(task, run, actor_id),
+            }
+            if seat_pool_cfg is not None:
+                backend_kwargs["seat_pool"] = seat_pool_cfg
             backend = backend_reg.get(
                 backend_name,
-                run_dir=self.run_dir,
-                sprint_id=task.job_id,
-                logger=logger,
-                cancel_event=cancel_event,
-                event_sink=self._task_event_sink(task, run, actor_id),
+                **backend_kwargs,
             )
             with self._job_backends_lock:
                 self._job_backends.setdefault(task.job_id, set()).add(backend_name)
@@ -903,6 +911,8 @@ class HermesActorAdapter(ActorAdapter):
                     "cmd_options": task.metadata.get("options", {}),
                     "fail_on_permission_denial": task.metadata.get("fail_on_permission_denial", False),
                     "permission_denial_ceiling": task.metadata.get("permission_denial_ceiling", 20),
+                    **({"priority": task.metadata["priority"]} if "priority" in task.metadata else {}),
+                    **({"persona": task.metadata["persona"]} if "persona" in task.metadata else {}),
                 },
                 worktree=worktree_path,
                 prompt=effective_prompt,

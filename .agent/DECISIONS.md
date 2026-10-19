@@ -564,3 +564,41 @@ Decided with the user.
    routing, guards and harness, and (B) "pure Herdr with one orchestrator agent spawning workers", the way the user
    works today. Compare speed, task success, rework, operator effort and cost. Hypothesis to test, not assume:
    Hermes' overhead (rules, guards, harness) pays for itself in reliability.
+
+## D-019: Herdr seat pool (2026-10-19)
+
+Today the Herdr backend creates a new pane for every phase (splitting the root pane downward, `_create_worker_pane`)
+and labels it with the phase name. In multi-phase jobs this yields stacked panes used only once. The operator wants
+fixed, named seats instead: one Herdr workspace containing a set of named panes, where any agent can run in any
+free seat, one agent at a time per seat, with one reserved "hot seat" for priority work.
+
+### Decisions
+
+1. **Workspace and Seats.** Seats are named panes inside the single runner workspace for the sprint/job.
+   Seats are identified by stable labels: `seat-1` through `seat-N` for normal pool seats (e.g., `seat-1` … `seat-5`),
+   and `hot` for the hot seat. Seats are created on first use if missing (or discovered from the workspace if already created).
+2. **Assignment and Exclusive Leases.** Pool seats (`seat-1` … `seat-N`) are fungible and can be assigned to any agent.
+   Each seat is acquired under an exclusive lease for the duration of a command and released back to the pool when the command ends.
+3. **Queueing / Waiting.** When no eligible seat is free, callers wait until a seat is released or until
+   `acquire_timeout_seconds` expires. If the timeout expires before a seat is acquired, execution fails with a clear
+   `SprintRunnerError("FAILED_SEAT_TIMEOUT", ...)`.
+4. **Hot Seat Rules.** The `hot` seat is reserved exclusively for phases configured with `"priority": "hot"`.
+   Non-hot phases never acquire the hot seat. Hot phases only use the hot seat. The hot seat may run even when all
+   normal pool seats are busy.
+5. **No Preemption.** Running phases are never preempted. A hot phase waiting on an occupied hot seat will wait for
+   the hot seat to be released.
+6. **Execution Banner.** At the start of each run in a seat, a visible banner line is written to stdout/log before executing
+   the worker command, displaying the job id, phase name, and persona/agent name:
+   `=== [seat:<label>] job:<sprint_id> phase:<phase> agent:<agent_name> ===`.
+7. **Survives Across Instances.** Seat pool and pane state survives across backend instances for a run using the backend's
+   existing runtime state file (`runtime.json`).
+8. **Resource Events (D-009).** When the seat pool is active, resource events (`execution.resource_acquired`, etc.) use
+   the seat label (`seat-1`, `hot`, etc.) as the resource id and label so LysControl's Execution page reflects the seats.
+9. **Configuration Shape and Default Off.** The seat pool is configured in the sprint spec or passed via backend settings:
+   ```json
+   "seat_pool": {"size": 5, "hot": true, "acquire_timeout_seconds": 600}
+   ```
+   When absent (default off), the backend behaves exactly as before (creating ad-hoc panes per phase).
+10. **Follow-ups.** The long-lived sessionful hot seat (retaining agent session state across tasks) is out of scope here
+    and tracked as a future follow-up.
+

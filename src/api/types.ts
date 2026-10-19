@@ -721,3 +721,40 @@ export interface JobObservation {
   confidence: number | null;
   createdAt: string | null;
 }
+
+// --------------------------------------------------------------------------
+// M8 Agent Model Registry DTOs (GET /agents/models, PUT /agents/{id}/model)
+// --------------------------------------------------------------------------
+
+export type AgentEffort = 'minimal' | 'low' | 'medium' | 'high' | 'xhigh';
+
+export type LastUsedSource = 'phase' | 'config' | 'cli-default';
+
+export interface AgentConfiguredModel {
+  default: string | null;
+  effort?: AgentEffort | string | null;
+}
+
+export interface AgentLastUsedModel {
+  model: string;
+  effort?: AgentEffort | string | null;
+  source: LastUsedSource | string;
+}
+
+export interface AgentModelConfig {
+  configured: AgentConfiguredModel | null;
+  allowed: string[];
+  lastUsed: AgentLastUsedModel | null;
+}
+
+export type AgentModelsMap = Record<string, AgentModelConfig>;
+
+export interface SetAgentModelRequest {
+  model: string;
+  effort?: AgentEffort | string | null;
+}
+
+export interface SetAgentModelResponse {
+  default: string;
+  effort: string | null;
+}

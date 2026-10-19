@@ -9,6 +9,7 @@ import { agentArt } from '../../theme/agentArt';
 import { useConsoleStore } from '../../stores/useConsoleStore';
 import { AgentContextMeter } from './AgentContextMeter';
 import { presenceAccent } from './AgentPresence';
+import { AgentModelSelector } from './AgentModelSelector';
 
 const Spec: React.FC<{ label: string; children: React.ReactNode }> = ({ label, children }) => (
   <div className="flex flex-col gap-1 min-w-0">
@@ -112,6 +113,8 @@ export const AgentDossier: React.FC<{ agent: AgentDetail; updatedAt?: number | n
               <AgentContextMeter agent={agent} />
             </div>
           </Card>
+
+          <AgentModelSelector agentId={agent.id} accent={accent} />
         </div>
       </div>
     </article>

@@ -23,6 +23,24 @@ export const LIVE_AGENTS = [
   { id: 'codex', displayName: 'Codex', provider: 'OpenAI', model: 'codex', role: 'Verification', capabilities: ['test'], status: 'IDLE', currentTask: null, activeTool: null, persona: null, presentation: null }
 ];
 
+export const LIVE_AGENT_MODELS = {
+  gemini: {
+    configured: { default: 'gemini-2.5-pro', effort: 'high' },
+    allowed: ['gemini-2.5-pro', 'gemini-2.5-flash', 'gemini-2.0-flash'],
+    lastUsed: { model: 'gemini-2.5-pro', effort: 'high', source: 'phase' }
+  },
+  claude: {
+    configured: null,
+    allowed: ['claude-3-7-sonnet', 'claude-3-5-sonnet', 'claude-3-5-haiku'],
+    lastUsed: null
+  },
+  codex: {
+    configured: { default: 'gpt-6.1-sol', effort: 'low' },
+    allowed: ['gpt-5-codex', 'gpt-5.4', 'gpt-5.3-codex', 'gpt-6.1-sol'],
+    lastUsed: { model: 'sonnet', effort: null, source: 'phase' }
+  }
+};
+
 /** The one historical FAILED job in the live sample: no active job exists. */
 export const LIVE_JOB_SUMMARY = {
   id: LIVE_JOB_ID,
@@ -113,6 +131,14 @@ export interface LiveOptions {
   threadMissing?: boolean;
   /** Simulate Hermes being down: every request fails at the network level. */
   unreachable?: boolean;
+  /** Make GET /agents/models fail with HTTP 500 */
+  failModels?: boolean;
+  /** Override models response */
+  models?: unknown;
+  /** Make PUT /agents/:id/model fail */
+  failModelPut?: boolean;
+  failModelPutDetail?: string;
+  modelPutResponse?: unknown;
 }
 
 export interface LiveResponse {
@@ -123,6 +149,17 @@ export interface LiveResponse {
 export function respond(pathname: string, options: LiveOptions): LiveResponse {
   if (pathname === '/health') return { status: 200, body: LIVE_HEALTH };
   if (pathname === '/agents') return { status: 200, body: LIVE_AGENTS };
+  if (pathname === '/agents/models') {
+    if (options.failModels) return { status: 500, body: { detail: 'models store unavailable' } };
+    return { status: 200, body: options.models ?? LIVE_AGENT_MODELS };
+  }
+  const modelPutMatch = pathname.match(/^\/agents\/([^/]+)\/model$/);
+  if (modelPutMatch) {
+    if (options.failModelPut) {
+      return { status: 400, body: { detail: options.failModelPutDetail || 'model not allowed' } };
+    }
+    return { status: 200, body: options.modelPutResponse ?? { default: 'gpt-6.1-sol', effort: 'low' } };
+  }
   if (pathname === '/jobs') {
     if (options.failJobs) return { status: 500, body: { detail: 'jobs store unavailable' } };
     return { status: 200, body: options.jobs ?? [LIVE_JOB_SUMMARY] };

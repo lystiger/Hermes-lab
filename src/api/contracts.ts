@@ -18,7 +18,9 @@ import {
   JobTokenTelemetry,
   TaskNode,
   AgentRun,
-  JobObservation
+  JobObservation,
+  AgentModelsMap,
+  SetAgentModelResponse
 } from './types';
 
 export interface EventSubscription {
@@ -51,6 +53,10 @@ export interface HermesApi {
   ): EventSubscription;
   sendOperatorCommand(targetActorId: string, command: string): Promise<{ success: boolean; response: string }>;
   triggerJobAction(jobId: string, action: 'retry' | 'pause' | 'cancel' | 'promote'): Promise<boolean>;
+
+  // M8 Agent Model Registry
+  getAgentModels(): Promise<AgentModelsMap>;
+  setAgentModel(agentId: string, model: string, effort?: string | null): Promise<SetAgentModelResponse>;
 
   // Phase 5 / Phase 6 Operational Messaging, A2A & Threads
   getThreads(jobId?: string, participant?: string, limit?: number): Promise<Thread[]>;

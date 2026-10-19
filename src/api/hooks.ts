@@ -9,7 +9,8 @@ import {
   HealthStatus,
   Thread,
   Message,
-  MailboxEntry
+  MailboxEntry,
+  AgentModelsMap
 } from './types';
 import { resolveActorPresentation } from './actors';
 import { useConsoleStore } from '../stores/useConsoleStore';
@@ -164,6 +165,16 @@ export function useAgent(id?: AgentId) {
   }, [base, id, agentRuntimeStatuses]);
 
   return { agent, loading, error, updatedAt, stale, refetch };
+}
+
+export function useAgentModels() {
+  const { agentRuntimeVersion } = useConsoleStore();
+  const { data, loading, error, updatedAt, stale, refetch } = useResource<AgentModelsMap>(
+    'agent-models',
+    () => hermesApi.getAgentModels(),
+    [agentRuntimeVersion]
+  );
+  return { models: data, loading, error, updatedAt, stale, refetch };
 }
 
 export function useJobs() {

@@ -18,9 +18,12 @@ import {
   Thread,
   Message,
   MailboxEntry,
-  ExecutionSnapshot
+  ExecutionSnapshot,
+  AgentModelsMap,
+  SetAgentModelResponse
 } from '../types';
 import { MOCK_AGENTS, createDynamicMockAgent } from '../mock/agents';
+import { MOCK_AGENT_MODELS } from '../mock/models';
 import { MOCK_JOBS, MOCK_PIPELINE, MOCK_ACTIVE_JOB_DETAIL } from '../mock/jobs';
 import {
   MOCK_TELEMETRY,
@@ -47,6 +50,7 @@ function fmtTs(sec: number): string {
 
 export class MockHermesApi implements HermesApi {
   private agents: Record<AgentId, AgentDetail> = { ...MOCK_AGENTS };
+  private agentModels: AgentModelsMap = JSON.parse(JSON.stringify(MOCK_AGENT_MODELS));
   private jobs: Job[] = [...MOCK_JOBS];
   private pipeline: PipelineStep[] = [...MOCK_PIPELINE];
   private simTick = 0;
@@ -422,6 +426,33 @@ export class MockHermesApi implements HermesApi {
     };
     this.mockMessages.push(newMsg);
     return newMsg;
+  }
+
+  // --------------------------------------------------------------------------
+  // M8 Agent Model Registry
+  // --------------------------------------------------------------------------
+
+  async getAgentModels(): Promise<AgentModelsMap> {
+    return JSON.parse(JSON.stringify(this.agentModels));
+  }
+
+  async setAgentModel(agentId: string, model: string, effort?: string | null): Promise<SetAgentModelResponse> {
+    const id = agentId.toLowerCase();
+    const config = this.agentModels[id];
+    if (!config) {
+      throw new Error(`Unknown agent: ${agentId}`);
+    }
+    if (!config.allowed.includes(model)) {
+      throw new Error(`Model '${model}' is not allowed for ${agentId}`);
+    }
+    config.configured = {
+      default: model,
+      effort: effort !== undefined ? effort : null
+    };
+    return {
+      default: model,
+      effort: effort !== undefined ? effort : null
+    };
   }
 }
 

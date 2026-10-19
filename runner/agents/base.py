@@ -135,10 +135,9 @@ class AgentAdapter(ABC):
                 )
 
             if "permission denied" in stderr.lower():
-                raise SprintRunnerError(
-                    "FAILED_PERMISSION_DENIED",
-                    f"Agent {self.name} permission denied:\n{stderr}",
-                )
+                # The adapter decides whether denials exhausted the task or violated scope.
+                # A recovered denial must not relabel an unrelated nonzero process exit.
+                self.validate_result(result, context)
             raise SprintRunnerError(
                 "FAILED_AGENT_EXECUTION",
                 f"Agent {self.name} exited with code {result.returncode}:\n{stderr}",

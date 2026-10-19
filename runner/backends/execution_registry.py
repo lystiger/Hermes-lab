@@ -63,6 +63,7 @@ class ExecutionRegistry:
     def __init__(self):
         self._lock = threading.Lock()
         self._resources = {}
+        self._executions = {}
         self._path = None
         self._save_lock = threading.Lock()
         # Saves run on one background thread: apply() only marks the state dirty, so slow storage
@@ -71,6 +72,32 @@ class ExecutionRegistry:
         self._pending_saves = 0
         self._writing = False
         self._writer = None
+
+    def register_execution(self, execution_id, job_id, handle, cancel):
+        """Keep live owned handles separate from serializable resource rows."""
+        with self._lock:
+            self._executions[execution_id] = (job_id, handle, cancel)
+
+    def unregister_execution(self, execution_id):
+        with self._lock:
+            self._executions.pop(execution_id, None)
+
+    def cancel_execution(self, execution_id):
+        with self._lock:
+            entry = self._executions.get(execution_id)
+        if entry is None:
+            return False
+        entry[2]()
+        return True
+
+    def cancel_job(self, job_id):
+        with self._lock:
+            callbacks = [row[2] for row in self._executions.values() if row[0] == job_id]
+        for callback in callbacks:
+            try:
+                callback()
+            except Exception:
+                logger.warning("Execution cancellation failed", exc_info=True)
 
     def enable_persistence(self, path=None):
         self._path = Path(path) if path is not None else default_state_path()

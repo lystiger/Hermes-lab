@@ -126,7 +126,7 @@ class TestHermesSprintRunnerValidation(unittest.TestCase):
             "subtype": "success",
             "is_error": False,
             "permission_denials": ["Tool call Bash denied"],
-            "result": "Permission prompt refused."
+            "result": ""
         }
         stdout_text = json.dumps(claude_output)
         with self.assertRaises(SprintRunnerError) as ctx:

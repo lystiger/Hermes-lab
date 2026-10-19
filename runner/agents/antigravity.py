@@ -2,6 +2,7 @@ import json
 
 from .base import AgentAdapter, argv_safe_prompt
 from .errors import SprintRunnerError
+from .denials import check_denials
 from .permissions import scoped_antigravity_permissions
 
 
@@ -41,7 +42,9 @@ class AntigravityAdapter(AgentAdapter):
             return super().execute(context)
 
     def validate_result(self, result, context):
-        meta = self.parse_stream_json(result.stdout or "", result.stderr or "")
+        meta = self.parse_stream_json(result.stdout or "", result.stderr or "",
+                                      getattr(context, "options", {}), getattr(result, "runtime_metadata", None),
+                               getattr(context, "phase", {}), getattr(context, "worktree", None))
         if isinstance(meta, dict) and hasattr(result, "runtime_metadata"):
             if result.runtime_metadata is None:
                 result.runtime_metadata = {}
@@ -51,13 +54,8 @@ class AntigravityAdapter(AgentAdapter):
                 result.runtime_metadata["model"] = meta["model"]
 
     @staticmethod
-    def parse_stream_json(stdout_text, stderr_text=""):
-        if AntigravityAdapter._is_permission_denial(stderr_text):
-            raise SprintRunnerError(
-                "FAILED_PERMISSION_DENIED",
-                f"Antigravity permission denied in stderr:\n{stderr_text}",
-            )
-
+    def parse_stream_json(stdout_text, stderr_text="", options=None, metadata=None, phase=None, worktree=None):
+        denials = [line for line in stderr_text.splitlines() if AntigravityAdapter._is_permission_denial(line)]
         events = []
         for line_number, line in enumerate(stdout_text.splitlines(), start=1):
             line = line.strip()
@@ -67,16 +65,14 @@ class AntigravityAdapter(AgentAdapter):
                 event = json.loads(line)
             except json.JSONDecodeError:
                 if AntigravityAdapter._is_permission_denial(line):
-                    raise SprintRunnerError(
-                        "FAILED_PERMISSION_DENIED",
-                        f"Antigravity permission error on line {line_number}: {line}",
-                    )
+                    denials.append(line)
                 continue
             if not isinstance(event, dict):
                 continue
             events.append((line_number, event, line))
 
         if not events:
+            check_denials(denials, False, options, metadata, phase, worktree)
             raise SprintRunnerError(
                 "FAILED_ANTIGRAVITY_INVALID_OUTPUT",
                 "Antigravity emitted no valid stream-JSON events",
@@ -91,17 +87,19 @@ class AntigravityAdapter(AgentAdapter):
             if isinstance(step, dict) and step.get("step_type") == "tool":
                 tool = step.get("tool_info")
                 if isinstance(tool, dict):
-                    tool_error = str(tool.get("error", ""))
+                    tool_error = str(tool.get("error") or "")
 
             for text in (message, error_val, tool_error):
                 if text and AntigravityAdapter._is_permission_denial(text):
-                    raise SprintRunnerError(
-                        "FAILED_PERMISSION_DENIED",
-                        f"Antigravity permission error: {text}",
-                    )
+                    denials.append(tool if tool_error else event)
+                    break
 
         has_result_event = any(event.get("event") == "result" for _, event, _ in events)
 
+        usable = any(event.get("event") == "result" and bool(event.get("result"))
+                     and str((event.get("result") if isinstance(event.get("result"), dict) else event).get("status", "")).upper() not in {"ERROR", "FAILED"}
+                     for _, event, _ in events)
+        check_denials(denials, usable, options, metadata, phase, worktree)
         if not has_result_event:
             for line_number, event, line in events:
                 step = event.get("step_update")

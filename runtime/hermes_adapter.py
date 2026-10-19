@@ -901,6 +901,8 @@ class HermesActorAdapter(ActorAdapter):
                     "agent": actor_id,
                     "role": role,
                     "cmd_options": task.metadata.get("options", {}),
+                    "fail_on_permission_denial": task.metadata.get("fail_on_permission_denial", False),
+                    "permission_denial_ceiling": task.metadata.get("permission_denial_ceiling", 20),
                 },
                 worktree=worktree_path,
                 prompt=effective_prompt,

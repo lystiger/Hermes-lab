@@ -5,6 +5,7 @@ import secrets
 import shlex
 import shutil
 import subprocess
+import threading
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -46,9 +47,10 @@ class HerdrBackend(ExecutionBackend):
         self.commands_log = self.herdr_dir / "commands.log"
         self.runtime_file = self.herdr_dir / "runtime.json"
         self.event_sink = event_sink
+        self.cancel_event = kwargs.get("cancel_event") or threading.Event()
 
     def execute(self, request):
-        trace = self.trace(self.sprint_id)
+        trace = self.trace(self.sprint_id, cancel_codes=("FAILED_CANCELLED",))
         trace.started(f"Herdr task for agent '{request.agent_name}' started")
         try:
             return self._execute(request, trace)
@@ -57,18 +59,46 @@ class HerdrBackend(ExecutionBackend):
             raise
 
     def _execute(self, request, trace):
+        if self.cancel_event.is_set():
+            raise SprintRunnerError("FAILED_CANCELLED", "Herdr execution cancelled before launch")
         self.preflight(request.command[0])
         self._ensure_workspace(request.cwd)
         pane_id = self._create_worker_pane(request)
         label = str(request.metadata.get("phase", request.agent_name))[:80]
         trace.bind(resource=events.resource("pane", pane_id, label))
         trace.event(events.RESOURCE_ACQUIRED, f"Worker pane {pane_id} created")
+        from .execution_registry import default_execution_registry
+        def interrupt():
+            try:
+                self._interrupt_pane(pane_id)
+            except Exception:
+                if self.logger:
+                    self.logger.warning("Could not interrupt pane %s", pane_id, exc_info=True)
+        stopped = threading.Event()
+        def watch_cancel():
+            while not stopped.wait(.1):
+                if self.cancel_event.is_set():
+                    interrupt()
+                    return
+        watcher = threading.Thread(target=watch_cancel, daemon=True)
+        default_execution_registry.register_execution(trace.execution_id, self.sprint_id, pane_id, self.cancel_event.set)
+        watcher.start()
         try:
-            return self._run_in_pane(request, trace, pane_id)
+            result = self._run_in_pane(request, trace, pane_id)
+            if self.cancel_event.is_set():
+                raise SprintRunnerError("FAILED_CANCELLED", "Herdr execution cancelled")
+            return result
         except BaseException as exc:
+            if self.cancel_event.is_set():
+                cancelled = SprintRunnerError("FAILED_CANCELLED", "Herdr execution cancelled")
+                trace.fail(cancelled)
+                raise cancelled from exc
             trace.fail(exc)
             raise
         finally:
+            stopped.set()
+            watcher.join(timeout=.2)
+            default_execution_registry.unregister_execution(trace.execution_id)
             trace.event(events.RESOURCE_RELEASED, f"Worker pane {pane_id} finished its command")
 
     def _run_in_pane(self, request, trace, pane_id):
@@ -136,6 +166,8 @@ class HerdrBackend(ExecutionBackend):
             "herdr_pane_id": pane_id,
         }
         self._record_operation("worker_complete", pane_id=pane_id, status=returncode)
+        if self.cancel_event.is_set():
+            raise SprintRunnerError("FAILED_CANCELLED", "Herdr execution cancelled")
         trace.finish(f"Worker exited with code {returncode}")
         return ExecutionResult(
             command=tuple(request.command),

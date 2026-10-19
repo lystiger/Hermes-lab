@@ -1,6 +1,6 @@
 import json
 
-from .base import AgentAdapter
+from .base import AgentAdapter, argv_safe_prompt
 from .errors import SprintRunnerError
 
 
@@ -66,7 +66,7 @@ class ClaudeAdapter(AgentAdapter):
         return [
             "claude",
             "-p",
-            prompt,
+            argv_safe_prompt(prompt),
             "--model",
             options.get("model", "sonnet"),
             "--max-turns",

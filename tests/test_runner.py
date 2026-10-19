@@ -339,6 +339,23 @@ class TestAgentRegistryAndCommands(unittest.TestCase):
             ["agy", "--new-project", "-p", "do work", "--output-format", "stream-json"],
         )
 
+    def test_prompt_starting_with_dashes_is_not_an_option(self):
+        persona_prompt = "--- LYSSTACK AGENT IDENTITY ---\nAgent: Claude\n--- END ---"
+        for adapter, options in (
+            (AntigravityAdapter(), {}),
+            (ClaudeAdapter(), {}),
+            (CodexAdapter(), {}),
+        ):
+            command = adapter.build_command(persona_prompt, options)
+            prompt_args = [a for a in command if "LYSSTACK AGENT IDENTITY" in a]
+            self.assertEqual(len(prompt_args), 1, adapter.name)
+            self.assertFalse(prompt_args[0].startswith("-"), adapter.name)
+            self.assertTrue(prompt_args[0].endswith(persona_prompt), adapter.name)
+
+    def test_plain_prompt_is_passed_unchanged(self):
+        for adapter in (AntigravityAdapter(), ClaudeAdapter(), CodexAdapter()):
+            self.assertIn("do work", adapter.build_command("do work", {}))
+
     def test_antigravity_command_with_print_timeout(self):
         command = AntigravityAdapter().build_command(
             "do work",

@@ -2,7 +2,7 @@ import json
 import re
 from typing import Any, Dict, List, Mapping, Optional
 
-from .base import AgentAdapter
+from .base import AgentAdapter, argv_safe_prompt
 from .errors import SprintRunnerError
 
 
@@ -19,7 +19,7 @@ class CodexAdapter(AgentAdapter):
         command.extend(["--sandbox", "workspace-write"])
         if options.get("ephemeral", True):
             command.append("--ephemeral")
-        command.append(prompt)
+        command.append(argv_safe_prompt(prompt))
         return command
 
     def validate_result(self, result, context):

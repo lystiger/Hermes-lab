@@ -11,11 +11,14 @@ class CodexAdapter(AgentAdapter):
     name = "codex"
 
     def build_command(self, prompt, options, worktree=None):
+        options = self.model_options(options)
         command = ["codex", "exec", "--color", "never"]
         if worktree is not None:
             command.extend(["--cd", str(worktree)])
         if options.get("model"):
             command.extend(["--model", str(options["model"])])
+        if options.get("effort"):
+            command.extend(["-c", "model_reasoning_effort=" + json.dumps(options["effort"])])
         # Worker specs cannot weaken the workspace boundary.
         command.extend(["--sandbox", "workspace-write"])
         if options.get("ephemeral", True):

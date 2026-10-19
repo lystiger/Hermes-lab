@@ -55,6 +55,13 @@ class AgentAdapter(ABC):
     def build_command(self, prompt, options, worktree=None):
         """Return the argv used to invoke this agent."""
 
+    def model_options(self, options):
+        from agent_models import model_registry
+        if options.get("_model_resolved"):
+            return options
+        resolved = model_registry.resolve(self.name, options)
+        return {**options, "model": resolved["model"], "effort": resolved["effort"], "_model_resolved": True}
+
     def prepare(self, context):
         pass
 
@@ -62,7 +69,11 @@ class AgentAdapter(ABC):
         pass
 
     def execute(self, context):
-        command = self.build_command(context.prompt, context.options, context.worktree)
+        from agent_models import model_registry
+        model_metadata = model_registry.resolve(self.name, context.options)
+        options = {**context.options, **model_metadata, "_model_resolved": True}
+        command = self.build_command(context.prompt, options, context.worktree)
+        model_registry.record(self.name, model_metadata)
         context.runner.logger.info(
             "Launching agent process: %s in worktree %s",
             command[0],
@@ -80,7 +91,7 @@ class AgentAdapter(ABC):
                 kind="agent.started",
                 detail=f"Executing phase {phase_name or self.name} in worktree {context.worktree.name}",
                 job_id=sprint_id,
-                metadata={"command": command[0], "phase": phase_name},
+                metadata={"command": command[0], "phase": phase_name, **model_metadata},
             )
 
         try:

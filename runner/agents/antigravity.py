@@ -13,6 +13,7 @@ class AntigravityAdapter(AgentAdapter):
         self.settings_path = settings_path
 
     def build_command(self, prompt, options, worktree=None):
+        options = self.model_options(options)
         command = [
             "agy",
             "--new-project",

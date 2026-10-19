@@ -12,24 +12,24 @@ interface BadgeProps {
 export const Badge: React.FC<BadgeProps> = ({
   label,
   variant: _variant = 'status',
-  color = '#8C949F',
+  color = 'var(--lys-text-muted)',
   dot = false,
-  pulse = false,
+  pulse: _pulse = false,
   className = ''
 }) => {
   return (
     <span
       style={{
         color: color,
-        borderColor: `${color}44`,
-        backgroundColor: `${color}11`
+        borderColor: `color-mix(in srgb, ${color} 27%, transparent)`,
+        backgroundColor: `color-mix(in srgb, ${color} 7%, transparent)`
       }}
-      className={`inline-flex items-center gap-1.5 px-1.5 py-0.5 border font-mono-code text-[11px] uppercase tracking-wider ${className}`}
+      className={`inline-flex items-center gap-1.5 px-1.5 py-0.5 border font-sans text-[11px] uppercase tracking-wider ${className}`}
     >
       {dot && (
         <span
           style={{ backgroundColor: color }}
-          className={`w-1.5 h-1.5 rounded-[1px] ${pulse ? 'animate-pulse' : ''}`}
+          className={`w-1.5 h-1.5 rounded-[1px]`}
         />
       )}
       {label}

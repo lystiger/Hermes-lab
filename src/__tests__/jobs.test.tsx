@@ -61,6 +61,8 @@ describe('Job Queue & Arbitrary Agent Reference', () => {
       job: mockDetail,
       loading: false,
       error: null,
+      updatedAt: null,
+      stale: false,
       refetch: vi.fn()
     });
 

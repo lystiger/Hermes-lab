@@ -93,7 +93,7 @@ describe('Phase 7: Capability-Aware Delegation & Tool Messaging UI', () => {
   it('renders tool actor results cleanly with TOOL indicator and no anime card styling', () => {
     render(<OperationalThreadView threadId="thread_test_1" />);
 
-    expect(screen.getByText(/⚙ TOOL/i)).toBeInTheDocument();
+    expect(screen.getByText(/^\s*TOOL\s*$/i)).toBeInTheDocument();
     expect(screen.getByText(/TOOL_RESULT · tool_result/i)).toBeInTheDocument();
     expect(screen.getByText(/lock\.acquire\(\)/i)).toBeInTheDocument();
   });

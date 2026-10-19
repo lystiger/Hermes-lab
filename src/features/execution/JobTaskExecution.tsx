@@ -30,9 +30,9 @@ export const JobTaskExecution: React.FC<JobTaskExecutionProps> = ({ events }) =>
 
   return (
     <div>
-      <div className="font-mono-code text-[11px] tracking-wider text-[#5C646E] mb-2.5">TASK EXECUTION · BACKENDS</div>
+      <div className="font-sans text-[11px] tracking-wider text-lys-faint mb-2.5">TASK EXECUTION · BACKENDS</div>
       {rows.length === 0 ? (
-        <div className="py-2 font-mono-code text-[11px] text-[#5C646E]">No backend execution recorded for this job yet.</div>
+        <div className="py-2 font-sans text-[11px] text-lys-faint">No backend execution recorded for this job yet.</div>
       ) : (
         <div className="flex flex-col gap-1.5">
           {rows.map(([taskId, evt]) => {
@@ -56,14 +56,14 @@ export const JobTaskExecution: React.FC<JobTaskExecutionProps> = ({ events }) =>
                 to="/execution"
                 onClick={() => setActiveModalJobId(null)}
                 data-testid="job-task-execution"
-                className="flex flex-wrap items-center gap-2 px-2.5 py-2 bg-[#0C0E11] border border-[#1F242B] hover:border-[#3A4048] font-mono-code text-[11px] text-[#8C949F] transition-colors"
+                className="flex flex-wrap items-center gap-2 px-2.5 py-2 bg-lys-surface-0 border border-lys-subtle hover:border-lys-strong font-sans text-[11px] text-lys-muted transition-colors"
               >
-                <span className="text-[#5C646E]">{taskId}</span>
-                <Badge label={backend} color="#7FB3D5" />
-                <span className="text-[#E6E9ED]">{resource ? resource.label : '—'}</span>
-                {reused && <Badge label="reused" color="#7FB3D5" />}
+                <span className="text-lys-faint">{taskId}</span>
+                <Badge label={backend} color="var(--lys-accent-sky)" />
+                <span className="text-lys-primary">{resource ? resource.label : '—'}</span>
+                {reused && <Badge label="reused" color="var(--lys-accent-sky)" />}
                 <Badge label={state.replace(/_/g, ' ')} color={style.color} />
-                <span className="ml-auto text-[#CBA35C]">open execution →</span>
+                <span className="ml-auto text-lys-gold">open execution →</span>
               </Link>
             );
           })}

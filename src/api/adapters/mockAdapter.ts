@@ -6,8 +6,12 @@ import {
   Job,
   JobDetail,
   PipelineStep,
-  ProviderQuota,
   ProjectionItem,
+  CapacityTelemetry,
+  JobTokenTelemetry,
+  TaskNode,
+  AgentRun,
+  JobObservation,
   SettingItem,
   TraceEvent,
   OverviewTelemetry,
@@ -20,7 +24,6 @@ import { MOCK_AGENTS, createDynamicMockAgent } from '../mock/agents';
 import { MOCK_JOBS, MOCK_PIPELINE, MOCK_ACTIVE_JOB_DETAIL } from '../mock/jobs';
 import {
   MOCK_TELEMETRY,
-  MOCK_PROVIDER_QUOTAS,
   MOCK_PROJECTIONS,
   MOCK_RUNTIME_SETTINGS,
   MOCK_POLICY_SETTINGS
@@ -125,8 +128,34 @@ export class MockHermesApi implements HermesApi {
     return { ...MOCK_TELEMETRY };
   }
 
-  async getProviderQuotas(): Promise<ProviderQuota[]> {
-    return [...MOCK_PROVIDER_QUOTAS];
+  // M2 endpoints: mock fixtures carry no capacity, task, run or observation records.
+  async getCapacityTelemetry(): Promise<CapacityTelemetry> {
+    return { timestamp: null, summary: null, providers: [], jobsTracked: 0 };
+  }
+
+  async getJobTelemetry(jobId: string): Promise<JobTokenTelemetry> {
+    return { jobId, inputTokens: 0, outputTokens: 0, cachedTokens: 0, totalTokens: 0 };
+  }
+
+  async getJobTasks(_jobId: string): Promise<TaskNode[]> {
+    return [];
+  }
+
+  async getJobRuns(_jobId: string): Promise<AgentRun[]> {
+    return [];
+  }
+
+  async getJobObservations(_jobId: string): Promise<JobObservation[]> {
+    return [];
+  }
+
+  async getJobEvents(_jobId: string): Promise<TraceEvent[]> {
+    return [];
+  }
+
+  async getRecoverableJobs(): Promise<Job[]> {
+    const jobs = await this.getJobs();
+    return jobs.filter((j) => j.status !== 'COMPLETED' && j.status !== 'CANCELLED');
   }
 
   async getProjections(): Promise<ProjectionItem[]> {

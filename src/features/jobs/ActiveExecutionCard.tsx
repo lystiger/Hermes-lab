@@ -1,67 +1,105 @@
 import React from 'react';
-import { AmbientGyro } from '../../components/AmbientGyro';
 import { JobPipelineGraph } from './JobPipelineGraph';
-import { useConsoleStore } from '../../stores/useConsoleStore';
+import { useJob, useJobs } from '../../api/hooks';
+import { ACTIVE_JOB_STATUSES } from '../../api/adapters/httpAdapter';
+import { ErrorState, Freshness, LoadingState, ResourceError, StaleNotice, UnknownValue } from '../../components/DataStates';
+import { Card } from '../../components/Card';
+import { CopyId } from '../../components/CopyId';
+import { HERMES_ART } from '../../theme/agentArt';
+import { useNow } from '../execution/useNow';
+import { formatElapsed } from './jobTiming';
+import { JobTokens } from './JobRealData';
 
 interface ActiveExecutionCardProps {
-  onOpenJob?: () => void;
+  onOpenJob?: (jobId: string) => void;
 }
 
+/** The job that is active right now, from the real job list. With none active, the card says so and stays short. */
 export const ActiveExecutionCard: React.FC<ActiveExecutionCardProps> = ({ onOpenJob }) => {
-  const { ambient3d, elapsed, jobTokens } = useConsoleStore();
+  const { jobs, loading, error, stale, refetch, updatedAt } = useJobs();
+  const activeJob = jobs.find((j) => ACTIVE_JOB_STATUSES.includes(j.status));
+  // The phase graph is its own resource: its failures are shown here, not hidden behind the card.
+  const phases = useJob(activeJob?.id ?? null);
+  const detail = phases.job;
+  const nowMs = useNow(1000);
+
+  if (loading && jobs.length === 0) {
+    return <Card><LoadingState label="Loading active execution…" /></Card>;
+  }
+
+  if (error && jobs.length === 0) {
+    return <Card><ErrorState label="Active execution" error={error} onRetry={refetch} /></Card>;
+  }
+
+  if (!activeJob) {
+    return (
+      <Card label="Active execution">
+        <div className="p-5 flex flex-col gap-3">
+          {stale && <StaleNotice label="Active execution" error={error} onRetry={refetch} />}
+          <div className="flex items-center justify-between gap-6">
+            <div className="min-w-0">
+              <div className="text-[11px] font-medium tracking-wider uppercase text-lys-faint">Active execution</div>
+              <div className="mt-1 font-display text-[22px] font-semibold text-lys-muted">No active execution</div>
+            </div>
+            <img src={HERMES_ART} alt="" aria-hidden="true" className="h-12 w-auto opacity-60 shrink-0" />
+          </div>
+        </div>
+      </Card>
+    );
+  }
 
   return (
-    <div className="relative p-5 pb-6 border-b border-[#1F242B] overflow-hidden select-none bg-[#0A0B0D]">
-      <AmbientGyro enabled={ambient3d} size={150} />
-
-      {/* Header Status */}
-      <div className="flex items-center gap-2.5 mb-2">
-        <span className="font-mono-code text-[11px] text-[#5C646E] tracking-wider">
-          ACTIVE EXECUTION
-        </span>
-        <span className="flex items-center gap-1.5 font-mono-code text-[11px] text-[#3FB950] border border-[rgba(63,185,80,0.35)] px-1.5 py-0.5 bg-[rgba(63,185,80,0.05)]">
-          <span className="w-1 h-1 rounded-[1px] bg-[#3FB950] animate-pulse" />
-          RUNNING
-        </span>
+    <Card accent="var(--lys-accent-gold)" label="Active execution">
+      <div className="p-5 flex flex-col gap-4">
+        {stale && <StaleNotice label="Active execution" error={error} onRetry={refetch} />}
+        <div className="flex flex-wrap items-center gap-3">
+          <span className="text-[11px] font-medium tracking-wider uppercase text-lys-faint">Active execution</span>
+          <span className="ml-auto"><Freshness at={updatedAt} /></span>
+          <span className="text-[10px] font-mono-code uppercase text-lys-success">{activeJob.status}</span>
+        </div>
+        <div className="flex flex-col gap-1">
+          <CopyId value={activeJob.id} truncate className="text-lys-faint text-[11px]" />
+          <button
+            type="button"
+            onClick={() => onOpenJob?.(activeJob.id)}
+            className="text-left font-display text-[24px] font-semibold text-lys-primary hover:underline cursor-pointer"
+          >
+            {activeJob.title}
+          </button>
+        </div>
+        <div className="flex flex-wrap gap-x-5 gap-y-1 text-[12px] text-lys-muted">
+          <span>{activeJob.repository}</span>
+          {activeJob.branch && <span className="text-lys-gold">{activeJob.branch}</span>}
+          <span>
+            elapsed <span className="text-lys-primary lys-metric">{formatElapsed(activeJob.startedAt, activeJob.completedAt, nowMs)}</span>
+          </span>
+          <span>tokens <JobTokens jobId={activeJob.id} /></span>
+        </div>
+        <div>
+          {phases.error && !detail ? (
+            <ErrorState label="Job phases" error={phases.error} onRetry={phases.refetch} />
+          ) : (
+            <>
+              {phases.error && detail && (
+                <ResourceError label="Job phases" error={phases.error} hasData updatedAt={phases.updatedAt} onRetry={phases.refetch} />
+              )}
+              <JobPipelineGraph steps={detail?.executionGraph ?? []} />
+            </>
+          )}
+        </div>
+        <div className="flex flex-wrap items-center gap-4 pt-3 border-t border-lys-subtle text-[12px] text-lys-muted">
+          <span>
+            estimated completion{' '}
+            <UnknownValue reason="Hermes exposes no estimator for phase or job completion" className="text-lys-muted" />
+          </span>
+          {onOpenJob && (
+            <button type="button" onClick={() => onOpenJob(activeJob.id)} className="text-lys-gold hover:underline cursor-pointer">
+              open job →
+            </button>
+          )}
+        </div>
       </div>
-
-      {/* Main Title / Clickable Target */}
-      <div
-        onClick={onOpenJob}
-        className="flex items-baseline flex-wrap gap-x-3 gap-y-0.5 cursor-pointer hover:opacity-80 transition-opacity"
-      >
-        <span className="font-mono-code text-[26px] text-[#5C646E]">#142</span>
-        <span className="text-[22px] font-semibold tracking-tight text-[#E6E9ED]">
-          Move VehicleStateStore to Redis
-        </span>
-      </div>
-
-      {/* Metadata Bar */}
-      <div className="flex items-center flex-wrap gap-x-3.5 gap-y-1 mt-2 font-mono-code text-[11px] text-[#8C949F]">
-        <span>moveinmate/backend</span>
-        <span className="text-[#2A3038]">·</span>
-        <span className="text-[#CBA35C]">feat/redis-state</span>
-        <span className="text-[#2A3038]">·</span>
-        <span>started 10:38</span>
-        <span className="text-[#2A3038]">·</span>
-        <span>elapsed <span className="text-[#E6E9ED]">{elapsed}</span></span>
-        <span className="text-[#2A3038]">·</span>
-        <span>budget <span className="text-[#E6E9ED]">{jobTokens}</span> / 80k</span>
-      </div>
-
-      {/* 3D Pipeline Graph */}
-      <div className="mt-6">
-        <JobPipelineGraph />
-      </div>
-
-      {/* Estimated Completion Footer */}
-      <div className="mt-5 flex flex-wrap gap-6 pt-3.5 border-t border-[#1F242B] font-mono-code text-[11px]">
-        <span className="text-[#5C646E]">ESTIMATED COMPLETION</span>
-        <span className="text-[#8C949F]">phase <span className="text-[#E6E9ED]">~4 min</span></span>
-        <span className="text-[#8C949F]">job <span className="text-[#E6E9ED]">~11 min</span></span>
-        <span className="text-[#8C949F]">queue <span className="text-[#E6E9ED]">~37 min</span></span>
-        <span className="text-[#5C646E]">median of 34 runs · confidence <span className="text-[#E3A008]">medium</span></span>
-      </div>
-    </div>
+    </Card>
   );
 };
+

@@ -1,4 +1,8 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
+// These tests exercise the mock fixtures, which are opt-in only (VITE_LYSCONTROL_MOCK=1).
+vi.hoisted(() => {
+  process.env.VITE_LYSCONTROL_MOCK = '1';
+});
 import { render, screen } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { AgentPortrait } from '../features/agents/AgentPortrait';
@@ -71,7 +75,7 @@ describe('Agent UI & Portrait Fallbacks', () => {
     expect(screen.getByText('CUSTOM')).toBeInTheDocument();
   });
 
-  it('renders [ VIEW DOSSIER ] trigger on Agent Detail when characterCardUrl is present', async () => {
+  it('renders view character sheet trigger on Agent Detail when characterCardUrl is present', async () => {
     render(
       <MemoryRouter initialEntries={['/agents/claude']}>
         <Routes>
@@ -80,11 +84,12 @@ describe('Agent UI & Portrait Fallbacks', () => {
       </MemoryRouter>
     );
 
-    expect(await screen.findByText('Claude')).toBeInTheDocument();
-    expect(screen.getByText('[ VIEW DOSSIER ]')).toBeInTheDocument();
+    // The name appears in the roster and as the dossier heading; the heading is the dossier.
+    expect(await screen.findByRole('heading', { name: 'Claude' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /character sheet/i })).toBeInTheDocument();
   });
 
-  it('renders Agent Detail without [ VIEW DOSSIER ] when characterCardUrl is not present', async () => {
+  it('renders Agent Detail without view character sheet when characterCardUrl is not present', async () => {
     render(
       <MemoryRouter initialEntries={['/agents/unknown-subagent']}>
         <Routes>
@@ -94,6 +99,6 @@ describe('Agent UI & Portrait Fallbacks', () => {
     );
 
     expect(await screen.findByText('Unknown-subagent')).toBeInTheDocument();
-    expect(screen.queryByText('[ VIEW DOSSIER ]')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /character sheet/i })).not.toBeInTheDocument();
   });
 });

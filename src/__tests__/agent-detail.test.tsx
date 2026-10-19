@@ -1,4 +1,8 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
+// These tests exercise the mock fixtures, which are opt-in only (VITE_LYSCONTROL_MOCK=1).
+vi.hoisted(() => {
+  process.env.VITE_LYSCONTROL_MOCK = '1';
+});
 import { render, screen } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { AgentDetailRoute } from '../routes/agents/$agentId';
@@ -15,6 +19,7 @@ describe('Agent Detail Route with Dynamic & Unknown Agents', () => {
 
     // Kimi should dynamically load and render via mock adapter fallback
     expect(await screen.findByText('Kimi')).toBeInTheDocument();
-    expect(screen.getByText(/Dynamic Provider/i)).toBeInTheDocument();
+    // The provider appears in the roster presence card and the dossier.
+    expect(screen.getAllByText(/Dynamic Provider/i).length).toBeGreaterThan(0);
   });
 });

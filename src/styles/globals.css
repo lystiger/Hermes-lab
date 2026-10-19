@@ -1,52 +1,127 @@
 @import "tailwindcss";
 
-@layer base {
-  :root {
-    --bg-primary: #0A0B0D;
-    --bg-secondary: #0C0E11;
-    --bg-tertiary: #101216;
-    --border-dim: #1F242B;
-    --border-highlight: #2A3038;
-    --gold-primary: #CBA35C;
-    --gold-hover: #E8CE9B;
-    --text-primary: #E6E9ED;
-    --text-muted: #8C949F;
-    --text-dim: #5C646E;
-    
-    --color-gem: #5B8CFF;
-    --color-cla: #D9A05B;
-    --color-cod: #4EC9A0;
-    --color-red: #F2555A;
-    --color-amber: #E3A008;
-    --color-green: #3FB950;
-  }
+/*
+ * Theme (M4). One source of truth: every colour, font, duration and easing the console uses is a token here.
+ * Components use the Tailwind utilities (text-lys-muted, bg-lys-surface-2, border-lys-subtle) or var(--lys-…)
+ * in inline styles. Values follow docs/design/mihoyo-ui-research.md §6. Contrast is recorded in
+ * docs/design/m4-decisions.md and checked by src/__tests__/m4-theme.test.ts.
+ */
+@theme {
+  --color-lys-base: var(--lys-bg-base);
+  --color-lys-surface-0: var(--lys-surface-0);
+  --color-lys-surface-1: var(--lys-surface-1);
+  --color-lys-surface-2: var(--lys-surface-2);
+  --color-lys-surface-interactive: var(--lys-surface-interactive);
+  --color-lys-subtle: var(--lys-border-subtle);
+  --color-lys-default: var(--lys-border-default);
+  --color-lys-strong: var(--lys-border-strong);
+  --color-lys-primary: var(--lys-text-primary);
+  --color-lys-secondary: var(--lys-text-secondary);
+  --color-lys-muted: var(--lys-text-muted);
+  --color-lys-faint: var(--lys-text-faint);
+  --color-lys-success: var(--lys-status-success);
+  --color-lys-warning: var(--lys-status-warning);
+  --color-lys-danger: var(--lys-status-danger);
+  --color-lys-info: var(--lys-status-info);
+  --color-lys-gold: var(--lys-accent-gold);
+  --color-lys-gold-hover: var(--lys-accent-gold-hover);
+  --color-lys-sky: var(--lys-accent-sky);
+  --color-lys-violet: var(--lys-accent-violet);
+  --color-lys-agent-claude: var(--lys-agent-claude);
+  --color-lys-agent-codex: var(--lys-agent-codex);
+  --color-lys-agent-gemini: var(--lys-agent-gemini);
+  --color-lys-agent-hermes: var(--lys-agent-hermes);
+  --color-lys-ink: var(--lys-ink);
 
+  --font-sans: var(--lys-font-body);
+  --font-display: var(--lys-font-display);
+  --font-mono: var(--lys-font-mono);
+
+  --ease-lys-hsr: var(--lys-ease-hsr);
+  --ease-lys-zzz: var(--lys-ease-zzz);
+  --ease-lys-standard: var(--lys-ease-standard);
+}
+
+:root {
+  /* Surfaces */
+  --lys-bg-base: #08090B;
+  --lys-surface-0: #0C0E12;
+  --lys-surface-1: #12151B;
+  --lys-surface-2: #181D25;
+  --lys-surface-interactive: #202632;
+  /* Borders */
+  --lys-border-subtle: #1C222C;
+  --lys-border-default: #28303E;
+  --lys-border-strong: #3D485C;
+  /* Text. "faint" replaces the old #5C646E, which reached only 3.3:1 on the surfaces (WCAG AA needs 4.5:1). */
+  --lys-text-primary: #E6E9ED;
+  --lys-text-secondary: #B7BEC7;
+  --lys-text-muted: #8C949F;
+  --lys-text-faint: #868F9B;
+  /* Status */
+  --lys-status-success: #3FB950;
+  --lys-status-warning: #E3A008;
+  --lys-status-danger: #F5626A;
+  --lys-status-info: #58A6FF;
+  /* Accents */
+  --lys-accent-gold: #CBA35C;
+  --lys-accent-gold-hover: #E8CE9B;
+  --lys-accent-sky: #7FB3D5;
+  --lys-accent-violet: #A78BFA;
+  /* Per-agent accents: one variable each, resolved in src/theme/agents.ts. The lead replaces these values. */
+  --lys-agent-claude: #CCA27D;
+  --lys-agent-codex: #7A8ECE;
+  --lys-agent-gemini: #9686E1;
+  --lys-agent-hermes: #CBA35C;
+  /* Ink for overlays and shadows */
+  --lys-ink: #000000;
+  /* Derived dim tints of the agent accents (for fills and glows; text uses the solid values). */
+  --lys-agent-claude-dim: color-mix(in srgb, var(--lys-agent-claude) 18%, transparent);
+  --lys-agent-codex-dim: color-mix(in srgb, var(--lys-agent-codex) 18%, transparent);
+  --lys-agent-gemini-dim: color-mix(in srgb, var(--lys-agent-gemini) 18%, transparent);
+  --lys-agent-hermes-dim: color-mix(in srgb, var(--lys-agent-hermes) 18%, transparent);
+
+  /* Typography (OFL fonts, bundled with @fontsource) */
+  --lys-font-display: "Outfit", "Space Grotesk", system-ui, sans-serif;
+  --lys-font-body: "Plus Jakarta Sans", "Inter", system-ui, sans-serif;
+  --lys-font-mono: "JetBrains Mono", ui-monospace, monospace;
+
+  /* Motion (research §3, §6). Durations and easings apply to transitions and entry only. */
+  --lys-duration-instant: 100ms;
+  --lys-duration-fast: 160ms;
+  --lys-duration-normal: 260ms;
+  --lys-duration-deliberate: 360ms;
+  --lys-ease-hsr: cubic-bezier(0.16, 1, 0.3, 1);
+  --lys-ease-zzz: cubic-bezier(0.34, 1.25, 0.64, 1);
+  --lys-ease-standard: cubic-bezier(0.4, 0, 0.2, 1);
+
+  /* Geometry and elevation */
+  --lys-radius-sm: 2px;
+  --lys-radius-md: 4px;
+  --lys-radius-lg: 6px;
+  --lys-clip-chamfer: polygon(0 0, calc(100% - 10px) 0, 100% 10px, 100% 100%, 10px 100%, 0 calc(100% - 10px));
+  --lys-shadow-card: 0 4px 16px rgba(0, 0, 0, 0.45);
+  --lys-shadow-elevated: 0 8px 32px rgba(0, 0, 0, 0.65);
+}
+
+@layer base {
   html, body {
     margin: 0;
     padding: 0;
-    background: #0A0B0D;
-    color: #E6E9ED;
-    font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Helvetica Neue', system-ui, sans-serif;
+    background: var(--lys-bg-base);
+    color: var(--lys-text-primary);
+    font-family: var(--lys-font-body);
     -webkit-font-smoothing: antialiased;
   }
 
-  *::-webkit-scrollbar {
-    width: 8px;
-    height: 8px;
+  h1, h2, h3 {
+    font-family: var(--lys-font-display);
   }
 
-  *::-webkit-scrollbar-thumb {
-    background: #242A32;
-    border-radius: 0px;
-  }
-
-  *::-webkit-scrollbar-thumb:hover {
-    background: #3A4048;
-  }
-
-  *::-webkit-scrollbar-track {
-    background: #0C0E11;
-  }
+  *::-webkit-scrollbar { width: 8px; height: 8px; }
+  *::-webkit-scrollbar-thumb { background: var(--lys-border-default); border-radius: 0; }
+  *::-webkit-scrollbar-thumb:hover { background: var(--lys-border-strong); }
+  *::-webkit-scrollbar-track { background: var(--lys-surface-0); }
 }
 
 /* 3D and Cyber Animations */
@@ -114,8 +189,41 @@
   to { transform: rotateX(-24deg) rotateY(360deg); }
 }
 
+
+@keyframes lys-enter {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: none; }
+}
+
+/* Entry motion. Rows stagger 20ms apart; the total stagger is capped at 180ms (research §3.2). */
+.lys-enter {
+  animation: lys-enter var(--lys-duration-normal) var(--lys-ease-hsr) both;
+  animation-delay: calc(min(var(--lys-stagger, 0), 9) * 20ms);
+}
+
+.lys-drawer {
+  animation: lys-enter var(--lys-duration-deliberate) var(--lys-ease-hsr) both;
+}
+
+/* Hover, focus and state transitions use the motion tokens. Layers below are unlayered so they win. */
+.transition-colors,
+.transition-all,
+.transition-opacity,
+.transition-transform,
+.transition-shadow,
+.transition {
+  transition-duration: var(--lys-duration-fast);
+  transition-timing-function: var(--lys-ease-standard);
+}
+
 .font-mono-code {
-  font-family: ui-monospace, 'SF Mono', SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace;
+  font-family: var(--lys-font-mono);
+}
+
+/* Tabular figures for every metric, so columns of numbers line up. */
+.font-mono-code,
+.lys-metric {
+  font-variant-numeric: tabular-nums;
 }
 
 .clip-hex {
@@ -126,12 +234,45 @@
   clip-path: polygon(24% 0, 76% 0, 100% 30%, 100% 100%, 0 100%, 0 30%);
 }
 
-.bg-cyber-grid {
-  background-image: linear-gradient(to right, rgba(31, 36, 43, 0.4) 1px, transparent 1px),
-                    linear-gradient(to bottom, rgba(31, 36, 43, 0.4) 1px, transparent 1px);
-  background-size: 20px 20px;
+.bg-striped-pattern {
+  background: repeating-linear-gradient(90deg, transparent 0 4px, var(--lys-bg-base) 4px 5px);
 }
 
-.bg-striped-pattern {
-  background: repeating-linear-gradient(90deg, transparent 0 4px, #0A0B0D 4px 5px);
+/* Visible keyboard focus everywhere: a 2px gold ring (research §7.2). */
+:focus-visible {
+  outline: 2px solid var(--lys-accent-gold);
+  outline-offset: 2px;
+}
+
+/* The page's single scroll container (M7). Smooth scrolling only where motion is allowed. */
+.lys-scroll {
+  overscroll-behavior: contain;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .lys-scroll {
+    scroll-behavior: smooth;
+  }
+}
+
+/* Reduced motion (research §7): animations and transitions collapse to their end state. */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    animation-delay: 0ms !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* Unified card system: clean border radius, layered surface, hairline border. */
+.lys-card-outer {
+  border-radius: var(--lys-radius-md);
+  overflow: hidden;
+}
+
+.lys-card-inner {
+  border-radius: calc(var(--lys-radius-md) - 1px);
+  overflow: hidden;
 }

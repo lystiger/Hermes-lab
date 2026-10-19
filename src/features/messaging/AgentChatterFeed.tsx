@@ -10,30 +10,30 @@ export const AgentChatterFeed: React.FC<{ limit?: number }> = ({ limit = 10 }) =
 
   return (
     <div className="flex flex-col select-none">
-      <div className="flex items-center justify-between font-mono-code text-[11px] text-[#5C646E] mb-2.5">
+      <div className="flex items-center justify-between font-sans text-[11px] text-lys-faint mb-2.5">
         <span className="tracking-wider">AGENT CHATTER &amp; HANDOFFS</span>
-        <span className="flex items-center gap-1.5 text-[#3FB950]">
-          <span className="w-1 h-1 rounded-full bg-[#3FB950] animate-pulse" />
+        <span className="flex items-center gap-1.5 text-lys-success">
+          <span className="w-1 h-1 rounded-full bg-lys-success" />
           live
         </span>
       </div>
 
       <div className="flex flex-col gap-2">
         {chatterEvents.map((evt) => {
-          const color = evt.source.accentColor || '#CBA35C';
+          const color = evt.source.accentColor || 'var(--lys-accent-gold)';
 
           return (
             <div
               key={evt.id}
-              className="p-2.5 bg-[#101216] border border-[#1A1E24] hover:border-[#2A3038] transition-colors"
+              className="p-2.5 bg-lys-surface-1 border border-lys-subtle hover:border-lys-default transition-colors"
             >
-              <div className="flex items-center justify-between font-mono-code text-[11px] mb-1">
+              <div className="flex items-center justify-between font-sans text-[11px] mb-1">
                 <span style={{ color }} className="font-semibold">
                   [{evt.source.displayName}]
                 </span>
-                <span className="text-[#5C646E]">{evt.ts}</span>
+                <span className="text-lys-faint">{evt.ts}</span>
               </div>
-              <p className="text-[12px] text-[#D7DCE2] leading-relaxed font-mono-code">
+              <p className="text-[12px] text-lys-primary leading-relaxed font-sans">
                 {evt.detail}
               </p>
             </div>

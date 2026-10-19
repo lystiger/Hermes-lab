@@ -6,6 +6,9 @@ export type AgentStatus = 'RUNNING' | 'WAITING' | 'IDLE' | 'OFFLINE' | 'BUSY' | 
 export type Priority = 'P0' | 'P1' | 'P2' | 'P3';
 
 export type JobStatus =
+  | 'CREATED'
+  | 'EXECUTING'
+  | 'WAITING_FOR_CAPACITY'
   | 'QUEUED'
   | 'PLANNING'
   | 'PREPARING'
@@ -30,7 +33,18 @@ export type PhaseStatus =
   | 'SUPERSEDED'
   | 'BLOCKED';
 
-export type PipelineStepState = 'COMPLETED' | 'RUNNING' | 'QUEUED' | 'CLAIMED' | 'BLOCKED' | 'IDLE';
+// Terminal failure/cancel/skip states are kept distinct from BLOCKED; UNKNOWN is a raw status we do not map.
+export type PipelineStepState =
+  | 'COMPLETED'
+  | 'RUNNING'
+  | 'QUEUED'
+  | 'CLAIMED'
+  | 'BLOCKED'
+  | 'FAILED'
+  | 'CANCELLED'
+  | 'SKIPPED'
+  | 'UNKNOWN'
+  | 'IDLE';
 
 export type PhaseName = string;
 
@@ -292,7 +306,7 @@ export interface JobTokenBreakdown {
 export interface JobDetail extends Job {
   phases?: JobPhase[];
   executionGraph: PipelineStep[];
-  changedFiles: ChangedFile[];
+  changedFiles?: ChangedFile[];
   testSummary?: {
     total?: number;
     passed: number;
@@ -302,12 +316,16 @@ export interface JobDetail extends Job {
     durationMs?: number;
     rawLog?: string;
   };
-  retryHistory: JobRetryItem[];
-  retriesUsed: number;
-  maxRetries: number;
-  tokenBreakdown: JobTokenBreakdown[];
+  /** Undefined when Hermes reports no attempt history; never a fixed or invented list. */
+  retryHistory?: JobRetryItem[];
+  /** Not reported by the HTTP API. Only mock fixtures carry these. */
+  retriesUsed?: number;
+  maxRetries?: number;
+  tokenBreakdown?: JobTokenBreakdown[];
   artifacts?: ArtifactRef[];
   errors?: any[];
+  /** Raw verification result from Hermes (status/results); null when none was recorded. */
+  verification?: unknown;
 }
 
 export interface PipelineStep {
@@ -337,9 +355,17 @@ export interface TraceEvent {
   kind: string;
   detail: string;
   dur: string;
-  jobId?: string;
-  taskId?: string;
+  /** Real nulls from Hermes are kept as null, not turned into undefined. */
+  jobId?: string | null;
+  taskId?: string | null;
+  runId?: string | null;
+  actorId?: string | null;
   metadata?: Record<string, any>;
+  /**
+   * Where a job-history event came from. `stored` is the canonical durable envelope; `bus` is the in-memory
+   * event bus fallback, which does not survive a restart. Live SSE and the global buffer leave this unset.
+   */
+  origin?: 'stored' | 'bus';
 }
 
 export interface ProviderQuota {
@@ -378,10 +404,14 @@ export interface OverviewTelemetry {
   runningJobsCount: number;
   queuedJobsCount: number;
   blockedJobsCount: number;
-  failed24hCount: number;
+  /** null when it cannot be counted honestly (e.g. a failed job has no completedAt). */
+  failed24hCount: number | null;
+  /** Number of jobs the counts were derived from (GET /jobs returns at most its default limit). */
+  sampleSize: number;
   tokensToday: string;
   estSpendToday: string;
-  sprintBudgetUsedPct: number;
+  /** null: Hermes exposes no sprint budget, so no percentage can be computed. */
+  sprintBudgetUsedPct: number | null;
 }
 
 export interface SendMessageRequest {
@@ -579,4 +609,115 @@ export interface ExecutionSnapshot {
   openrig: OpenRigExecutionStatus | null;
   /** Epoch seconds (same clock as event rawTs). Events at or before it are already reflected. */
   takenAt?: number;
+}
+
+// ---------------------------------------------------------------------------
+// M2 real-data DTOs. Field names are camelCase; nulls are real nulls from Hermes.
+// ---------------------------------------------------------------------------
+
+/** Source of a usage snapshot as Hermes labels it (runtime/capacity.py UsageSnapshot.source). */
+export type UsageSource = 'provider_reported' | 'hermes_estimated' | 'unknown';
+
+export interface UsageSnapshotView {
+  source: UsageSource | string;
+  observedAt: string | null;
+  modelId: string | null;
+  actorId: string | null;
+  inputTokens: number | null;
+  outputTokens: number | null;
+  cachedTokens: number | null;
+  tokensUsed: number | null;
+  requestsUsed: number | null;
+  requestsRemaining: number | null;
+  requestLimit: number | null;
+  tokensRemaining: number | null;
+  tokenLimit: number | null;
+  contextWindow: number | null;
+  contextUsed: number | null;
+  resetAt: string | null;
+}
+
+export interface ProviderTelemetry {
+  providerId: string;
+  status: string;
+  statusReason: string | null;
+  totalRequests: number;
+  successCount: number;
+  failureCount: number;
+  /** null when no request has been made, because no rate can be stated. */
+  successRate: number | null;
+  throttlingCount: number;
+  failureBreakdown: Record<string, number>;
+  usage: UsageSnapshotView | null;
+}
+
+/** GET /capacity/telemetry. Totals are counted since the runtime process started; they are not daily totals. */
+export interface CapacityTelemetry {
+  timestamp: string | null;
+  summary: {
+    totalProviders: number | null;
+    totalRequests: number | null;
+    totalFailures: number | null;
+    totalThrottlingEvents: number | null;
+    totalTokens: number | null;
+    inputTokens: number | null;
+    outputTokens: number | null;
+    cachedTokens: number | null;
+  } | null;
+  providers: ProviderTelemetry[];
+  jobsTracked: number | null;
+}
+
+/** GET /jobs/{id}/telemetry. Zero means no usage was tracked for the job, not proof that none was spent. */
+export interface JobTokenTelemetry {
+  jobId: string;
+  inputTokens: number;
+  outputTokens: number;
+  cachedTokens: number;
+  totalTokens: number;
+}
+
+export interface TaskNode {
+  taskId: string;
+  jobId: string;
+  description: string;
+  status: string;
+  dependencies: string[];
+  requiredCapabilities: string[];
+  assignedActor: string | null;
+  parentTaskId: string | null;
+  createdAt: string | null;
+  startedAt: string | null;
+  completedAt: string | null;
+  attempt: number;
+  maxAttempts: number | null;
+  error: unknown;
+  supersededBy: string | null;
+  artifactRefs: ArtifactRef[];
+}
+
+export interface AgentRun {
+  runId: string;
+  jobId: string;
+  taskId: string;
+  actorId: string;
+  status: string;
+  attempt: number;
+  startedAt: string | null;
+  finishedAt: string | null;
+  exitReason: string | null;
+  error: unknown;
+  artifactRefs: ArtifactRef[];
+}
+
+export interface JobObservation {
+  observationId: string;
+  jobId: string;
+  kind: string;
+  content: string;
+  taskId: string | null;
+  actorId: string | null;
+  source: string | null;
+  confidence: number | null;
+  createdAt: string | null;
 }

@@ -14,7 +14,7 @@ describe('MockHermesApi Contract Implementation', () => {
     expect(gemini).toBeDefined();
     expect(gemini?.displayName).toBe('Gemini');
     expect(gemini?.presentation?.characterCardUrl).toBeDefined();
-    expect(gemini?.presentation?.accentColor).toBe('#5B8CFF');
+    expect(gemini?.presentation?.accentColor).toBe('var(--lys-agent-gemini)');
   });
 
   it('should return detail for an existing agent', async () => {
@@ -40,7 +40,7 @@ describe('MockHermesApi Contract Implementation', () => {
     
     const geminiActor = resolveActorPresentation('gemini', agents);
     expect(geminiActor.displayName).toBe('Gemini');
-    expect(geminiActor.accentColor).toBe('#5B8CFF');
+    expect(geminiActor.accentColor).toBe('var(--lys-agent-gemini)');
 
     const hermesActor = resolveActorPresentation('hermes', agents);
     expect(hermesActor.displayName).toBe('Hermes');
@@ -48,7 +48,7 @@ describe('MockHermesApi Contract Implementation', () => {
 
     const unknownActor = resolveActorPresentation('reviewer-8f92', agents);
     expect(unknownActor.displayName).toBe('Reviewer-8f92');
-    expect(unknownActor.accentColor).toBe('#8C949F');
+    expect(unknownActor.accentColor).toBe('var(--lys-text-muted)');
   });
 
   it('should return job queue and active job detail with normalized status', async () => {
@@ -59,7 +59,7 @@ describe('MockHermesApi Contract Implementation', () => {
     const activeJob = await api.getJob('#142');
     expect(activeJob).not.toBeNull();
     expect(activeJob?.assignedAgentIds).toContain('gemini');
-    expect(activeJob?.changedFiles.length).toBeGreaterThan(0);
+    expect(activeJob?.changedFiles?.length).toBeGreaterThan(0);
   });
 
   it('should support event subscriptions via subscribeEvents', () => {

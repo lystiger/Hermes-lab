@@ -6,7 +6,6 @@ import {
   Job,
   JobDetail,
   PipelineStep,
-  ProviderQuota,
   ProjectionItem,
   SettingItem,
   TraceEvent,
@@ -15,9 +14,89 @@ import {
   Thread,
   Message,
   MailboxEntry,
-  ExecutionSnapshot
+  ExecutionSnapshot,
+  PipelineStepState,
+  CapacityTelemetry,
+  JobTokenTelemetry,
+  TaskNode,
+  AgentRun,
+  JobObservation
 } from '../types';
 import { resolveActorPresentation } from '../actors';
+import { HermesUnreachableError, recordContact, recordUnreachable } from '../connection';
+import { UNKNOWN } from '../unknown';
+import { actorAccent } from '../../theme/agents';
+import {
+  isStoredEvent,
+  mapBusEvent,
+  mapStoredEvent,
+  mapEvent,
+  mapCapacityTelemetry,
+  mapJobTokenTelemetry,
+  mapTaskNode,
+  mapAgentRun,
+  mapObservation
+} from '../mapping';
+
+/** Jobs that are being worked on right now. Anything else is queued, blocked, or terminal. */
+export const JOB_STATUS_GROUPS = {
+  RUNNING: ['EXECUTING', 'RUNNING', 'PLANNING', 'PREPARING', 'VERIFYING', 'REPAIRING'],
+  QUEUED: ['CREATED', 'QUEUED', 'CLAIMED', 'WAITING_FOR_CAPACITY'],
+  BLOCKED: ['BLOCKED'],
+  FAILED: ['FAILED'],
+  COMPLETED: ['COMPLETED'],
+  CANCELLED: ['CANCELLED']
+};
+export const ACTIVE_JOB_STATUSES = JOB_STATUS_GROUPS.RUNNING;
+export const TERMINAL_JOB_STATUSES = [
+  ...JOB_STATUS_GROUPS.COMPLETED, ...JOB_STATUS_GROUPS.FAILED, ...JOB_STATUS_GROUPS.CANCELLED
+];
+
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+/** Job summary from GET /jobs or GET /jobs/recoverable. Keeps blocked and repair diagnostics; no invented estimates. */
+export function mapJobSummary(j: any): Job {
+  return {
+    id: j.id,
+    sprintId: j.sprintId,
+    title: j.title,
+    repository: j.repository,
+    branch: j.branch,
+    // Hermes does not report a priority on every job; an absent one stays absent instead of defaulting to P1.
+    priority: j.priority || undefined,
+    status: j.status,
+    currentPhase: j.currentPhase,
+    assignedAgentIds: j.assignedAgentIds || [],
+    createdAt: j.createdAt,
+    startedAt: j.startedAt ?? undefined,
+    completedAt: j.completedAt ?? undefined,
+    progress: j.progress ?? undefined,
+    blockedReason: j.blockedReason ?? null,
+    // Absent counts stay absent (unknown), never zero.
+    repairCount: j.repairCount ?? undefined,
+    replanCount: j.replanCount ?? undefined,
+    estimatedTokens: UNKNOWN,
+    estimatedTime: UNKNOWN,
+    budget: UNKNOWN
+  };
+}
+
+/** Maps a backend phase status without collapsing failure, cancellation or skip into BLOCKED or QUEUED. */
+export function mapPhaseState(status: string | null | undefined): PipelineStepState {
+  switch (status) {
+    case 'SUCCEEDED': return 'COMPLETED';
+    case 'RUNNING': return 'RUNNING';
+    case 'PREPARING': return 'CLAIMED';
+    case 'PENDING':
+    case 'READY': return 'QUEUED';
+    case 'BLOCKED': return 'BLOCKED';
+    case 'FAILED': return 'FAILED';
+    case 'CANCELLED': return 'CANCELLED';
+    case 'SKIPPED': return 'SKIPPED';
+    case 'SUPERSEDED': return 'IDLE';
+    default: return 'UNKNOWN';
+  }
+}
 
 interface BackendAgentDTO {
   id: string;
@@ -71,8 +150,25 @@ export class HttpHermesApi implements HermesApi {
     this.baseUrl = baseUrl.replace(/\/+$/, '');
   }
 
+  /**
+   * Single entry point for HTTP requests. A network failure is reported as HermesUnreachableError and
+   * recorded for the connection banner; any HTTP response, whatever its status, counts as contact.
+   */
+  private async request(url: string, init?: RequestInit): Promise<Response> {
+    let res: Response;
+    try {
+      res = init ? await fetch(url, init) : await fetch(url);
+    } catch {
+      recordUnreachable(this.baseUrl);
+      throw new HermesUnreachableError(this.baseUrl);
+    }
+    // Only a successful response is contact. A 4xx/5xx proves the server answered, not that the data is current.
+    if (res.ok) recordContact();
+    return res;
+  }
+
   async getHealth(): Promise<HealthStatus> {
-    const res = await fetch(`${this.baseUrl}/health`);
+    const res = await this.request(`${this.baseUrl}/health`);
     if (!res.ok) {
       throw new Error(`Hermes /health returned HTTP ${res.status}: ${res.statusText}`);
     }
@@ -80,7 +176,7 @@ export class HttpHermesApi implements HermesApi {
   }
 
   async getAgents(): Promise<AgentSummary[]> {
-    const res = await fetch(`${this.baseUrl}/agents`);
+    const res = await this.request(`${this.baseUrl}/agents`);
     if (!res.ok) {
       throw new Error(`Hermes /agents returned HTTP ${res.status}: ${res.statusText}`);
     }
@@ -95,7 +191,7 @@ export class HttpHermesApi implements HermesApi {
         provider: dto.provider || 'Hermes Agent',
         model: dto.model || 'unknown',
         role: dto.role || 'Specialized Operative',
-        capabilities: dto.capabilities || ['execution'],
+        capabilities: dto.capabilities || [],
         status: (dto.status?.toUpperCase() as any) || 'IDLE',
         phase: (dto.phase as any) || undefined,
         currentTask: dto.currentTask,
@@ -103,7 +199,7 @@ export class HttpHermesApi implements HermesApi {
         persona: dto.persona || dto.presentation?.persona,
         presentation: {
           displayName: dto.presentation?.displayName || dto.displayName || actor.displayName,
-          accentColor: dto.presentation?.accentColor || actor.accentColor,
+          accentColor: actorAccent(dto.id, dto.presentation?.accentColor || actor.accentColor),
           avatarUrl: dto.presentation?.avatarUrl || `/agents/${dto.id}.webp`,
           characterCardUrl: dto.presentation?.characterCardUrl || (['gemini', 'claude', 'codex'].includes(dto.id) ? `/agents/${dto.id}-card.webp` : undefined),
           sigil: dto.presentation?.sigil || dto.id.toUpperCase().slice(0, 4),
@@ -122,66 +218,58 @@ export class HttpHermesApi implements HermesApi {
       return null;
     }
 
+    // GET /agents carries identity and status only. Token, context, activity, run and quota
+    // values are not fetched here, so they stay unknown rather than zero or a placeholder percentage.
     return {
       ...found,
-      input: '—',
-      output: '—',
-      cached: '—',
-      remaining: '—',
-      inPct: '0%',
-      outPct: '0%',
-      cachePct: '0%',
+      input: UNKNOWN,
+      output: UNKNOWN,
+      cached: UNKNOWN,
+      remaining: UNKNOWN,
+      inPct: UNKNOWN,
+      outPct: UNKNOWN,
+      cachePct: UNKNOWN,
       activity: [],
       metrics: [
         { label: 'STATUS', value: found.status }
       ],
       runs: [],
-      allowance: [
-        { label: 'fleet quota', value: 'Unavailable', pct: '0%', tag: 'N/A' }
-      ],
-      capacity: 'Live capacity not exposed',
-      reset: '—',
-      resetNote: 'Detailed provider token telemetry will connect in Phase 4.'
+      allowance: [],
+      capacity: UNKNOWN,
+      reset: UNKNOWN,
+      resetNote: 'Hermes GET /agents does not report provider capacity or reset windows.'
     };
   }
 
   // --------------------------------------------------------------------------
-  // Real Job & Queue endpoints (Phase 4)
+  // Real Job & Queue endpoints
   // --------------------------------------------------------------------------
 
   async getJobs(status?: string): Promise<Job[]> {
     const params = new URLSearchParams();
     if (status) params.set('status', status);
 
-    const res = await fetch(`${this.baseUrl}/jobs?${params.toString()}`);
+    const res = await this.request(`${this.baseUrl}/jobs?${params.toString()}`);
     if (!res.ok) {
       throw new Error(`Hermes /jobs returned HTTP ${res.status}: ${res.statusText}`);
     }
     const data: any[] = await res.json();
 
-    return data.map((j) => ({
-      id: j.id,
-      sprintId: j.sprintId,
-      title: j.title,
-      repository: j.repository,
-      branch: j.branch,
-      priority: j.priority || 'P1',
-      status: j.status,
-      currentPhase: j.currentPhase,
-      assignedAgentIds: j.assignedAgentIds || [],
-      createdAt: j.createdAt,
-      startedAt: j.startedAt,
-      completedAt: j.completedAt,
-      progress: j.progress,
-      estimatedTokens: '—',
-      estimatedTime: '—',
-      budget: '—',
-      policy: 'governed · serial'
-    }));
+    return data.map(mapJobSummary);
+  }
+
+  /** Recoverable jobs are read-only here: discovery only, no resume or cancel. */
+  async getRecoverableJobs(): Promise<Job[]> {
+    const res = await this.request(`${this.baseUrl}/jobs/recoverable`);
+    if (!res.ok) {
+      throw new Error(`Hermes /jobs/recoverable returned HTTP ${res.status}: ${res.statusText}`);
+    }
+    const data: any[] = await res.json();
+    return data.map(mapJobSummary);
   }
 
   async getJob(id: string): Promise<JobDetail | null> {
-    const res = await fetch(`${this.baseUrl}/jobs/${encodeURIComponent(id)}`);
+    const res = await this.request(`${this.baseUrl}/jobs/${encodeURIComponent(id)}`);
     if (!res.ok) {
       if (res.status === 404) return null;
       throw new Error(`Hermes /jobs/${id} returned HTTP ${res.status}: ${res.statusText}`);
@@ -191,13 +279,7 @@ export class HttpHermesApi implements HermesApi {
     const phases = data.phases || [];
     const executionGraph: PipelineStep[] = phases.map((p: any) => {
       const actor = p.agentId ? resolveActorPresentation(p.agentId) : null;
-      let state: any = 'QUEUED';
-      if (p.status === 'SUCCEEDED') state = 'COMPLETED';
-      else if (p.status === 'RUNNING') state = 'RUNNING';
-      else if (p.status === 'FAILED') state = 'BLOCKED';
-      else if (p.status === 'CANCELLED') state = 'BLOCKED';
-      else if (p.status === 'BLOCKED') state = 'BLOCKED';
-      else if (p.status === 'SUPERSEDED') state = 'IDLE';
+      const rawStatus = typeof p.status === 'string' ? p.status : UNKNOWN;
 
       return {
         id: p.id || `phase-${p.order}`,
@@ -206,8 +288,8 @@ export class HttpHermesApi implements HermesApi {
         agentId: p.agentId,
         agentName: actor?.displayName || p.agentId,
         task: p.name,
-        meta: p.commitSha ? p.commitSha.slice(0, 7) : (p.status === 'SUCCEEDED' ? 'completed' : p.status.toLowerCase()),
-        state,
+        meta: p.commitSha ? p.commitSha.slice(0, 7) : (p.status === 'SUCCEEDED' ? 'completed' : rawStatus.toLowerCase()),
+        state: mapPhaseState(p.status),
         note: p.role || (p.status === 'SUPERSEDED' ? 'superseded' : undefined)
       };
     });
@@ -218,7 +300,7 @@ export class HttpHermesApi implements HermesApi {
       title: data.title,
       repository: data.repository,
       branch: data.branch,
-      priority: data.priority || 'P1',
+      priority: data.priority || undefined,
       status: data.status,
       currentPhase: data.currentPhase,
       assignedAgentIds: data.assignedAgentIds || [],
@@ -229,65 +311,63 @@ export class HttpHermesApi implements HermesApi {
       phases,
       tasks: data.tasks || [],
       observations: data.observations || [],
-      blockedReason: data.blockedReason,
-      repairCount: data.repairCount || 0,
-      replanCount: data.replanCount || 0,
+      blockedReason: data.blockedReason ?? null,
+      repairCount: data.repairCount ?? undefined,
+      replanCount: data.replanCount ?? undefined,
+      verification: data.verification ?? null,
       executionGraph,
-      changedFiles: [],
-      retryHistory: data.retryHistory || [],
-      retriesUsed: 0,
-      maxRetries: 3,
-      tokenBreakdown: [],
+      retryHistory: Array.isArray(data.retryHistory) ? data.retryHistory : undefined,
       artifacts: data.artifacts || [],
       errors: data.errors || []
     };
   }
 
+  /** Steps of the job that is active right now. Empty when none is active; a historical job is never shown here. */
   async getPipeline(): Promise<PipelineStep[]> {
-    try {
-      const jobs = await this.getJobs();
-      const activeJob = jobs.find((j) => j.status === 'RUNNING') || jobs[0];
-      if (!activeJob) {
-        return [];
-      }
-      const detail = await this.getJob(activeJob.id);
-      return (detail?.executionGraph || []).map((s) => ({
-        ...s,
-        jobId: activeJob.id
-      }));
-    } catch {
+    const jobs = await this.getJobs();
+    const activeJob = jobs.find((j) => ACTIVE_JOB_STATUSES.includes(j.status));
+    if (!activeJob) {
       return [];
     }
+    const detail = await this.getJob(activeJob.id);
+    return (detail?.executionGraph || []).map((s) => ({
+      ...s,
+      jobId: activeJob.id
+    }));
   }
 
+  /**
+   * Counts derived from the job list only. Errors propagate so the UI can show them instead of zeros.
+   * Token, spend and budget values are not reported by Hermes in this milestone, so they stay unknown.
+   */
   async getTelemetry(): Promise<OverviewTelemetry> {
-    try {
-      const jobs = await this.getJobs();
-      const runningJobsCount = jobs.filter((j) => j.status === 'RUNNING').length;
-      const queuedJobsCount = jobs.filter((j) => ['QUEUED', 'PREPARING'].includes(j.status)).length;
-      const blockedJobsCount = jobs.filter((j) => j.status === 'BLOCKED').length;
-      const failed24hCount = jobs.filter((j) => j.status === 'FAILED').length;
+    const jobs = await this.getJobs();
+    const countOf = (...statuses: string[]) => jobs.filter((j) => statuses.includes(j.status)).length;
 
-      return {
-        runningJobsCount,
-        queuedJobsCount,
-        blockedJobsCount,
-        failed24hCount,
-        tokensToday: '—',
-        estSpendToday: '—',
-        sprintBudgetUsedPct: 0
-      };
-    } catch {
-      return {
-        runningJobsCount: 0,
-        queuedJobsCount: 0,
-        blockedJobsCount: 0,
-        failed24hCount: 0,
-        tokensToday: '—',
-        estSpendToday: '—',
-        sprintBudgetUsedPct: 0
-      };
+    // A failed job without a completion time cannot be placed in the 24h window, so the count is unknown.
+    const cutoff = Date.now() - DAY_MS;
+    let failed24hCount: number | null = 0;
+    for (const j of jobs.filter((job) => JOB_STATUS_GROUPS.FAILED.includes(job.status))) {
+      const endedAt = j.completedAt ? Date.parse(j.completedAt) : NaN;
+      if (Number.isNaN(endedAt)) {
+        failed24hCount = null;
+        break;
+      }
+      if (endedAt >= cutoff) {
+        failed24hCount = (failed24hCount ?? 0) + 1;
+      }
     }
+
+    return {
+      runningJobsCount: countOf(...ACTIVE_JOB_STATUSES),
+      queuedJobsCount: countOf(...JOB_STATUS_GROUPS.QUEUED),
+      blockedJobsCount: countOf(...JOB_STATUS_GROUPS.BLOCKED),
+      failed24hCount,
+      sampleSize: jobs.length,
+      tokensToday: UNKNOWN,
+      estSpendToday: UNKNOWN,
+      sprintBudgetUsedPct: null
+    };
   }
 
   async getTraceEvents(limit = 100, after?: string): Promise<TraceEvent[]> {
@@ -295,31 +375,16 @@ export class HttpHermesApi implements HermesApi {
     if (limit) params.set('limit', String(limit));
     if (after) params.set('after', after);
 
-    const res = await fetch(`${this.baseUrl}/events?${params.toString()}`);
+    const res = await this.request(`${this.baseUrl}/events?${params.toString()}`);
     if (!res.ok) {
       throw new Error(`Hermes /events returned HTTP ${res.status}: ${res.statusText}`);
     }
     const data: BackendTraceEventDTO[] = await res.json();
 
     return data.map((e) => {
-      if (e.id) this.lastEventId = e.id;
-      return {
-        id: e.id,
-        ts: e.ts,
-        rawTs: e.rawTs,
-        source: {
-          id: e.source.id,
-          kind: e.source.kind,
-          displayName: e.source.displayName,
-          accentColor: e.source.accentColor || resolveActorPresentation(e.source.id).accentColor
-        },
-        kind: e.kind,
-        detail: e.detail,
-        dur: e.dur || '—',
-        jobId: e.jobId,
-        taskId: e.taskId,
-        metadata: e.metadata
-      };
+      const event = mapEvent(e);
+      if (event.id) this.lastEventId = event.id;
+      return event;
     });
   }
 
@@ -344,27 +409,8 @@ export class HttpHermesApi implements HermesApi {
 
     const parseAndEmit = (rawEvent: MessageEvent) => {
       try {
-        const dto: BackendTraceEventDTO = JSON.parse(rawEvent.data);
-        if (dto.id) this.lastEventId = dto.id;
-
-        const event: TraceEvent = {
-          id: dto.id,
-          ts: dto.ts,
-          rawTs: dto.rawTs,
-          source: {
-            id: dto.source.id,
-            kind: dto.source.kind,
-            displayName: dto.source.displayName,
-            accentColor: dto.source.accentColor || resolveActorPresentation(dto.source.id).accentColor
-          },
-          kind: dto.kind,
-          detail: dto.detail,
-          dur: dto.dur || '—',
-          jobId: dto.jobId,
-          taskId: dto.taskId,
-          metadata: dto.metadata
-        };
-
+        const event = mapEvent(JSON.parse(rawEvent.data));
+        if (event.id) this.lastEventId = event.id;
         handler(event);
       } catch (err) {
         console.error('[HttpHermesApi] Failed to parse SSE event:', err, rawEvent.data);
@@ -395,7 +441,7 @@ export class HttpHermesApi implements HermesApi {
   // --------------------------------------------------------------------------
 
   async getExecutionSnapshot(): Promise<ExecutionSnapshot> {
-    const res = await fetch(`${this.baseUrl}/execution`);
+    const res = await this.request(`${this.baseUrl}/execution`);
     if (!res.ok) {
       throw new Error(`Hermes /execution returned HTTP ${res.status}: ${res.statusText}`);
     }
@@ -435,29 +481,10 @@ export class HttpHermesApi implements HermesApi {
   }
 
   // --------------------------------------------------------------------------
-  // Quota & Projections (Phase 4 simulated until provider accounting)
+  // Quota & Projections: no real source is wired yet, so these return nothing rather than a measurement
   // --------------------------------------------------------------------------
 
-  async getProviderQuotas(): Promise<ProviderQuota[]> {
-    return [
-      {
-        id: 'google',
-        name: 'Google AI Studio',
-        color: '#5B8CFF',
-        pct: '56%',
-        tag: 'EXACT',
-        window: 'daily',
-        left: '666 req left',
-        capacity: '1,500 req/day',
-        reset: 'daily 00:00 UTC',
-        resetTag: 'EXACT',
-        conf: 'exact',
-        basis: 'AI Studio reported quota',
-        opacity: '1'
-      }
-    ];
-  }
-
+  /** No projection source exists in Hermes yet, so there are no projected rows in HTTP mode. */
   async getProjections(): Promise<ProjectionItem[]> {
     return [];
   }
@@ -465,12 +492,12 @@ export class HttpHermesApi implements HermesApi {
   async getSettings(): Promise<{ runtime: SettingItem[]; policy: SettingItem[] }> {
     return {
       runtime: [
-        { label: 'Hermes Runtime API', value: this.baseUrl, color: '#3FB950' },
-        { label: 'Event Bus Transport', value: 'SSE / Server-Sent Events', color: '#CBA35C' }
+        { label: 'Hermes Runtime API', value: this.baseUrl, color: 'var(--lys-status-success)' },
+        { label: 'Event Bus Transport', value: 'SSE / Server-Sent Events', color: 'var(--lys-accent-gold)' }
       ],
+      // The Hermes API does not expose its execution or merge policy, so none is claimed here.
       policy: [
-        { label: 'Execution Mode', value: 'Governed Hermes Runtime', color: '#E6E9ED' },
-        { label: 'Auto-Merge Policy', value: 'Human Review Required (Strict)', color: '#E3A008' }
+        { label: 'Policy', value: 'Not exposed by the Hermes API', color: 'var(--lys-text-muted)' }
       ]
     };
   }
@@ -485,7 +512,7 @@ export class HttpHermesApi implements HermesApi {
   async triggerJobAction(jobId: string, action: 'retry' | 'pause' | 'cancel' | 'promote'): Promise<boolean> {
     if (action === 'cancel') {
       try {
-        const res = await fetch(`${this.baseUrl}/jobs/${encodeURIComponent(jobId)}/cancel`, {
+        const res = await this.request(`${this.baseUrl}/jobs/${encodeURIComponent(jobId)}/cancel`, {
           method: 'POST'
         });
         return res.ok;
@@ -508,7 +535,7 @@ export class HttpHermesApi implements HermesApi {
     if (participant) params.set("participant", participant);
     if (limit) params.set("limit", String(limit));
 
-    const res = await fetch(`${this.baseUrl}/threads?${params.toString()}`);
+    const res = await this.request(`${this.baseUrl}/threads?${params.toString()}`);
     if (!res.ok) {
       throw new Error(`Hermes /threads returned HTTP ${res.status}: ${res.statusText}`);
     }
@@ -521,7 +548,7 @@ export class HttpHermesApi implements HermesApi {
         id: p.id,
         kind: p.kind,
         displayName: p.displayName || resolveActorPresentation(p.id).displayName,
-        accentColor: p.accentColor || resolveActorPresentation(p.id).accentColor
+        accentColor: actorAccent(p.id, p.accentColor)
       })),
       createdAt: t.createdAt,
       updatedAt: t.updatedAt
@@ -529,7 +556,7 @@ export class HttpHermesApi implements HermesApi {
   }
 
   async getThread(threadId: string): Promise<Thread | null> {
-    const res = await fetch(`${this.baseUrl}/threads/${encodeURIComponent(threadId)}`);
+    const res = await this.request(`${this.baseUrl}/threads/${encodeURIComponent(threadId)}`);
     if (!res.ok) {
       if (res.status === 404) return null;
       throw new Error(`Hermes /threads/${threadId} returned HTTP ${res.status}: ${res.statusText}`);
@@ -543,7 +570,7 @@ export class HttpHermesApi implements HermesApi {
         id: p.id,
         kind: p.kind,
         displayName: p.displayName || resolveActorPresentation(p.id).displayName,
-        accentColor: p.accentColor || resolveActorPresentation(p.id).accentColor
+        accentColor: actorAccent(p.id, p.accentColor)
       })),
       createdAt: t.createdAt,
       updatedAt: t.updatedAt
@@ -556,9 +583,9 @@ export class HttpHermesApi implements HermesApi {
     if (after) params.set("after", after);
     if (conversationId) params.set("conversationId", conversationId);
 
-    const res = await fetch(`${this.baseUrl}/threads/${encodeURIComponent(threadId)}/messages?${params.toString()}`);
+    const res = await this.request(`${this.baseUrl}/threads/${encodeURIComponent(threadId)}/messages?${params.toString()}`);
     if (!res.ok) {
-      if (res.status === 404) return [];
+      // A 404 means the thread does not exist. That is an error to show, not an empty conversation.
       throw new Error(`Hermes /threads/${threadId}/messages returned HTTP ${res.status}: ${res.statusText}`);
     }
     const data: any[] = await res.json();
@@ -571,7 +598,7 @@ export class HttpHermesApi implements HermesApi {
           id: m.from?.id,
           kind: m.from?.kind || "agent",
           displayName: m.from?.displayName || fromActor.displayName,
-          accentColor: m.from?.accentColor || fromActor.accentColor,
+          accentColor: actorAccent(m.from?.id ?? fromActor.id, m.from?.accentColor || fromActor.accentColor),
           avatarUrl: m.from?.avatarUrl || fromActor.avatarUrl,
           subtitle: m.from?.subtitle || fromActor.subtitle
         },
@@ -581,7 +608,7 @@ export class HttpHermesApi implements HermesApi {
             id: to.id,
             kind: to.kind || "agent",
             displayName: to.displayName || toActor.displayName,
-            accentColor: to.accentColor || toActor.accentColor,
+            accentColor: actorAccent(to.id, to.accentColor || toActor.accentColor),
             avatarUrl: to.avatarUrl || toActor.avatarUrl,
             subtitle: to.subtitle || toActor.subtitle
           };
@@ -607,7 +634,7 @@ export class HttpHermesApi implements HermesApi {
     if (limit) params.set("limit", String(limit));
     if (conversationId) params.set("conversationId", conversationId);
 
-    const res = await fetch(`${this.baseUrl}/agents/${encodeURIComponent(agentId)}/inbox?${params.toString()}`);
+    const res = await this.request(`${this.baseUrl}/agents/${encodeURIComponent(agentId)}/inbox?${params.toString()}`);
     if (!res.ok) {
       throw new Error(`Hermes /agents/${agentId}/inbox returned HTTP ${res.status}: ${res.statusText}`);
     }
@@ -622,6 +649,58 @@ export class HttpHermesApi implements HermesApi {
     }));
   }
 
+  // --------------------------------------------------------------------------
+  // M2 real data: capacity, job telemetry, tasks, runs, observations, job events
+  // --------------------------------------------------------------------------
+
+  private async getJson(path: string, label: string): Promise<any> {
+    const res = await this.request(`${this.baseUrl}${path}`);
+    if (!res.ok) {
+      throw new Error(`Hermes ${label} returned HTTP ${res.status}: ${res.statusText}`);
+    }
+    return res.json();
+  }
+
+  async getCapacityTelemetry(): Promise<CapacityTelemetry> {
+    return mapCapacityTelemetry(await this.getJson('/capacity/telemetry', '/capacity/telemetry'));
+  }
+
+  async getJobTelemetry(jobId: string): Promise<JobTokenTelemetry> {
+    const id = encodeURIComponent(jobId);
+    return mapJobTokenTelemetry(await this.getJson(`/jobs/${id}/telemetry`, `/jobs/${jobId}/telemetry`), jobId);
+  }
+
+  async getJobTasks(jobId: string): Promise<TaskNode[]> {
+    const id = encodeURIComponent(jobId);
+    const data: any[] = await this.getJson(`/jobs/${id}/tasks`, `/jobs/${jobId}/tasks`);
+    return data.map(mapTaskNode);
+  }
+
+  async getJobRuns(jobId: string): Promise<AgentRun[]> {
+    const id = encodeURIComponent(jobId);
+    const data: any[] = await this.getJson(`/jobs/${id}/runs`, `/jobs/${jobId}/runs`);
+    return data.map(mapAgentRun);
+  }
+
+  async getJobObservations(jobId: string): Promise<JobObservation[]> {
+    const id = encodeURIComponent(jobId);
+    const data: any[] = await this.getJson(`/jobs/${id}/observations`, `/jobs/${jobId}/observations`);
+    return data.map(mapObservation);
+  }
+
+  /** Durable job history, normalised from the stored envelope. Live SSE events are merged by the store. */
+  async getJobEvents(jobId: string, limit = 500): Promise<TraceEvent[]> {
+    const id = encodeURIComponent(jobId);
+    const data: any[] = await this.getJson(
+      `/jobs/${id}/events?limit=${limit}`,
+      `/jobs/${jobId}/events`
+    );
+    // Hermes answers with stored envelopes, or with bus envelopes when nothing is stored. Keep which it was.
+    return data.map((dto) =>
+      isStoredEvent(dto) ? { ...mapStoredEvent(dto), origin: 'stored' as const } : { ...mapBusEvent(dto), origin: 'bus' as const }
+    );
+  }
+
   async sendMessage(
     threadId: string,
     text: string,
@@ -632,7 +711,7 @@ export class HttpHermesApi implements HermesApi {
     replyTo?: string,
     correlationId?: string
   ): Promise<Message> {
-    const res = await fetch(`${this.baseUrl}/messages`, {
+    const res = await this.request(`${this.baseUrl}/messages`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -658,13 +737,13 @@ export class HttpHermesApi implements HermesApi {
         id: m.from?.id,
         kind: m.from?.kind || "operator",
         displayName: m.from?.displayName || fromActor.displayName,
-        accentColor: m.from?.accentColor || fromActor.accentColor
+        accentColor: actorAccent(m.from?.id ?? fromActor.id, m.from?.accentColor || fromActor.accentColor)
       },
       to: (m.to || []).map((to: any) => ({
         id: to.id,
         kind: to.kind || "agent",
         displayName: to.displayName || resolveActorPresentation(to.id).displayName,
-        accentColor: to.accentColor || resolveActorPresentation(to.id).accentColor
+        accentColor: actorAccent(to.id, to.accentColor || resolveActorPresentation(to.id).accentColor)
       })),
       kind: m.kind,
       text: m.text,

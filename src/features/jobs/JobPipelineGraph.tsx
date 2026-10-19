@@ -1,25 +1,33 @@
 import React from 'react';
-import { PipelineStep } from '../../api/types';
-import { useConsoleStore } from '../../stores/useConsoleStore';
+import { PipelineStep, PipelineStepState } from '../../api/types';
 import { useAgents } from '../../api/hooks';
 import { resolveActorPresentation } from '../../api/actors';
+import { EmptyState } from '../../components/DataStates';
 
 interface JobPipelineGraphProps {
-  steps?: PipelineStep[];
+  steps: PipelineStep[];
 }
 
+const STATE_LABEL: Record<PipelineStepState, string> = {
+  COMPLETED: 'completed',
+  RUNNING: 'running',
+  QUEUED: 'queued',
+  CLAIMED: 'claimed',
+  BLOCKED: 'blocked',
+  FAILED: 'failed',
+  CANCELLED: 'cancelled',
+  SKIPPED: 'skipped',
+  UNKNOWN: 'unknown status',
+  IDLE: 'idle'
+};
+
+/** Renders only the steps it is given. No phases are invented when there are none. */
 export const JobPipelineGraph: React.FC<JobPipelineGraphProps> = ({ steps }) => {
-  const { hardenTokens, liveMotion } = useConsoleStore();
   const { agents } = useAgents();
 
-  const defaultPhases: PipelineStep[] = [
-    { id: '1', phase: 'BUILD', agentId: 'gemini', agentName: 'Gemini', note: 'closed 30.4k', state: 'COMPLETED', task: 'Build', meta: '' },
-    { id: '2', phase: 'HARDEN', agentId: 'claude', agentName: 'Claude', note: `02:14 · ${hardenTokens}`, state: 'RUNNING', task: 'Harden', meta: '' },
-    { id: '3', phase: 'VERIFY', agentId: 'codex', agentName: 'Codex', note: 'staged ~19k', state: 'QUEUED', task: 'Verify', meta: '' },
-    { id: '4', phase: 'COMPLETE', agentId: 'elysia', agentName: 'Elysia', note: 'auto-merge & notify', state: 'IDLE', task: 'Complete', meta: '' }
-  ];
-
-  const graphSteps = steps || defaultPhases;
+  if (steps.length === 0) {
+    return <EmptyState>No phases reported for this job yet.</EmptyState>;
+  }
 
   return (
     <div style={{ perspective: '900px' }} className="w-full select-none">
@@ -30,11 +38,12 @@ export const JobPipelineGraph: React.FC<JobPipelineGraphProps> = ({ steps }) => 
         }}
         className="flex items-start relative"
       >
-        {graphSteps.map((p, idx) => {
+        {steps.map((p, idx) => {
           const actor = p.agentId ? resolveActorPresentation(p.agentId, agents) : null;
-          const col = actor?.accentColor || '#3A4048';
+          const col = actor?.accentColor || 'var(--lys-border-strong)';
           const isDone = p.state === 'COMPLETED';
           const isActive = p.state === 'RUNNING';
+          const isFailed = p.state === 'FAILED';
 
           return (
             <div
@@ -42,52 +51,52 @@ export const JobPipelineGraph: React.FC<JobPipelineGraphProps> = ({ steps }) => 
               className="flex-1 relative flex flex-col items-start"
             >
               {/* Connecting Line */}
-              {idx < graphSteps.length - 1 && (
+              {idx < steps.length - 1 && (
                 <div
                   style={{
-                    backgroundColor: isDone ? 'rgba(63,185,80,0.5)' : '#1F242B'
+                    backgroundColor: isDone ? 'color-mix(in srgb, var(--lys-status-success) 50%, transparent)' : 'var(--lys-border-subtle)'
                   }}
                   className="absolute left-6 right-0 top-[11px] h-[1px]"
                 />
               )}
 
               {/* Diamond Node */}
-              <div className="relative w-6 h-6 flex items-center justify-center bg-[#0A0B0D] z-10">
+              <div className="relative w-6 h-6 flex items-center justify-center bg-lys-base z-10">
                 <div
                   style={{
-                    borderColor: isDone ? 'rgba(63,185,80,0.6)' : isActive ? col : '#2A3038',
-                    backgroundColor: isDone ? 'rgba(63,185,80,0.12)' : isActive ? 'rgba(217,160,91,0.16)' : '#0E1116',
-                    boxShadow: isActive ? '0 6px 14px -6px rgba(217,160,91,0.5)' : 'none',
+                    borderColor: isDone ? 'color-mix(in srgb, var(--lys-status-success) 60%, transparent)' : isFailed ? 'color-mix(in srgb, var(--lys-status-danger) 60%, transparent)' : isActive ? col : 'var(--lys-border-default)',
+                    backgroundColor: isDone ? 'color-mix(in srgb, var(--lys-status-success) 12%, transparent)' : isFailed ? 'color-mix(in srgb, var(--lys-status-danger) 12%, transparent)' : isActive ? 'color-mix(in srgb, var(--lys-agent-claude) 16%, transparent)' : 'var(--lys-surface-0)',
+                    boxShadow: isActive ? '0 6px 14px -6px color-mix(in srgb, var(--lys-agent-claude) 50%, transparent)' : 'none',
                     transform: 'rotate(45deg) translateZ(6px)'
                   }}
                   className="absolute w-[22px] h-[22px] border"
                 />
                 <div
                   style={{
-                    backgroundColor: isDone ? '#3FB950' : isActive ? col : '#2A3038',
+                    backgroundColor: isDone ? 'var(--lys-status-success)' : isFailed ? 'var(--lys-status-danger)' : isActive ? col : 'var(--lys-border-default)',
                     transform: 'rotate(45deg) translateZ(12px)'
                   }}
-                  className={`absolute w-2 h-2 ${isActive && liveMotion ? 'animate-pulse' : ''}`}
+                  className={`absolute w-2 h-2`}
                 />
               </div>
 
               {/* Phase Info */}
               <div
-                style={{ color: isDone || isActive ? '#E6E9ED' : '#5C646E' }}
-                className="mt-3 font-mono-code text-[12px] tracking-wider font-semibold"
+                style={{ color: isDone || isActive || isFailed ? 'var(--lys-text-primary)' : 'var(--lys-text-faint)' }}
+                className="mt-3 font-sans text-[12px] tracking-wider font-semibold"
               >
                 {p.phase}
               </div>
 
               <div
-                style={{ color: p.state === 'IDLE' ? '#3A4048' : col }}
+                style={{ color: p.state === 'IDLE' ? 'var(--lys-text-faint)' : col }}
                 className="mt-1 text-[11px]"
               >
                 {p.agentName || actor?.displayName || '—'}
               </div>
 
-              <div className="mt-0.5 font-mono-code text-[11px] text-[#5C646E]">
-                {p.note}
+              <div className="mt-0.5 font-sans text-[11px] text-lys-faint">
+                {STATE_LABEL[p.state]}{p.meta ? ` · ${p.meta}` : ''}
               </div>
             </div>
           );

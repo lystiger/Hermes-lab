@@ -21,7 +21,7 @@ export const MOCK_AGENTS: Record<AgentId, AgentDetail> = {
       displayName: 'Gemini',
       avatarUrl: '/agents/gemini.webp',
       characterCardUrl: '/agents/gemini-card.webp',
-      accentColor: '#5B8CFF',
+      accentColor: 'var(--lys-agent-gemini)',
       animationProfile: 'quick',
       sigil: 'BUILD',
       code: 'G-01',
@@ -88,7 +88,7 @@ export const MOCK_AGENTS: Record<AgentId, AgentDetail> = {
       displayName: 'Claude',
       avatarUrl: '/agents/claude.webp',
       characterCardUrl: '/agents/claude-card.webp',
-      accentColor: '#D9A05B',
+      accentColor: 'var(--lys-agent-claude)',
       animationProfile: 'relaxed',
       sigil: 'HARDEN',
       code: 'C-02',
@@ -155,7 +155,7 @@ export const MOCK_AGENTS: Record<AgentId, AgentDetail> = {
       displayName: 'Codex',
       avatarUrl: '/agents/codex.webp',
       characterCardUrl: '/agents/codex-card.webp',
-      accentColor: '#4EC9A0',
+      accentColor: 'var(--lys-agent-codex)',
       animationProfile: 'slow',
       sigil: 'VERIFY',
       code: 'X-03',
@@ -200,65 +200,6 @@ export const MOCK_AGENTS: Record<AgentId, AgentDetail> = {
       { id: '#138', phase: 'VERIFY', task: 'Queue scheduler tests', tokens: '19.1k', dur: '03:44', result: 'FAILED' },
       { id: '#137', phase: 'VERIFY', task: 'Auth refactor — session adapter', tokens: '24.6k', dur: '05:11', result: 'RATE LIMITED' },
       { id: '#135', phase: 'VERIFY', task: 'Redis client compat matrix', tokens: '12.2k', dur: '02:18', result: 'PASSED' }
-    ]
-  },
-  elysia: {
-    id: 'elysia',
-    displayName: 'Elysia',
-    provider: 'Local Fleet Agent',
-    model: 'lys-tactical-orchestrator-v1',
-    role: 'Autonomous synthesis · tactical arbitration · dispatch',
-    capabilities: ['orchestration', 'synthesis', 'dispatch', 'planning'],
-    status: 'RUNNING',
-    phase: 'COMPLETE',
-    currentTask: 'Overseeing agent handoffs, budget convergence, and state machine integrity.',
-    activeTool: 'tool: dispatch',
-    contextPct: '21%',
-    contextUsed: '42.8k',
-    contextMax: '200k',
-    queueDepth: 0,
-    sessionTokens: '8.4k',
-    presentation: {
-      displayName: 'Elysia',
-      avatarUrl: '/agents/elysia.webp',
-      accentColor: '#CBA35C',
-      animationProfile: 'steady',
-      sigil: 'COMMAND',
-      code: 'E-00',
-      badge: 'DISPATCH'
-    },
-    input: '31.2k',
-    output: '8.4k',
-    cached: '3.2k',
-    remaining: '157.2k',
-    inPct: '15%',
-    outPct: '4%',
-    cachePct: '2%',
-    crawlCode: 'mesh.sync()\npolicy.assert(budget<cap)\nqueue.prioritize(P0)\nhandoff.verify()\nmetrics.emit()\n',
-    frameLog: 'agent fleet active\nconsensus 4/4 nodes',
-    traceId: 'trc 9f14·dispatch',
-    capacity: 'unlimited local',
-    reset: 'continuous',
-    resetNote: 'Local agent fleet coordinator. Dispatches sub-tasks to build and harden operatives.',
-    allowance: [
-      { label: 'session', value: '42.8k', pct: '21%', tag: 'EXACT' },
-      { label: 'routing quota', value: '100%', pct: '100%', tag: 'EXACT' },
-      { label: 'network', value: 'unmetered', pct: '0%', tag: 'N/A' }
-    ],
-    activity: [
-      { op: 'READ', path: 'config/policy.toml', meta: '0.4k tok' },
-      { op: 'RUN', path: 'mesh.broadcast_status()', meta: '1.4ms' },
-      { op: 'NOTE', path: 'pipeline handoff scheduled', meta: '04:00' }
-    ],
-    metrics: [
-      { label: 'JOBS ORCHESTRATED', value: '342', sub: 'all-time' },
-      { label: 'HANDOFF EFFICIENCY', value: '99.4%', sub: 'sub-second' },
-      { label: 'BUDGET DRIFT', value: '±1.2%', sub: 'optimal' },
-      { label: 'SYSTEM HEALTH', value: '100%', sub: '4/4 daemons', color: '#3FB950' }
-    ],
-    runs: [
-      { id: '#142', phase: 'COMPLETE', task: 'Redis State Migration Orchestration', tokens: '8.4k', dur: '10:38', result: 'RUNNING' },
-      { id: '#141', phase: 'COMPLETE', task: 'Frontend A11y Audit Chain', tokens: '4.2k', dur: '09:12', result: 'PASSED' }
     ]
   }
 };

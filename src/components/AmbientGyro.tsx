@@ -10,34 +10,32 @@ export const AmbientGyro: React.FC<{ size?: number; enabled?: boolean }> = ({ si
     >
       <div
         style={{
-          transformStyle: 'preserve-3d',
-          animation: 'lys-spin 26s linear infinite'
+          transformStyle: 'preserve-3d'
         }}
         className="absolute inset-0"
       >
         <div
           style={{ transform: 'translateZ(26px)' }}
-          className="absolute left-[25px] top-[25px] w-[100px] height-[100px] h-[100px] border border-[rgba(91,140,255,0.5)]"
+          className="absolute left-[25px] top-[25px] w-[100px] height-[100px] h-[100px] border border-lys-agent-gemini/50"
         />
         <div
           style={{ transform: 'translateZ(0px)' }}
-          className="absolute left-[37px] top-[37px] w-[76px] h-[76px] border border-[rgba(217,160,91,0.45)]"
+          className="absolute left-[37px] top-[37px] w-[76px] h-[76px] border border-lys-agent-claude/45"
         />
         <div
           style={{ transform: 'translateZ(-26px)' }}
-          className="absolute left-[49px] top-[49px] w-[52px] h-[52px] border border-[rgba(78,201,160,0.45)]"
+          className="absolute left-[49px] top-[49px] w-[52px] h-[52px] border border-lys-agent-codex/45"
         />
       </div>
       <div
         style={{
-          transformStyle: 'preserve-3d',
-          animation: 'lys-spin-rev 40s linear infinite'
+          transformStyle: 'preserve-3d'
         }}
         className="absolute inset-0"
       >
         <div
           style={{ transform: 'translateZ(10px)' }}
-          className="absolute left-[44px] top-[44px] w-[62px] h-[62px] border border-dashed border-[rgba(203,163,92,0.35)]"
+          className="absolute left-[44px] top-[44px] w-[62px] h-[62px] border border-dashed border-lys-gold/35"
         />
       </div>
     </div>

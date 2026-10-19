@@ -1,71 +1,75 @@
 import React from 'react';
-import { TokenBudgetMeter } from '../features/telemetry/TokenBudgetMeter';
-import { ProviderQuotaList } from '../features/telemetry/ProviderQuotaList';
-import { QueueProjectionBar } from '../features/jobs/QueueProjectionBar';
-import { useAgents } from '../api/hooks';
-import { isRealApiMode } from '../api/client';
+import { useCapacityTelemetry } from '../api/hooks';
+import { EmptyState, ErrorState, LoadingState, StaleNotice } from '../components/DataStates';
+import { Card } from '../components/Card';
+import { PageHeader, HeaderCount } from '../components/PageHeader';
+import { NotReportedItem } from '../components/NotReported';
+import { ProviderMeters } from '../features/telemetry/UsageMeters';
 
+const NOT_REPORTED: NotReportedItem[] = [
+  { label: 'run budget', reason: 'Hermes exposes no per-run token budget or cap' },
+  { label: 'sprint budget', reason: 'Hermes exposes no sprint budget, so no percentage can be computed' },
+  { label: 'queue projection', reason: 'Hermes has no projection source for queued work' },
+  { label: 'per-agent context', reason: 'Hermes reports no context usage for each agent' },
+  { label: 'measurement window', reason: 'Metrics cover since runtime start (process lifetime, not daily)' }
+];
+
+/** Usage (research §5.5): meters from capacity telemetry, each labelled with the window it covers. */
 export const UsageRoute: React.FC = () => {
-  const { agents } = useAgents();
+  const { capacity, loading, error, stale, refetch, updatedAt } = useCapacityTelemetry();
+
+  const providers = capacity?.providers ?? [];
+  const requests = providers.reduce((sum, p) => sum + p.totalRequests, 0);
+  const successes = providers.reduce((sum, p) => sum + p.successCount, 0);
+  const aggregateRate = requests > 0 ? Math.round((successes / requests) * 100) : null;
+  const tokens = capacity?.summary?.totalTokens;
+
+  const counts: HeaderCount[] = capacity
+    ? [
+        { label: 'TOKENS', value: typeof tokens === 'number' ? tokens.toLocaleString() : '—', unit: 'tok' },
+        { label: 'REQUESTS', value: requests },
+        { label: 'SUCCESS RATE', value: aggregateRate === null ? '—' : aggregateRate, unit: aggregateRate === null ? undefined : '%' },
+        { label: 'THROTTLING', value: capacity.summary?.totalThrottlingEvents ?? '—' }
+      ]
+    : [];
 
   return (
-    <div className="flex flex-col pb-10 select-none bg-[#0A0B0D]">
-      {isRealApiMode && (
-        <div className="px-5 py-2.5 bg-[#0C0E11] border-b border-[#1F242B] flex items-center justify-between font-mono-code text-[11px]">
-          <span className="text-[#8C949F]">PROVIDER TELEMETRY &amp; QUOTAS</span>
-          <span className="text-[10px] tracking-wider text-[#CBA35C] border border-[rgba(203,163,92,0.3)] px-2 py-0.5 bg-[rgba(203,163,92,0.06)]">
-            [ SIMULATED DEMO · PHASE 4 MIGRATION ]
-          </span>
-        </div>
-      )}
+    <div className="flex flex-col min-h-full">
+      <PageHeader
+        updatedAt={updatedAt}
+        title="Usage"
+        subtitle="Capacity and limits"
+        counts={counts}
+        notReported={[
+          ...NOT_REPORTED,
+          ...(capacity && providers.length === 0
+            ? [{ label: 'provider usage', reason: 'No provider has recorded a request in this runtime process yet' }]
+            : [])
+        ]}
+      />
 
-      {/* 3-Column Top Grid: Context Windows, Run Budget, Provider Quotas */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 border-b border-[#1F242B]">
-        {/* 1 · CONTEXT WINDOWS */}
-        <div className="p-5 border-b lg:border-b-0 border-r border-[#1F242B] bg-[#0A0B0D]">
-          <div className="text-[11px] tracking-wider text-[#5C646E] font-mono-code">
-            1 · CONTEXT WINDOWS
-          </div>
-          <div className="mt-1 text-[11px] text-[#5C646E] mb-4">
-            per-agent, resets each run
-          </div>
+      <div className="flex-1 flex flex-col gap-6 p-6">
+        {stale && <StaleNotice label="Capacity telemetry" error={error} onRetry={refetch} />}
+        {loading && !capacity && <Card><LoadingState label="Loading capacity telemetry…" /></Card>}
+        {error && !capacity && <Card><ErrorState label="Capacity telemetry" error={error} onRetry={refetch} /></Card>}
 
+        {capacity && (
           <div className="flex flex-col gap-4">
-            {agents.map((a) => {
-              const accentColor = a.presentation?.accentColor || '#8C949F';
-              const contextPct = a.contextPct || '25%';
-              return (
-                <div key={a.id}>
-                  <div className="flex justify-between items-baseline font-mono-code text-[11px]">
-                    <span style={{ color: accentColor }}>{a.displayName} · {a.model}</span>
-                    <span className="text-[#8C949F]">{a.contextUsed || '0k'} / {a.contextMax || '200k'}</span>
-                  </div>
-                  <div className="mt-1.5 h-2 bg-[#14171C] relative">
-                    <div
-                      style={{ width: contextPct, backgroundColor: accentColor }}
-                      className="absolute left-0 top-0 bottom-0"
-                    />
-                    <div className="absolute inset-0 bg-striped-pattern pointer-events-none" />
-                  </div>
-                  <div className="mt-1 flex justify-between font-mono-code text-[11px] text-[#5C646E]">
-                    <span>{contextPct} used</span>
-                    <span>{a.sessionTokens || 'active'}</span>
-                  </div>
-                </div>
-              );
-            })}
+            <div className="text-[11px] text-lys-faint">since runtime start (process lifetime, not daily)</div>
+            {providers.length === 0 ? (
+              <Card><EmptyState>No provider usage</EmptyState></Card>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-5">
+                {providers.map((p) => (
+                  <Card key={p.providerId} label={`Meters for ${p.providerId}`}>
+                    <ProviderMeters provider={p} />
+                  </Card>
+                ))}
+              </div>
+            )}
           </div>
-        </div>
-
-        {/* 2 · RUN BUDGET */}
-        <TokenBudgetMeter />
-
-        {/* 3 · PROVIDER QUOTA */}
-        <ProviderQuotaList compact={false} />
+        )}
       </div>
-
-      {/* 4 · QUEUE PROJECTION */}
-      <QueueProjectionBar compact={false} />
     </div>
   );
 };

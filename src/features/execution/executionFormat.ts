@@ -1,12 +1,12 @@
 import { ExecutionResource, ExecutionResourceState, TraceEvent } from '../../api/types';
 
 export const RESOURCE_STATE_STYLE: Record<ExecutionResourceState, { label: string; color: string }> = {
-  acquiring: { label: 'ACQUIRING', color: '#CBA35C' },
-  ready: { label: 'READY', color: '#5B8CFF' },
-  running: { label: 'RUNNING', color: '#3FB950' },
-  idle: { label: 'IDLE · POOLED', color: '#8C949F' },
-  releasing: { label: 'RELEASING', color: '#E3A008' },
-  failed: { label: 'FAILED', color: '#F2555A' }
+  acquiring: { label: 'ACQUIRING', color: 'var(--lys-accent-gold)' },
+  ready: { label: 'READY', color: 'var(--lys-agent-gemini)' },
+  running: { label: 'RUNNING', color: 'var(--lys-status-success)' },
+  idle: { label: 'IDLE · POOLED', color: 'var(--lys-text-muted)' },
+  releasing: { label: 'RELEASING', color: 'var(--lys-status-warning)' },
+  failed: { label: 'FAILED', color: 'var(--lys-status-danger)' }
 };
 
 const STATE_ORDER: Record<ExecutionResourceState, number> = {
@@ -21,7 +21,7 @@ const STATE_ORDER: Record<ExecutionResourceState, number> = {
 export function stateStyle(state: string): { label: string; color: string } {
   return (RESOURCE_STATE_STYLE as Record<string, { label: string; color: string }>)[state] ?? {
     label: state.toUpperCase(),
-    color: '#8C949F'
+    color: 'var(--lys-text-muted)'
   };
 }
 
@@ -63,12 +63,12 @@ export function formatExpiry(expiresAt: string | null, nowMs: number): string | 
 }
 
 export function eventColor(kind: string): string {
-  if (kind === 'execution.failed' || kind === 'execution.release_failed') return '#F2555A';
-  if (kind === 'execution.cancelled') return '#E3A008';
-  if (kind === 'execution.running') return '#3FB950';
-  if (kind === 'execution.started' || kind === 'execution.resource_acquired' || kind === 'execution.resource_ready') return '#CBA35C';
-  if (kind === 'execution.resource_pooled') return '#8C949F';
-  return '#5C646E';
+  if (kind === 'execution.failed' || kind === 'execution.release_failed') return 'var(--lys-status-danger)';
+  if (kind === 'execution.cancelled') return 'var(--lys-status-warning)';
+  if (kind === 'execution.running') return 'var(--lys-status-success)';
+  if (kind === 'execution.started' || kind === 'execution.resource_acquired' || kind === 'execution.resource_ready') return 'var(--lys-accent-gold)';
+  if (kind === 'execution.resource_pooled') return 'var(--lys-text-muted)';
+  return 'var(--lys-text-faint)';
 }
 
 /** Execution events for the timeline, newest first. */

@@ -1,6 +1,7 @@
 import React from 'react';
 import { TraceEvent } from '../../api/types';
 import { eventColor } from './executionFormat';
+import { traceSourceName } from '../../api/actors';
 
 interface ExecutionTimelineProps {
   events: TraceEvent[];
@@ -13,13 +14,13 @@ export const ExecutionTimeline: React.FC<ExecutionTimelineProps> = ({ events, li
 
   if (rows.length === 0) {
     return (
-      <div className="py-4 font-mono-code text-[11px] text-[#5C646E]">No execution events recorded yet.</div>
+      <div className="py-4 font-sans text-[11px] text-lys-faint">No execution events recorded yet.</div>
     );
   }
 
   return (
-    <div className="flex flex-col font-mono-code text-[11px]">
-      <div className="hidden md:flex items-center gap-4 px-1 py-1.5 border-b border-[#1F242B] tracking-wider text-[#5C646E]">
+    <div className="flex flex-col font-sans text-[11px]">
+      <div className="hidden md:flex items-center gap-4 px-1 py-1.5 border-b border-lys-subtle tracking-wider text-lys-faint">
         <span className="w-24 flex-shrink-0">TIME</span>
         <span className="w-24 flex-shrink-0">BACKEND</span>
         <span className="w-44 flex-shrink-0">EVENT</span>
@@ -30,17 +31,17 @@ export const ExecutionTimeline: React.FC<ExecutionTimelineProps> = ({ events, li
         <div
           key={e.id}
           data-testid="execution-event"
-          className="flex flex-wrap md:flex-nowrap items-center gap-x-4 gap-y-0.5 px-1 py-1.5 border-b border-[#101216] hover:bg-[#12151A]"
+          className="flex flex-wrap md:flex-nowrap items-center gap-x-4 gap-y-0.5 px-1 py-1.5 border-b border-lys-subtle hover:bg-lys-surface-1"
         >
-          <span className="w-24 flex-shrink-0 text-[#5C646E]">{e.ts}</span>
-          <span className="w-24 flex-shrink-0 font-semibold" style={{ color: e.source.accentColor || '#8C949F' }}>
-            {e.source.id}
+          <span className="w-24 flex-shrink-0 text-lys-faint">{e.ts}</span>
+          <span className="w-24 flex-shrink-0 font-semibold" style={{ color: e.source.accentColor || 'var(--lys-text-muted)' }}>
+            {traceSourceName(e.source)}
           </span>
-          <span className="w-44 flex-shrink-0 font-medium" style={{ color: eventColor(e.kind) }}>
+          <span className="w-full md:w-44 flex-shrink-0 font-medium break-all" style={{ color: eventColor(e.kind) }}>
             {e.kind.replace('execution.', '')}
           </span>
-          <span className="flex-1 min-w-0 truncate font-sans text-[#B7BEC7]">{e.detail}</span>
-          <span className="w-28 flex-shrink-0 text-[#8C949F] truncate">
+          <span className="flex-1 min-w-0 break-words font-sans text-lys-secondary">{e.detail}</span>
+          <span className="flex-shrink-0 max-w-full font-mono-code text-[11px] text-lys-muted break-all">
             {e.jobId || '—'}{e.taskId ? ` · ${e.taskId}` : ''}
           </span>
         </div>

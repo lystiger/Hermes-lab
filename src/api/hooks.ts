@@ -1,17 +1,9 @@
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { hermesApi, isRealApiMode } from './client';
 import { EventSubscription } from './contracts';
 import {
-  AgentSummary,
-  AgentDetail,
   AgentId,
-  Job,
-  JobDetail,
-  PipelineStep,
-  ProviderQuota,
-  ProjectionItem,
   SettingItem,
-  OverviewTelemetry,
   ActorRef,
   TraceEvent,
   HealthStatus,
@@ -56,36 +48,84 @@ export function useHealth() {
   return { health, loading, error, refetch: checkHealth };
 }
 
-export function useAgents() {
-  const [baseAgents, setBaseAgents] = useState<AgentSummary[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<Error | null>(null);
-  const { setConnectionStatus, agentRuntimeStatuses } = useConsoleStore();
+/** Result of one keyed resource. Data survives only refreshes of the same key; a different key starts empty. */
+interface ResourceState<T> {
+  key: string | null;
+  data: T | null;
+  error: Error | null;
+  updatedAt: number | null;
+  loading: boolean;
+}
 
-  const fetchAgents = useCallback(async () => {
-    try {
-      setLoading(true);
-      const data = await hermesApi.getAgents();
-      setBaseAgents(data);
-      if (isRealApiMode) {
-        setConnectionStatus('CONNECTED');
-      }
-      setError(null);
-    } catch (err) {
-      setError(err as Error);
-      if (isRealApiMode) {
-        setConnectionStatus('DISCONNECTED');
-      }
-    } finally {
-      setLoading(false);
-    }
-  }, [setConnectionStatus]);
+/**
+ * Loads one resource identified by `key` (for example `agent:claude` or `job:<id>`) and re-runs when `deps`
+ * change. Correctness rules (M5 F1, F2):
+ * - Data from another key is never returned. Changing key clears it at once.
+ * - Only the newest request for the current key may write state. An older response that resolves later is dropped.
+ * - A failed refresh of the same key keeps the last good data alongside the error, so the UI can say it is stale.
+ */
+export function useResource<T>(key: string | null, load: (() => Promise<T>) | null, deps: unknown[]) {
+  const [state, setState] = useState<ResourceState<T>>({ key, data: null, error: null, updatedAt: null, loading: load !== null });
+  const [attempt, setAttempt] = useState(0);
+  // Tokens increase with each request. A response is applied only if it is newer than the last one applied, so a
+  // request that is superseded by a refresh still lands when it is the newest to finish. Live events can restart a
+  // load many times a second; requiring the very latest request to finish would starve the screen (M7).
+  const latest = useRef(0);
+  const applied = useRef(0);
+  // A response that arrives after the component has unmounted has nowhere to go; it is dropped.
+  const alive = useRef(true);
+  useEffect(() => {
+    alive.current = true;
+    return () => {
+      alive.current = false;
+    };
+  }, []);
+  const refetch = useCallback(() => setAttempt((n) => n + 1), []);
 
   useEffect(() => {
-    fetchAgents();
-  }, [fetchAgents]);
+    const token = ++latest.current;
+    if (!load) {
+      setState({ key, data: null, error: null, updatedAt: null, loading: false });
+      return;
+    }
+    setState((prev) => {
+      const same = prev.key === key;
+      return { key, data: same ? prev.data : null, error: same ? prev.error : null, updatedAt: same ? prev.updatedAt : null, loading: true };
+    });
+    load().then(
+      (result) => {
+        if (!alive.current || token <= applied.current) return;
+        applied.current = token;
+        setState({ key, data: result, error: null, updatedAt: Date.now(), loading: false });
+      },
+      (err) => {
+        if (!alive.current || token <= applied.current) return;
+        applied.current = token;
+        setState((prev) => ({ key, data: prev.key === key ? prev.data : null, error: err as Error, updatedAt: prev.key === key ? prev.updatedAt : null, loading: false }));
+      }
+    );
+    // The caller's deps decide when to refetch; the loader is rebuilt on each render.
+  }, [key, attempt, ...deps]);
 
-  // Reactive overlay: updates dynamically whenever SSE events change active statuses (Item 1)
+  // State left over from another key is never shown.
+  const current: ResourceState<T> = state.key === key ? state : { key, data: null, error: null, updatedAt: null, loading: load !== null };
+  return {
+    data: current.data,
+    loading: current.loading,
+    error: current.error,
+    updatedAt: current.updatedAt,
+    /** True when the last good data is still shown while the latest refresh has failed. */
+    stale: current.data !== null && current.error !== null,
+    refetch
+  };
+}
+
+export function useAgents() {
+  const { agentRuntimeVersion, agentRuntimeStatuses } = useConsoleStore();
+  const { data, loading, error, updatedAt, stale, refetch } = useResource('agents', () => hermesApi.getAgents(), [agentRuntimeVersion]);
+  const baseAgents = data ?? [];
+
+  // Reactive overlay: live statuses from SSE for the same agent identity only.
   const agents = useMemo(() => {
     return baseAgents.map((ag) => {
       const liveOverlay = agentRuntimeStatuses[ag.id.toLowerCase()];
@@ -98,170 +138,168 @@ export function useAgents() {
     });
   }, [baseAgents, agentRuntimeStatuses]);
 
-  return { agents, loading, error, refetch: fetchAgents };
+  return { agents, loading, error, updatedAt, stale, refetch };
 }
 
 export function useAgent(id?: AgentId) {
-  const [baseAgent, setBaseAgent] = useState<AgentDetail | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<Error | null>(null);
-  const { agentRuntimeStatuses } = useConsoleStore();
+  const { agentRuntimeStatuses, agentRuntimeVersion } = useConsoleStore();
+  const key = id ? `agent:${id.toLowerCase()}` : null;
+  const { data, loading, error, updatedAt, stale, refetch } = useResource(
+    key,
+    id ? () => hermesApi.getAgent(id) : null,
+    [id, agentRuntimeVersion]
+  );
+  // The response must be the agent that was asked for; anything else is not shown.
+  const base = data && id && data.id.toLowerCase() === id.toLowerCase() ? data : null;
 
-  const fetchAgent = useCallback(async (targetId: AgentId) => {
-    try {
-      setLoading(true);
-      const data = await hermesApi.getAgent(targetId);
-      setBaseAgent(data);
-      setError(null);
-    } catch (err) {
-      setError(err as Error);
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    if (id) {
-      fetchAgent(id);
-    }
-  }, [id, fetchAgent]);
-
-  // Reactive overlay for single agent inspection (Item 1)
   const agent = useMemo(() => {
-    if (!baseAgent || !id) return baseAgent;
+    if (!base || !id) return base;
     const liveOverlay = agentRuntimeStatuses[id.toLowerCase()];
-    if (!liveOverlay) return baseAgent;
+    if (!liveOverlay) return base;
     return {
-      ...baseAgent,
-      status: liveOverlay.status || baseAgent.status,
-      currentTask: liveOverlay.currentTask !== undefined ? liveOverlay.currentTask : baseAgent.currentTask
+      ...base,
+      status: liveOverlay.status || base.status,
+      currentTask: liveOverlay.currentTask !== undefined ? liveOverlay.currentTask : base.currentTask
     };
-  }, [baseAgent, id, agentRuntimeStatuses]);
+  }, [base, id, agentRuntimeStatuses]);
 
-  return { agent, loading, error, refetch: () => id && fetchAgent(id) };
+  return { agent, loading, error, updatedAt, stale, refetch };
 }
 
 export function useJobs() {
-  const [jobs, setJobs] = useState<Job[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<Error | null>(null);
   const { jobRuntimeVersion } = useConsoleStore();
-
-  const fetchJobs = useCallback(async () => {
-    try {
-      setLoading(true);
-      const data = await hermesApi.getJobs();
-      setJobs(data);
-      setError(null);
-    } catch (err) {
-      setError(err as Error);
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    fetchJobs();
-  }, [fetchJobs, jobRuntimeVersion]);
-
-  return { jobs, loading, error, refetch: fetchJobs };
+  const { data, loading, error, updatedAt, stale, refetch } = useResource('jobs', () => hermesApi.getJobs(), [jobRuntimeVersion]);
+  return { jobs: data ?? [], loading, error, updatedAt, stale, refetch };
 }
 
 export function useJob(id: string | null) {
-  const [job, setJob] = useState<JobDetail | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<Error | null>(null);
   const { jobRuntimeVersion } = useConsoleStore();
-
-  const fetchJob = useCallback(async (jobId: string) => {
-    try {
-      setLoading(true);
-      const data = await hermesApi.getJob(jobId);
-      setJob(data);
-      setError(null);
-    } catch (err) {
-      setError(err as Error);
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    if (id) {
-      fetchJob(id);
-    } else {
-      setJob(null);
-    }
-  }, [id, fetchJob, jobRuntimeVersion]);
-
-  return { job, loading, error, refetch: () => id && fetchJob(id) };
+  const { data, loading, error, updatedAt, stale, refetch } = useResource(
+    id ? `job:${id}` : null,
+    id ? () => hermesApi.getJob(id) : null,
+    [id, jobRuntimeVersion]
+  );
+  // A detail is shown only for the job that was asked for.
+  const job = data && id && data.id === id ? data : null;
+  return { job, loading, error, updatedAt, stale, refetch };
 }
 
 export function usePipeline() {
-  const [pipeline, setPipeline] = useState<PipelineStep[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<Error | null>(null);
   const { jobRuntimeVersion } = useConsoleStore();
-
-  const fetchPipeline = useCallback(async () => {
-    try {
-      setLoading(true);
-      const data = await hermesApi.getPipeline();
-      setPipeline(data);
-      setError(null);
-    } catch (err) {
-      setError(err as Error);
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    fetchPipeline();
-  }, [fetchPipeline, jobRuntimeVersion]);
-
-  return { pipeline, loading, error, refetch: fetchPipeline };
+  const { data, loading, error, updatedAt, stale, refetch } = useResource('pipeline', () => hermesApi.getPipeline(), [jobRuntimeVersion]);
+  return { pipeline: data ?? [], loading, error, updatedAt, stale, refetch };
 }
 
 export function useTelemetry() {
-  const [telemetry, setTelemetry] = useState<OverviewTelemetry | null>(null);
-  const [quotas, setQuotas] = useState<ProviderQuota[]>([]);
-  const [projections, setProjections] = useState<ProjectionItem[]>([]);
-  const [loading, setLoading] = useState(true);
+  const { jobRuntimeVersion, agentRuntimeVersion } = useConsoleStore();
+  const { data, loading, error, updatedAt, stale, refetch } = useResource(
+    'telemetry',
+    async () => {
+      const [telemetry, projections] = await Promise.all([hermesApi.getTelemetry(), hermesApi.getProjections()]);
+      return { telemetry, projections };
+    },
+    [jobRuntimeVersion, agentRuntimeVersion]
+  );
+  return {
+    telemetry: data?.telemetry ?? null,
+    projections: data?.projections ?? [],
+    loading,
+    error,
+    updatedAt,
+    stale,
+    refetch
+  };
+}
 
-  useEffect(() => {
-    async function load() {
-      try {
-        const [tel, q, proj] = await Promise.all([
-          hermesApi.getTelemetry(),
-          hermesApi.getProviderQuotas(),
-          hermesApi.getProjections()
-        ]);
-        setTelemetry(tel);
-        setQuotas(q);
-        setProjections(proj);
-      } finally {
-        setLoading(false);
-      }
-    }
-    load();
-  }, []);
+/** Capacity telemetry. Totals are since runtime start; they refresh on job and agent activity. */
+export function useCapacityTelemetry() {
+  const { jobRuntimeVersion, agentRuntimeVersion } = useConsoleStore();
+  const { data, loading, error, updatedAt, stale, refetch } = useResource(
+    'capacity',
+    () => hermesApi.getCapacityTelemetry(),
+    [jobRuntimeVersion, agentRuntimeVersion]
+  );
+  return { capacity: data, loading, error, updatedAt, stale, refetch };
+}
 
-  return { telemetry, quotas, projections, loading };
+/** Token telemetry for one job. Keyed by job, so another job's totals are never shown. */
+export function useJobTelemetry(jobId: string | null) {
+  const { jobRuntimeVersion, agentRuntimeVersion } = useConsoleStore();
+  const { data, loading, error, updatedAt, stale, refetch } = useResource(
+    jobId ? `job-telemetry:${jobId}` : null,
+    jobId ? () => hermesApi.getJobTelemetry(jobId) : null,
+    [jobId, jobRuntimeVersion, agentRuntimeVersion]
+  );
+  return { telemetry: data, loading, error, updatedAt, stale, refetch };
+}
+
+export function useJobTasks(jobId: string | null) {
+  const { jobRuntimeVersion } = useConsoleStore();
+  const { data, loading, error, updatedAt, stale, refetch } = useResource(
+    jobId ? `job-tasks:${jobId}` : null,
+    jobId ? () => hermesApi.getJobTasks(jobId) : null,
+    [jobId, jobRuntimeVersion]
+  );
+  return { tasks: data ?? [], loading, error, updatedAt, stale, refetch };
+}
+
+export function useJobRuns(jobId: string | null) {
+  const { jobRuntimeVersion, agentRuntimeVersion } = useConsoleStore();
+  const { data, loading, error, updatedAt, stale, refetch } = useResource(
+    jobId ? `job-runs:${jobId}` : null,
+    jobId ? () => hermesApi.getJobRuns(jobId) : null,
+    [jobId, jobRuntimeVersion, agentRuntimeVersion]
+  );
+  return { runs: data ?? [], loading, error, updatedAt, stale, refetch };
+}
+
+export function useJobObservations(jobId: string | null) {
+  const { jobRuntimeVersion } = useConsoleStore();
+  const { data, loading, error, updatedAt, stale, refetch } = useResource(
+    jobId ? `job-observations:${jobId}` : null,
+    jobId ? () => hermesApi.getJobObservations(jobId) : null,
+    [jobId, jobRuntimeVersion]
+  );
+  return { observations: data ?? [], loading, error, updatedAt, stale, refetch };
+}
+
+/** Durable job history. Live events for the job are merged on top by the caller. */
+export function useJobEvents(jobId: string | null) {
+  const { jobRuntimeVersion } = useConsoleStore();
+  const { data, loading, error, updatedAt, stale, refetch } = useResource(
+    jobId ? `job-events:${jobId}` : null,
+    jobId ? () => hermesApi.getJobEvents(jobId) : null,
+    [jobId, jobRuntimeVersion]
+  );
+  return { events: data ?? [], loading, error, updatedAt, stale, refetch };
+}
+
+/** Recoverable jobs, read-only. */
+export function useRecoverableJobs() {
+  const { jobRuntimeVersion } = useConsoleStore();
+  const { data, loading, error, updatedAt, stale, refetch } = useResource(
+    'recoverable',
+    () => hermesApi.getRecoverableJobs(),
+    [jobRuntimeVersion]
+  );
+  return { jobs: data ?? [], loading, error, updatedAt, stale, refetch };
 }
 
 export function useSettings() {
-  const [settings, setSettings] = useState<{ runtime: SettingItem[]; policy: SettingItem[] }>({
-    runtime: [],
-    policy: []
-  });
-  const [loading, setLoading] = useState(true);
+  const { data, loading, error, updatedAt, stale, refetch } = useResource<{ runtime: SettingItem[]; policy: SettingItem[] }>(
+    'settings',
+    () => hermesApi.getSettings(),
+    []
+  );
 
-  useEffect(() => {
-    hermesApi.getSettings().then(setSettings).finally(() => setLoading(false));
-  }, []);
-
-  return { settings, loading };
+  return {
+    settings: data ?? { runtime: [], policy: [] },
+    loading,
+    error,
+    updatedAt,
+    stale,
+    refetch
+  };
 }
 
 export function useEventStream() {
@@ -321,9 +359,11 @@ export function useEventStream() {
               addTraceEvent(evt);
               setConnectionStatus('CONNECTED');
               if (streamDropped) {
-                // Events were missed while disconnected: reset execution state to a fresh snapshot.
+                // Events were missed while disconnected: reset execution state to a fresh snapshot,
+                // and refetch identity and telemetry that events would otherwise have updated.
                 streamDropped = false;
                 void useExecutionStore.getState().refreshSnapshot();
+                useConsoleStore.getState().markRuntimeResynced();
               }
               if (isExecutionEvent(evt)) {
                 useExecutionStore.getState().applyEvent(evt);
@@ -379,17 +419,27 @@ export function useThreads(jobId?: string, participant?: string) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<Error | null>(null);
   const { messageRuntimeVersion, jobRuntimeVersion } = useConsoleStore();
+  const alive = useRef(true);
+
+  useEffect(() => {
+    alive.current = true;
+    return () => {
+      alive.current = false;
+    };
+  }, []);
 
   const fetchThreads = useCallback(async () => {
     try {
-      setLoading(true);
+      if (alive.current) setLoading(true);
       const data = await hermesApi.getThreads(jobId, participant);
-      setThreads(data);
-      setError(null);
+      if (alive.current) {
+        setThreads(data);
+        setError(null);
+      }
     } catch (err) {
-      setError(err as Error);
+      if (alive.current) setError(err as Error);
     } finally {
-      setLoading(false);
+      if (alive.current) setLoading(false);
     }
   }, [jobId, participant]);
 

@@ -13,7 +13,7 @@ describe('Phase 6 Generic Agent Identity, Personas & A2A Conversations UI', () =
     participants: [
       { id: 'gemini', kind: 'agent', displayName: 'Gemini', accentColor: '#5B8CFF', subtitle: 'Energetic Builder' },
       { id: 'claude', kind: 'agent', displayName: 'Claude', accentColor: '#D9A05B', subtitle: 'Calm Hardener' },
-      { id: 'elysia', kind: 'agent', displayName: 'Elysia', accentColor: '#A78BFA', subtitle: 'Dynamic Planner' }
+      { id: 'custom-agent', kind: 'agent', displayName: 'Custom Agent', accentColor: '#A78BFA', subtitle: 'Dynamic Planner' }
     ],
     createdAt: '2026-08-22T12:00:00Z',
     updatedAt: '2026-08-22T12:05:00Z'
@@ -51,15 +51,15 @@ describe('Phase 6 Generic Agent Identity, Personas & A2A Conversations UI', () =
       }
     },
     {
-      id: 'elysia',
-      displayName: 'Elysia',
+      id: 'custom-agent',
+      displayName: 'Custom Agent',
       provider: 'Custom AI',
-      model: 'elysia-v1',
+      model: 'custom-agent-v1',
       role: 'Dynamic Planning',
       capabilities: ['planning'],
       status: 'IDLE',
       presentation: {
-        displayName: 'Elysia',
+        displayName: 'Custom Agent',
         accentColor: '#A78BFA',
         subtitle: 'Dynamic Planner',
         sigil: 'PLAN'
@@ -108,7 +108,7 @@ describe('Phase 6 Generic Agent Identity, Personas & A2A Conversations UI', () =
     {
       id: 'msg_p6_004',
       threadId: 'thread_job_run_p6_001',
-      from: { id: 'elysia', kind: 'agent', displayName: 'Elysia', accentColor: '#A78BFA', subtitle: 'Dynamic Planner' },
+      from: { id: 'custom-agent', kind: 'agent', displayName: 'Custom Agent', accentColor: '#A78BFA', subtitle: 'Dynamic Planner' },
       to: [{ id: 'gemini', kind: 'agent', displayName: 'Gemini' }],
       kind: 'a2a',
       intent: 'question',
@@ -129,14 +129,14 @@ describe('Phase 6 Generic Agent Identity, Personas & A2A Conversations UI', () =
     render(
       <OperationalThreadView
         jobId="run_p6_001"
-        assignedAgentIds={['gemini', 'claude', 'elysia']}
+        assignedAgentIds={['gemini', 'claude', 'custom-agent']}
       />
     );
 
     await waitFor(() => {
       expect(screen.getAllByText('Gemini').length).toBeGreaterThan(0);
       expect(screen.getAllByText('Claude').length).toBeGreaterThan(0);
-      expect(screen.getAllByText('Elysia').length).toBeGreaterThan(0);
+      expect(screen.getAllByText('Custom Agent').length).toBeGreaterThan(0);
     });
 
     // Check persona subtitles
@@ -162,8 +162,8 @@ describe('Phase 6 Generic Agent Identity, Personas & A2A Conversations UI', () =
     expect(screen.getAllByText('conv_planning_sync').length).toBeGreaterThan(0);
 
     // Reply-To badges
-    expect(screen.getByText('↳ reply: msg_p6_001')).toBeInTheDocument();
-    expect(screen.getByText('↳ reply: msg_p6_002')).toBeInTheDocument();
+    expect(screen.getByText('reply: msg_p6_001')).toBeInTheDocument();
+    expect(screen.getByText('reply: msg_p6_002')).toBeInTheDocument();
 
     // Correlation ID
     expect(screen.getAllByText('corr:corr_review_01').length).toBe(2);
@@ -207,6 +207,6 @@ describe('Phase 6 Generic Agent Identity, Personas & A2A Conversations UI', () =
     const replyButtons = screen.getAllByTitle('Reply to this message');
     fireEvent.click(replyButtons[1]); // Reply to Claude's message (msg_p6_002)
 
-    expect(screen.getByText('Replying to msg_p6_002')).toBeInTheDocument();
+    expect(screen.getByText(/Replying to msg_p6_002/)).toBeInTheDocument();
   });
 });

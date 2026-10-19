@@ -1,64 +1,77 @@
 import { ActorRef, AgentSummary } from './types';
+import { actorAccent, agentAccent, NEUTRAL_ACCENT } from '../theme/agents';
 
 export const SYSTEM_ACTORS: Record<string, ActorRef> = {
   hermes: {
     id: 'hermes',
     kind: 'runtime',
     displayName: 'Hermes',
-    accentColor: '#CBA35C'
+    accentColor: agentAccent('hermes'),
+    avatarUrl: '/agents/hermes.webp',
+    subtitle: 'Orchestrator'
   },
   hermes_runner: {
     id: 'hermes_runner',
     kind: 'runtime',
     displayName: 'Hermes Runner',
-    accentColor: '#CBA35C'
+    accentColor: agentAccent('hermes')
   },
   herdr: {
     id: 'herdr',
     kind: 'runtime',
     displayName: 'Herdr',
-    accentColor: '#8C949F'
+    accentColor: NEUTRAL_ACCENT
   },
   // D-009 execution backends (source_kind="runtime", source_id=<backend>)
   openrig: {
     id: 'openrig',
     kind: 'runtime',
     displayName: 'OpenRig',
-    accentColor: '#7FB3D5'
+    accentColor: 'var(--lys-accent-sky)'
   },
   subprocess: {
     id: 'subprocess',
     kind: 'runtime',
     displayName: 'Subprocess',
-    accentColor: '#8C949F'
+    accentColor: NEUTRAL_ACCENT
   },
   // Legacy actor ID retained for events/messages created before the runtime was renamed.
   lysstack: {
     id: 'hermes',
     kind: 'runtime',
     displayName: 'Hermes',
-    accentColor: '#CBA35C'
+    accentColor: agentAccent('hermes'),
+    avatarUrl: '/agents/hermes.webp',
+    subtitle: 'Orchestrator'
   },
   lyscontrol: {
     id: 'lyscontrol',
     kind: 'system',
     displayName: 'LysControl Console',
-    accentColor: '#CBA35C'
+    accentColor: agentAccent('hermes')
   },
   operator: {
     id: 'operator',
     kind: 'operator',
     displayName: 'Operator',
-    accentColor: '#E6E9ED',
+    accentColor: 'var(--lys-text-primary)',
     subtitle: 'Human Operator'
   },
   pytest: {
     id: 'pytest',
     kind: 'tool',
     displayName: 'pytest-runner',
-    accentColor: '#3FB950'
+    accentColor: 'var(--lys-status-success)'
   }
 };
+
+/**
+ * Name shown for an event's source: the registered name for a known actor (for example "OpenRig" rather than the
+ * raw id "openrig"), otherwise the name the event itself carries.
+ */
+export function traceSourceName(source: { id: string; displayName: string }): string {
+  return SYSTEM_ACTORS[source.id.toLowerCase()]?.displayName ?? source.displayName;
+}
 
 /**
  * Resolves an actor presentation reference from dynamic agent registry, known system actors, or generic fallback.
@@ -68,7 +81,7 @@ export function resolveActorPresentation(
   agentRegistry?: Record<string, AgentSummary> | AgentSummary[]
 ): ActorRef {
   if (!rawIdentifier) {
-    return { id: 'unknown', kind: 'system', displayName: '—', accentColor: '#8C949F' };
+    return { id: 'unknown', kind: 'system', displayName: '—', accentColor: NEUTRAL_ACCENT };
   }
 
   const normalized = rawIdentifier.toLowerCase();
@@ -93,7 +106,7 @@ export function resolveActorPresentation(
         id: foundAgent.id,
         kind: 'agent',
         displayName: foundAgent.displayName,
-        accentColor: foundAgent.presentation?.accentColor || '#8C949F',
+        accentColor: actorAccent(foundAgent.id, foundAgent.presentation?.accentColor),
         avatarUrl,
         subtitle
       };
@@ -117,6 +130,6 @@ export function resolveActorPresentation(
     id: normalized,
     kind: 'agent',
     displayName: rawIdentifier.charAt(0).toUpperCase() + rawIdentifier.slice(1),
-    accentColor: '#8C949F'
+    accentColor: agentAccent(normalized) || NEUTRAL_ACCENT
   };
 }

@@ -225,7 +225,7 @@ export const JobDetailView: React.FC<JobDetailViewProps> = ({ jobId = '' }) => {
               <ErrorState label="Durable job history" error={durable.error} onRetry={durable.refetch} />
             )}
             {!durable.error && traceRows.length === 0 && !durable.loading && (
-              <EmptyState>Hermes recorded no events for this job.</EmptyState>
+              <EmptyState>No events recorded</EmptyState>
             )}
             <div className="flex flex-col">
               {traceRows.slice(0, 50).map(({ event: e, origin }) => (
@@ -241,7 +241,7 @@ export const JobDetailView: React.FC<JobDetailViewProps> = ({ jobId = '' }) => {
                     {e.source.displayName}
                   </span>
                   <span className="w-28 text-lys-muted">{e.kind}</span>
-                  <span className="flex-1 min-w-0 text-lys-secondary break-words font-sans">
+                  <span className="flex-1 min-w-0 text-lys-secondary break-words font-sans line-clamp-2" title={e.detail}>
                     {e.detail}
                   </span>
                   <span className="w-16 text-right text-lys-muted">{e.dur}</span>

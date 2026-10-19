@@ -31,7 +31,7 @@ export const JobFailure: React.FC<{ job: JobDetail }> = ({ job }) => {
       <div className="text-lys-danger font-semibold">{explanation.headline}</div>
       <ul className="mt-1.5 flex flex-col gap-1 text-lys-primary break-words">
         {explanation.lines.map((line, i) => (
-          <li key={i}>{line}</li>
+          <li key={i} className="line-clamp-2" title={line}>{line}</li>
         ))}
       </ul>
     </div>
@@ -83,7 +83,7 @@ export const JobTasks: React.FC<{ jobId: string }> = ({ jobId }) => {
     <Section title={`TASKS · ${tasks.length}`} updatedAt={updatedAt}>
       {loading && tasks.length === 0 && <LoadingState label="Loading tasks…" />}
       <ResourceError label="Tasks" error={error} hasData={stale || tasks.length > 0} updatedAt={updatedAt} onRetry={refetch} />
-      {!loading && !error && tasks.length === 0 && <EmptyState>Hermes recorded no tasks for this job.</EmptyState>}
+      {!loading && !error && tasks.length === 0 && <EmptyState>No tasks recorded</EmptyState>}
       <div className="flex flex-col gap-1.5 font-sans text-[11px]">
         {tasks.map((t) => (
           <div key={t.taskId} className="p-2 bg-lys-surface-1 border border-lys-subtle">
@@ -98,7 +98,7 @@ export const JobTasks: React.FC<{ jobId: string }> = ({ jobId }) => {
               {t.dependencies.length > 0 ? ` · after ${t.dependencies.join(', ')}` : ''}
             </div>
             {t.error !== null && t.error !== undefined && (
-              <div className="mt-1 text-lys-danger break-words">{describeError(t.error)}</div>
+              <div className="mt-1 text-lys-danger break-words line-clamp-2" title={describeError(t.error)}>{describeError(t.error)}</div>
             )}
           </div>
         ))}
@@ -113,7 +113,7 @@ export const JobRuns: React.FC<{ jobId: string }> = ({ jobId }) => {
     <Section title={`RUNS · ${runs.length}`} updatedAt={updatedAt}>
       {loading && runs.length === 0 && <LoadingState label="Loading runs…" />}
       <ResourceError label="Runs" error={error} hasData={stale || runs.length > 0} updatedAt={updatedAt} onRetry={refetch} />
-      {!loading && !error && runs.length === 0 && <EmptyState>Hermes recorded no runs for this job.</EmptyState>}
+      {!loading && !error && runs.length === 0 && <EmptyState>No runs recorded</EmptyState>}
       <div className="flex flex-col gap-1.5 font-sans text-[11px]">
         {runs.map((r) => (
           <div key={r.runId} className="p-2 bg-lys-surface-1 border border-lys-subtle flex flex-wrap justify-between gap-2">
@@ -122,7 +122,7 @@ export const JobRuns: React.FC<{ jobId: string }> = ({ jobId }) => {
             <span className="text-lys-primary">{r.status}</span>
             {r.exitReason && <span className="w-full text-lys-faint">exit: {r.exitReason}</span>}
             {r.error !== null && r.error !== undefined && (
-              <span className="w-full text-lys-danger break-words">{describeError(r.error)}</span>
+              <span className="w-full text-lys-danger break-words line-clamp-2" title={describeError(r.error)}>{describeError(r.error)}</span>
             )}
           </div>
         ))}
@@ -138,7 +138,7 @@ export const JobObservations: React.FC<{ jobId: string }> = ({ jobId }) => {
       {loading && observations.length === 0 && <LoadingState label="Loading observations…" />}
       <ResourceError label="Observations" error={error} hasData={stale || observations.length > 0} updatedAt={updatedAt} onRetry={refetch} />
       {!loading && !error && observations.length === 0 && (
-        <EmptyState>Hermes recorded no observations for this job.</EmptyState>
+        <EmptyState>No observations recorded</EmptyState>
       )}
       <div className="flex flex-col gap-1.5 font-sans text-[11px]">
         {observations.map((o) => (
@@ -169,7 +169,7 @@ export const JobDiagnostics: React.FC<{ job: JobDetail }> = ({ job }) => {
         <div className="p-2 bg-lys-surface-1 border border-lys-subtle">
           <div className="text-lys-muted tracking-wider mb-1">VERIFICATION</div>
           {v === null || v === undefined ? (
-            <EmptyState>Hermes recorded no verification result for this job.</EmptyState>
+            <EmptyState>No verification recorded</EmptyState>
           ) : (
             <div className="flex flex-col gap-1 text-lys-secondary">
               <span>status: {typeof v.status === 'string' ? v.status : <UnknownValue reason="verification has no status" />}</span>

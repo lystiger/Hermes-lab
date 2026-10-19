@@ -36,16 +36,13 @@ export const ActiveExecutionCard: React.FC<ActiveExecutionCardProps> = ({ onOpen
       <Card label="Active execution">
         <div className="p-5 flex flex-col gap-3">
           {stale && <StaleNotice label="Active execution" error={error} onRetry={refetch} />}
-        <div className="flex items-center justify-between gap-6">
-          <div className="min-w-0">
-            <div className="text-[11px] tracking-wider uppercase text-lys-faint">Active execution</div>
-            <div className="mt-1 font-display text-[22px] font-semibold text-lys-muted">No active execution</div>
-            <p className="mt-1 text-[12px] text-lys-faint">
-              None of the latest {jobs.length} jobs is in RUNNING, PLANNING, PREPARING, VERIFYING or REPAIRING state.
-            </p>
+          <div className="flex items-center justify-between gap-6">
+            <div className="min-w-0">
+              <div className="text-[11px] font-medium tracking-wider uppercase text-lys-faint">Active execution</div>
+              <div className="mt-1 font-display text-[22px] font-semibold text-lys-muted">No active execution</div>
+            </div>
+            <img src={HERMES_ART} alt="" aria-hidden="true" className="h-12 w-auto opacity-60 shrink-0" />
           </div>
-          <img src={HERMES_ART} alt="" aria-hidden="true" className="h-16 w-auto opacity-60 shrink-0" />
-        </div>
         </div>
       </Card>
     );
@@ -56,12 +53,12 @@ export const ActiveExecutionCard: React.FC<ActiveExecutionCardProps> = ({ onOpen
       <div className="p-5 flex flex-col gap-4">
         {stale && <StaleNotice label="Active execution" error={error} onRetry={refetch} />}
         <div className="flex flex-wrap items-center gap-3">
-          <span className="text-[11px] tracking-wider uppercase text-lys-faint">Active execution</span>
+          <span className="text-[11px] font-medium tracking-wider uppercase text-lys-faint">Active execution</span>
           <span className="ml-auto"><Freshness at={updatedAt} /></span>
-          <span className="text-[10px] tracking-wider uppercase text-lys-success border border-lys-success/35 px-1.5 py-0.5">{activeJob.status}</span>
+          <span className="text-[10px] font-mono-code uppercase text-lys-success">{activeJob.status}</span>
         </div>
         <div className="flex flex-col gap-1">
-          <CopyId value={activeJob.id} className="text-lys-faint text-[11px]" />
+          <CopyId value={activeJob.id} truncate className="text-lys-faint text-[11px]" />
           <button
             type="button"
             onClick={() => onOpenJob?.(activeJob.id)}

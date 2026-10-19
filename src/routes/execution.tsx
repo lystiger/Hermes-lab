@@ -5,14 +5,11 @@ import { executionTimeline, groupByBackend, stateStyle } from '../features/execu
 import { useNow } from '../features/execution/useNow';
 import { useExecution } from '../api/hooks';
 import { useConsoleStore } from '../stores/useConsoleStore';
-import { formatTimeOfDay } from '../features/time/format';
 import { isRealApiMode } from '../api/client';
 import { Card } from '../components/Card';
-import { CopyId } from '../components/CopyId';
 import { EmptyState, ErrorState, LoadingState } from '../components/DataStates';
 import { PageHeader, HeaderCount } from '../components/PageHeader';
-import { NotReported, NotReportedItem } from '../components/NotReported';
-import { HERMES_ART } from '../theme/agentArt';
+import { NotReportedItem } from '../components/NotReported';
 
 const NOT_REPORTED: NotReportedItem[] = [
   { label: 'seat memory', reason: 'The execution snapshot carries no memory or compute figures' },
@@ -46,16 +43,12 @@ export const ExecutionRoute: React.FC = () => {
       <PageHeader
         updatedAt={snapshotLoadedAt ? Date.parse(snapshotLoadedAt) : null}
         title="Execution"
-        subtitle={
-          <span>
-            Backends and deployed seats from the execution snapshot
-            {snapshotLoadedAt && <> · loaded <span className="font-mono-code">{formatTimeOfDay(snapshotLoadedAt)}</span></>}
-          </span>
-        }
+        subtitle="Backends and seats"
         counts={counts}
+        notReported={NOT_REPORTED}
         actions={
-          <button onClick={() => void refresh()} className="text-[12px] px-3 py-1.5 border border-lys-default text-lys-muted hover:text-lys-primary cursor-pointer">
-            refresh
+          <button onClick={() => void refresh()} className="text-[12px] px-3 py-1.5 border border-lys-default text-lys-muted hover:text-lys-primary cursor-pointer transition-colors">
+            Refresh
           </button>
         }
       />
@@ -73,9 +66,9 @@ export const ExecutionRoute: React.FC = () => {
           </Card>
         )}
 
-        <section aria-label="Backends" className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
+        <section aria-label="Backends" className="grid grid-cols-1 md:grid-cols-3 gap-5">
           {!loaded && snapshotStatus !== 'error' && (
-            <Card className="md:col-span-2 xl:col-span-4">
+            <Card className="md:col-span-3">
               <LoadingState label="Waiting for the execution snapshot…" />
             </Card>
           )}
@@ -86,25 +79,23 @@ export const ExecutionRoute: React.FC = () => {
                 <div className="p-5 flex flex-col gap-2">
                   <div className="flex items-center justify-between">
                     <span className="font-display text-[20px] font-semibold text-lys-primary">{b.name}</span>
-                    <span className="text-[10px] tracking-wider uppercase" style={{ color: tone }}>
+                    <span className="text-[10px] font-mono-code uppercase" style={{ color: tone }}>
                       {b.available ? 'available' : 'unavailable'}
                     </span>
                   </div>
-                  <p className="text-[12px] text-lys-muted break-words">{b.detail || 'no detail reported'}</p>
+                  <p className="text-[12px] text-lys-muted truncate" title={b.detail || 'no detail reported'}>{b.detail || 'no detail reported'}</p>
                 </div>
               </Card>
             );
           })}
         </section>
 
-        <section aria-label="Deployed seats" className="flex flex-col gap-4">
-          <div className="text-[11px] tracking-wider uppercase text-lys-faint">Deployed seats · by backend</div>
+        <section aria-label="Deployed seats" className="flex flex-col gap-3">
+          <div className="text-[11px] font-medium tracking-wider uppercase text-lys-faint">Deployed seats</div>
           {groups.length === 0 ? (
-            <Card>
-              <EmptyState art={HERMES_ART}>
-                {loaded ? 'No deployed seats. Hermes reports no live execution resources right now.' : 'Waiting for the execution snapshot…'}
-              </EmptyState>
-            </Card>
+            <div className="px-5 py-3 bg-lys-surface-1 border border-lys-subtle rounded-md flex items-center justify-between text-[12px] text-lys-muted">
+              <span>No deployed seats</span>
+            </div>
           ) : (
             groups.map((g) => (
               <div key={g.backend} className="flex flex-col gap-3">
@@ -126,16 +117,13 @@ export const ExecutionRoute: React.FC = () => {
 
         <Card label="Recent execution timeline">
           <div className="p-5 flex flex-col gap-3">
-            <div className="flex items-center justify-between text-[11px] tracking-wider uppercase text-lys-faint">
+            <div className="flex items-center justify-between text-[11px] font-medium tracking-wider uppercase text-lys-faint">
               <span>Recent execution timeline</span>
               <span>{timeline.length} events</span>
             </div>
-            {timeline.length === 0 ? <EmptyState>No execution events recorded yet.</EmptyState> : <ExecutionTimeline events={timeline} />}
+            {timeline.length === 0 ? <EmptyState>No execution events</EmptyState> : <ExecutionTimeline events={timeline} />}
           </div>
         </Card>
-
-        <NotReported items={NOT_REPORTED} />
-        <span className="sr-only"><CopyId value="" /></span>
       </div>
     </div>
   );

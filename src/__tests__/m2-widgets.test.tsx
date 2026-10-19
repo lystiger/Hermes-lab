@@ -76,9 +76,9 @@ describe('M2 job detail: failure, tasks, runs, observations and trace', () => {
     installLiveHermes();
     renderIn(<JobDetailView jobId={LIVE_JOB_ID} />);
 
-    expect(await screen.findByText('Hermes recorded no tasks for this job.')).toBeInTheDocument();
-    expect(screen.getByText('Hermes recorded no runs for this job.')).toBeInTheDocument();
-    expect(screen.getByText('Hermes recorded no observations for this job.')).toBeInTheDocument();
+    expect(await screen.findByText('No tasks recorded')).toBeInTheDocument();
+    expect(screen.getByText('No runs recorded')).toBeInTheDocument();
+    expect(screen.getByText('No observations recorded')).toBeInTheDocument();
   });
 
   it('shows a failed task list as an error with retry, not as no tasks', async () => {
@@ -86,7 +86,7 @@ describe('M2 job detail: failure, tasks, runs, observations and trace', () => {
     renderIn(<JobDetailView jobId={LIVE_JOB_ID} />);
 
     expect(await screen.findByText('Tasks failed')).toBeInTheDocument();
-    expect(screen.queryByText('Hermes recorded no tasks for this job.')).not.toBeInTheDocument();
+    expect(screen.queryByText('No tasks recorded')).not.toBeInTheDocument();
   });
 
   it('shows the job token total with its window and says when none was tracked', async () => {
@@ -176,7 +176,7 @@ describe('M2 provider telemetry: labelled as process lifetime, never daily', () 
   it('shows an honest empty state for an empty registry', async () => {
     installLiveHermes();
     renderIn(<ProviderTelemetryList />);
-    expect(await screen.findByText(/No provider usage reported by Hermes/)).toBeInTheDocument();
+    expect(await screen.findByText('No provider usage')).toBeInTheDocument();
   });
 
   it('shows the capacity error with retry when the report cannot be loaded', async () => {
@@ -200,7 +200,6 @@ describe('M2 recoverable jobs and thread errors', () => {
     expect(screen.getByText(/Recoverable · 1 · read-only/)).toBeInTheDocument();
     // Exact action names only: the queue's "Cancelled" status filter is not an action.
     expect(screen.queryByRole('button', { name: /^(resume|cancel)( job)?$/i })).not.toBeInTheDocument();
-    expect(screen.getByText('Resume and cancel are not available from this console.')).toBeInTheDocument();
   });
 
   it('shows a missing thread as an error, not as an empty conversation', async () => {

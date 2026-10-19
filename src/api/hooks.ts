@@ -286,17 +286,20 @@ export function useRecoverableJobs() {
 }
 
 export function useSettings() {
-  const [settings, setSettings] = useState<{ runtime: SettingItem[]; policy: SettingItem[] }>({
-    runtime: [],
-    policy: []
-  });
-  const [loading, setLoading] = useState(true);
+  const { data, loading, error, updatedAt, stale, refetch } = useResource<{ runtime: SettingItem[]; policy: SettingItem[] }>(
+    'settings',
+    () => hermesApi.getSettings(),
+    []
+  );
 
-  useEffect(() => {
-    hermesApi.getSettings().then(setSettings).finally(() => setLoading(false));
-  }, []);
-
-  return { settings, loading };
+  return {
+    settings: data ?? { runtime: [], policy: [] },
+    loading,
+    error,
+    updatedAt,
+    stale,
+    refetch
+  };
 }
 
 export function useEventStream() {
@@ -416,17 +419,27 @@ export function useThreads(jobId?: string, participant?: string) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<Error | null>(null);
   const { messageRuntimeVersion, jobRuntimeVersion } = useConsoleStore();
+  const alive = useRef(true);
+
+  useEffect(() => {
+    alive.current = true;
+    return () => {
+      alive.current = false;
+    };
+  }, []);
 
   const fetchThreads = useCallback(async () => {
     try {
-      setLoading(true);
+      if (alive.current) setLoading(true);
       const data = await hermesApi.getThreads(jobId, participant);
-      setThreads(data);
-      setError(null);
+      if (alive.current) {
+        setThreads(data);
+        setError(null);
+      }
     } catch (err) {
-      setError(err as Error);
+      if (alive.current) setError(err as Error);
     } finally {
-      setLoading(false);
+      if (alive.current) setLoading(false);
     }
   }, [jobId, participant]);
 

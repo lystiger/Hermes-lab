@@ -3,11 +3,11 @@ import { useConsoleStore } from '../stores/useConsoleStore';
 import { useJobs, usePipeline, useRecoverableJobs, useTelemetry } from '../api/hooks';
 import { resolveActorPresentation } from '../api/actors';
 import { useAgents } from '../api/hooks';
-import { EmptyState, ErrorState, Freshness, LoadingState, StaleNotice } from '../components/DataStates';
+import { ErrorState, Freshness, LoadingState, StaleNotice } from '../components/DataStates';
 import { Card } from '../components/Card';
 import { CopyId } from '../components/CopyId';
 import { PageHeader, HeaderCount } from '../components/PageHeader';
-import { NotReported, NotReportedItem } from '../components/NotReported';
+import { NotReportedItem } from '../components/NotReported';
 import { MissionBoard } from '../features/jobs/MissionBoard';
 
 const NOT_REPORTED: NotReportedItem[] = [
@@ -36,8 +36,9 @@ export const QueueRoute: React.FC = () => {
       <PageHeader
         updatedAt={jobsUpdatedAt}
         title="Queue"
-        subtitle={`Mission board · grouped by the status Hermes reports · ${jobs.length} jobs in the latest sample`}
+        subtitle="Mission board"
         counts={counts}
+        notReported={NOT_REPORTED}
       />
 
       <div className="flex-1 flex flex-col gap-6 p-6">
@@ -45,7 +46,7 @@ export const QueueRoute: React.FC = () => {
           <Card accent="var(--lys-accent-gold)" label="Execution order">
             <div className="p-5 flex flex-col gap-2">
               <div className="flex items-center justify-between">
-                <span className="text-[11px] tracking-wider uppercase text-lys-faint">Execution order · active job</span>
+                <span className="text-[11px] font-medium tracking-wider uppercase text-lys-faint">Execution order · active job</span>
               </div>
               {Boolean(pipelineError) && <StaleNotice label="Execution order" error={pipelineError} onRetry={refetchPipeline} />}
               <ol className="flex flex-col gap-1.5">
@@ -83,8 +84,6 @@ export const QueueRoute: React.FC = () => {
         />
 
         <RecoverableJobs onSelect={(id) => setActiveModalJobId(id)} />
-
-        <NotReported items={NOT_REPORTED} />
       </div>
     </div>
   );
@@ -92,26 +91,46 @@ export const QueueRoute: React.FC = () => {
 
 const RecoverableJobs: React.FC<{ onSelect: (jobId: string) => void }> = ({ onSelect }) => {
   const { jobs, loading, error, updatedAt, refetch } = useRecoverableJobs();
+
+  if (!loading && !error && jobs.length === 0) {
+    return (
+      <div className="px-5 py-3 bg-lys-surface-1 border border-lys-subtle rounded-md flex items-center justify-between text-[12px]">
+        <span className="text-[11px] font-medium tracking-wider uppercase text-lys-faint">Recoverable · 0</span>
+        <span className="text-lys-faint">No recoverable jobs</span>
+      </div>
+    );
+  }
+
   return (
     <Card label="Recoverable jobs">
       <div className="p-5 flex flex-col gap-3">
         <div className="flex items-center justify-between">
-          <span className="text-[11px] tracking-wider uppercase text-lys-faint">Recoverable · {jobs.length} · read-only</span>
+          <span className="text-[11px] font-medium tracking-wider uppercase text-lys-faint">Recoverable · {jobs.length} · read-only</span>
           <Freshness at={updatedAt} />
         </div>
         {loading && jobs.length === 0 && <LoadingState label="Loading recoverable jobs…" />}
         {error && <ErrorState label="Recoverable jobs" error={error} onRetry={refetch} />}
-        {!loading && !error && jobs.length === 0 && <EmptyState>No unfinished jobs are recoverable from the event ledger.</EmptyState>}
         <div className="flex flex-col gap-1.5">
           {jobs.map((j) => (
-            <button key={j.id} type="button" onClick={() => onSelect(j.id)} className="flex flex-wrap justify-between gap-2 p-2.5 bg-lys-surface-2 hover:bg-lys-surface-interactive text-left text-[12px] cursor-pointer">
-              <CopyId value={j.id} className="text-lys-faint" />
-              <span className="text-lys-primary">{j.title}</span>
-              <span className="text-lys-muted">{j.status}</span>
-            </button>
+            <div
+              key={j.id}
+              role="button"
+              tabIndex={0}
+              onClick={() => onSelect(j.id)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                  e.preventDefault();
+                  onSelect(j.id);
+                }
+              }}
+              className="flex flex-wrap justify-between gap-2 p-2.5 bg-lys-surface-2 hover:bg-lys-surface-interactive text-left text-[12px] cursor-pointer"
+            >
+              <CopyId value={j.id} truncate className="text-lys-faint" />
+              <span className="text-lys-primary truncate max-w-[300px]" title={j.title}>{j.title}</span>
+              <span className="text-lys-muted uppercase font-mono-code text-[11px]">{j.status}</span>
+            </div>
           ))}
         </div>
-        <p className="text-[11px] text-lys-faint">Resume and cancel are not available from this console.</p>
       </div>
     </Card>
   );

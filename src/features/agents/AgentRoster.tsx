@@ -47,15 +47,14 @@ export const AgentRoster: React.FC<AgentRosterProps> = ({ agents, selectedId, fi
       {loading && agents.length === 0 && <LoadingState label="Loading roster…" />}
       {Boolean(error) && agents.length === 0 && <ErrorState label="Agent roster" error={error} onRetry={onRetry} />}
       {Boolean(stale) && <div className="p-2"><StaleNotice label="Agent roster" error={error} onRetry={onRetry} /></div>}
-      {!loading && !error && agents.length === 0 && <EmptyState>Hermes reports no registered agents.</EmptyState>}
-      {agents.length > 0 && visible.length === 0 && <EmptyState>No agent has status {filter.toLowerCase()}.</EmptyState>}
+      {!loading && !error && agents.length === 0 && <EmptyState>No agents</EmptyState>}
+      {agents.length > 0 && visible.length === 0 && <EmptyState>No {filter.toLowerCase()} agents</EmptyState>}
 
       <div ref={listRef} role="listbox" aria-label="Agents" className="flex flex-col p-3 gap-2 overflow-y-auto">
         {visible.map((a, idx) => (
           <AgentPresence key={a.id} agent={a} selected={a.id === selectedId} index={idx} onClick={() => onSelect(a.id)} />
         ))}
       </div>
-      <p className="mt-auto p-4 text-[11px] text-lys-faint">↑ ↓ move · Enter opens the dossier</p>
     </aside>
   );
 };

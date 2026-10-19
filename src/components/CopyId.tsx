@@ -1,7 +1,11 @@
 import React, { useEffect, useState } from 'react';
 
 /** An identifier with a copy button. Copy failures (no clipboard permission) are shown, not swallowed. */
-export const CopyId: React.FC<{ value: string; className?: string }> = ({ value, className = '' }) => {
+export const CopyId: React.FC<{ value: string; className?: string; truncate?: boolean }> = ({
+  value,
+  className = '',
+  truncate = false
+}) => {
   const [state, setState] = useState<'idle' | 'copied' | 'failed'>('idle');
 
   useEffect(() => {
@@ -10,7 +14,8 @@ export const CopyId: React.FC<{ value: string; className?: string }> = ({ value,
     return () => clearTimeout(id);
   }, [state]);
 
-  const copy = async () => {
+  const copy = async (e: React.MouseEvent) => {
+    e.stopPropagation();
     try {
       await navigator.clipboard.writeText(value);
       setState('copied');
@@ -20,8 +25,13 @@ export const CopyId: React.FC<{ value: string; className?: string }> = ({ value,
   };
 
   return (
-    <span className={`inline-flex items-center gap-1.5 min-w-0 ${className}`}>
-      <span className="font-mono-code break-all">{value}</span>
+    <span className={`inline-flex items-center gap-1.5 min-w-0 max-w-full ${className}`}>
+      <span
+        title={value}
+        className={`font-mono-code ${truncate ? 'truncate' : 'break-all'}`}
+      >
+        {value}
+      </span>
       <button
         type="button"
         onClick={copy}

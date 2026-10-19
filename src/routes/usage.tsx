@@ -1,21 +1,22 @@
 import React from 'react';
 import { useCapacityTelemetry } from '../api/hooks';
-import { ErrorState, LoadingState } from '../components/DataStates';
+import { EmptyState, ErrorState, LoadingState, StaleNotice } from '../components/DataStates';
 import { Card } from '../components/Card';
 import { PageHeader, HeaderCount } from '../components/PageHeader';
-import { NotReported, NotReportedItem } from '../components/NotReported';
-import { Meter, PROCESS_WINDOW, ProviderMeters } from '../features/telemetry/UsageMeters';
+import { NotReportedItem } from '../components/NotReported';
+import { ProviderMeters } from '../features/telemetry/UsageMeters';
 
 const NOT_REPORTED: NotReportedItem[] = [
   { label: 'run budget', reason: 'Hermes exposes no per-run token budget or cap' },
   { label: 'sprint budget', reason: 'Hermes exposes no sprint budget, so no percentage can be computed' },
   { label: 'queue projection', reason: 'Hermes has no projection source for queued work' },
-  { label: 'per-agent context', reason: 'Hermes reports no context usage for each agent' }
+  { label: 'per-agent context', reason: 'Hermes reports no context usage for each agent' },
+  { label: 'measurement window', reason: 'Metrics cover since runtime start (process lifetime, not daily)' }
 ];
 
 /** Usage (research §5.5): meters from capacity telemetry, each labelled with the window it covers. */
 export const UsageRoute: React.FC = () => {
-  const { capacity, loading, error, refetch, updatedAt } = useCapacityTelemetry();
+  const { capacity, loading, error, stale, refetch, updatedAt } = useCapacityTelemetry();
 
   const providers = capacity?.providers ?? [];
   const requests = providers.reduce((sum, p) => sum + p.totalRequests, 0);
@@ -34,76 +35,40 @@ export const UsageRoute: React.FC = () => {
 
   return (
     <div className="flex flex-col min-h-full">
-      <PageHeader updatedAt={updatedAt} title="Usage" subtitle={`Every total covers ${PROCESS_WINDOW}. Unknown values are shown as — and are never zero.`} counts={counts} />
+      <PageHeader
+        updatedAt={updatedAt}
+        title="Usage"
+        subtitle="Capacity and limits"
+        counts={counts}
+        notReported={[
+          ...NOT_REPORTED,
+          ...(capacity && providers.length === 0
+            ? [{ label: 'provider usage', reason: 'No provider has recorded a request in this runtime process yet' }]
+            : [])
+        ]}
+      />
 
       <div className="flex-1 flex flex-col gap-6 p-6">
+        {stale && <StaleNotice label="Capacity telemetry" error={error} onRetry={refetch} />}
         {loading && !capacity && <Card><LoadingState label="Loading capacity telemetry…" /></Card>}
         {error && !capacity && <Card><ErrorState label="Capacity telemetry" error={error} onRetry={refetch} /></Card>}
 
         {capacity && (
-          <>
-            <section aria-label="Totals" className="grid grid-cols-1 lg:grid-cols-3 gap-5">
-              <Card accent="var(--lys-accent-gold)">
-                <div className="p-5">
-                  <Meter
-                    label="TOKENS"
-                    value={capacity.summary?.totalTokens}
-                    unit="tok"
-                    window={PROCESS_WINDOW}
-                    unknownReason="Capacity report has no summary"
-                    tone="var(--lys-accent-gold)"
-                    note={capacity.summary ? `${capacity.summary.inputTokens ?? '—'} in · ${capacity.summary.outputTokens ?? '—'} out` : undefined}
-                  />
-                </div>
-              </Card>
-              <Card accent="var(--lys-status-success)">
-                <div className="p-5">
-                  <Meter
-                    label="SUCCESS RATE"
-                    value={aggregateRate}
-                    limit={100}
-                    unit="%"
-                    window={PROCESS_WINDOW}
-                    unknownReason="No requests have been made, so no success rate exists"
-                    tone="var(--lys-status-success)"
-                    note={`${requests} requests · ${capacity.summary?.totalFailures ?? requests - successes} failed`}
-                  />
-                </div>
-              </Card>
-              <Card accent="var(--lys-status-warning)">
-                <div className="p-5">
-                  <Meter
-                    label="THROTTLING EVENTS"
-                    value={capacity.summary?.totalThrottlingEvents}
-                    window={PROCESS_WINDOW}
-                    unknownReason="Capacity report has no summary"
-                    tone="var(--lys-status-warning)"
-                    note={`${capacity.jobsTracked ?? '—'} jobs tracked`}
-                  />
-                </div>
-              </Card>
-            </section>
-
-            {providers.length > 0 && (
-              <section aria-label="Provider meters" className="grid grid-cols-1 xl:grid-cols-2 gap-5">
+          <div className="flex flex-col gap-4">
+            <div className="text-[11px] text-lys-faint">since runtime start (process lifetime, not daily)</div>
+            {providers.length === 0 ? (
+              <Card><EmptyState>No provider usage</EmptyState></Card>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-5">
                 {providers.map((p) => (
                   <Card key={p.providerId} label={`Meters for ${p.providerId}`}>
                     <ProviderMeters provider={p} />
                   </Card>
                 ))}
-              </section>
+              </div>
             )}
-          </>
+          </div>
         )}
-
-        <NotReported
-          items={[
-            ...NOT_REPORTED,
-            ...(capacity && providers.length === 0
-              ? [{ label: 'provider usage', reason: 'No provider has recorded a request in this runtime process yet' }]
-              : [])
-          ]}
-        />
       </div>
     </div>
   );

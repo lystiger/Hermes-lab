@@ -24,7 +24,7 @@ export const SettingsRoute: React.FC = () => {
 
   return (
     <div className="flex flex-col min-h-full select-none bg-lys-base">
-      <PageHeader title="Settings" subtitle="Runtime endpoints, policy as Hermes reports it, and local presentation" />
+      <PageHeader title="Settings" subtitle="Runtime and presentation" />
       {/* Top Split: Runtime vs Budget/Policy */}
       <div className="flex flex-col lg:flex-row items-stretch border-b border-lys-subtle">
         {/* Left Column: Runtime & Environment */}

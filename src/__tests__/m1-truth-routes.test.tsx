@@ -115,10 +115,10 @@ describe('M1 truth sweep: HTTP-mode screens render only real data', () => {
     expect(metricValue('BLOCKED')).toBe('0');
     expect(metricValue('FAILED 24H')).toBe('0');
     // Process total since runtime start, from the observed capacity report; never labelled as today.
-    expect(metricValue('TOKENS · SINCE START')).toMatch(/^0/);
+    expect(metricValue('TOKENS')).toMatch(/^0/);
     // Spend and budget are unknown-only, so they are listed on the not-reported line instead of a panel.
     expect(screen.getByText('estimated spend')).toBeInTheDocument();
-    expect(screen.getByText(/counts from the latest \d+ jobs/)).toBeInTheDocument();
+    expect(screen.getByText(/Not reported by Hermes/)).toBeInTheDocument();
 
     expect(await screen.findByText('provider usage')).toBeInTheDocument();
     expectNoFabrication(container);
@@ -142,7 +142,7 @@ describe('M1 truth sweep: HTTP-mode screens render only real data', () => {
     installLiveHermes();
     const { container } = renderIn(<QueueRoute />);
 
-    expect((await screen.findAllByText(/in the latest sample/)).length).toBeGreaterThan(0);
+    expect(await screen.findByRole('region', { name: 'Mission board' })).toBeInTheDocument();
     expect(screen.getByText('time estimates')).toBeInTheDocument();
     expect(container.textContent).not.toContain(LIVE_JOB_ID.slice(0, 8) + ' · build');
     expectNoFabrication(container);
@@ -152,7 +152,7 @@ describe('M1 truth sweep: HTTP-mode screens render only real data', () => {
     installLiveHermes();
     const { container } = renderIn(<UsageRoute />);
 
-    expect(await screen.findByText(/Every total covers/)).toBeInTheDocument();
+    expect(await screen.findByText(/Since runtime start/i)).toBeInTheDocument();
     expect(screen.getByText('run budget')).toBeInTheDocument();
     expect(screen.getByText(/Not reported by Hermes/)).toBeInTheDocument();
     expectNoFabrication(container);
@@ -205,7 +205,7 @@ describe('M1 truth sweep: HTTP-mode screens render only real data', () => {
     installLiveHermes();
     renderIn(<EventsRoute />, '/events');
     // With no events, the category pills offer only "All", and the log says so.
-    expect(screen.getByText(/No events received yet/)).toBeInTheDocument();
+    expect(screen.getByText('No events')).toBeInTheDocument();
   });
 
   it('Sidebar: Herdr is shown as available on PATH, not online, and Hermes status comes from the connection', async () => {

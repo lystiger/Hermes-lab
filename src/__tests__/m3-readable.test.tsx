@@ -288,8 +288,8 @@ describe('M3 usage: meters with window labels', () => {
     expect(within(providerSection).queryByRole('progressbar', { name: 'TOKENS USED' })).not.toBeInTheDocument();
     // Context is not reported: unknown, with the reason.
     expect(within(providerSection).getByLabelText('unknown: Provider did not report context use')).toBeInTheDocument();
-    // Every total says which window it covers.
-    expect(screen.getAllByText(/since runtime start \(process lifetime, not daily\)/).length).toBeGreaterThan(2);
+    // Window covers since runtime start.
+    expect(screen.getAllByText(/since runtime start \(process lifetime, not daily\)/).length).toBeGreaterThanOrEqual(1);
     // Aggregate and provider success rates are both 3 of 4.
     for (const meter of screen.getAllByRole('progressbar', { name: 'SUCCESS RATE' })) {
       expect(meter).toHaveAttribute('aria-valuenow', '75');

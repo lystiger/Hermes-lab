@@ -272,11 +272,13 @@
   }
 }
 
-/* Card system (research §2.3, §6): chamfered corners, layered surface, hairline border. */
+/* Unified card system: clean border radius, layered surface, hairline border. */
 .lys-card-outer {
-  clip-path: polygon(0 0, calc(100% - 12px) 0, 100% 12px, 100% 100%, 12px 100%, 0 calc(100% - 12px));
+  border-radius: var(--lys-radius-md);
+  overflow: hidden;
 }
 
 .lys-card-inner {
-  clip-path: polygon(0 0, calc(100% - 11px) 0, 100% 11px, 100% 100%, 11px 100%, 0 calc(100% - 11px));
+  border-radius: calc(var(--lys-radius-md) - 1px);
+  overflow: hidden;
 }

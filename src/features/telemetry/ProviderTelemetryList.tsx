@@ -4,7 +4,7 @@ import { CAPACITY_WINDOW_LABEL } from '../../api/mapping';
 import { ProviderTelemetry, UsageSnapshotView } from '../../api/types';
 import { EmptyState, ErrorState, Freshness, LoadingState, UNKNOWN, UnknownValue, isKnown } from '../../components/DataStates';
 
-const NO_PROVIDERS = 'No provider usage reported by Hermes. The provider registry has recorded no requests yet.';
+const NO_PROVIDERS = 'No provider usage';
 
 /** Label for where a usage figure came from. Estimates are never shown as provider-reported facts. */
 export function sourceLabel(source: string | null | undefined): { text: string; color: string } {
@@ -57,9 +57,8 @@ const ProviderRow: React.FC<{ provider: ProviderTelemetry; compact: boolean }> =
         </div>
       )}
 
-      <div className="mt-2 flex flex-wrap justify-between gap-2 text-lys-faint">
+      <div className="mt-2 flex items-center justify-between text-lys-faint">
         <span style={{ color: src.color }}>{src.text}</span>
-        <span>{CAPACITY_WINDOW_LABEL}</span>
       </div>
     </div>
   );

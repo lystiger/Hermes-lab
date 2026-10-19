@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { act, fireEvent, render, screen, within } from '@testing-library/react';
+import { act, render, screen, within } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { EventsRoute } from '../routes/events';
 import { OverviewRoute } from '../routes/index';

@@ -96,28 +96,37 @@ export const EventsRoute: React.FC = () => {
 
   return (
     <div className="flex flex-col min-h-full">
-      <PageHeader updatedAt={allEvents[0] ? allEvents[0].rawTs * 1000 : null} title="Events" subtitle="Runtime log · live bus buffer, newest first · click a row for its payload" counts={pageCounts} />
+      <PageHeader
+        updatedAt={allEvents[0] ? allEvents[0].rawTs * 1000 : null}
+        title="Events"
+        subtitle="Live bus buffer"
+        counts={pageCounts}
+      />
 
       <div ref={anchorRef} className="flex-1 p-6 flex flex-col">
         <Card label="Event log" className="h-full">
           <div className="flex flex-col">
-            <div className="flex flex-wrap items-center justify-between gap-3 px-5 py-4 border-b border-lys-subtle">
-              <div className="flex flex-col gap-2 min-w-0">
+            <div className="flex flex-wrap items-center justify-between gap-3 px-5 py-3 border-b border-lys-subtle">
+              <div className="flex flex-wrap items-center gap-3 min-w-0">
                 <FilterPills label="Filter events by category" options={categoryOptions} value={category} onChange={(id) => setCategory(id as 'ALL' | EventCategory)} />
+                <div className="h-4 w-px bg-lys-subtle hidden lg:block" />
                 <FilterPills label="Filter events by source" options={sourceOptions} value={source} onChange={setSource} />
               </div>
-              <span className="text-[12px] text-lys-faint">{shown.length} of {allEvents.length} shown</span>
+              <span className="text-[12px] text-lys-faint whitespace-nowrap">{shown.length} of {allEvents.length} shown</span>
             </div>
 
-            <div className="flex items-center gap-4 px-5 py-2 border-b border-lys-subtle text-[10px] tracking-wider uppercase text-lys-faint bg-lys-surface-0">
-              <span className="w-24 shrink-0">Time</span>
-              <span className="w-4 shrink-0">Sev</span>
-              <span className="min-w-0">Event</span>
+            <div className="hidden sm:grid grid-cols-[80px_16px_110px_120px_minmax(0,1fr)_120px] items-center gap-3 px-5 py-2 border-b border-lys-subtle text-[10px] font-medium tracking-wider uppercase text-lys-faint bg-lys-surface-0 select-none">
+              <span>Time</span>
+              <span>Sev</span>
+              <span>Source</span>
+              <span>Kind</span>
+              <span>Detail</span>
+              <span className="text-right">Job / Run</span>
             </div>
 
             <div ref={listRef} role="log" aria-live="polite" aria-relevant="additions text" aria-label="Events" className="flex flex-col">
               {shown.length === 0 && (
-                <EmptyState art={HERMES_ART}>{allEvents.length === 0 ? 'No events received yet. The log fills as Hermes emits them.' : 'No events match these filters.'}</EmptyState>
+                <EmptyState art={HERMES_ART}>{allEvents.length === 0 ? 'No events' : 'No matching events'}</EmptyState>
               )}
               {shown.map((e) => {
                 const severity = eventSeverity(e.kind);
@@ -129,37 +138,35 @@ export const EventsRoute: React.FC = () => {
                       data-nav-item
                       aria-expanded={isOpen}
                       onClick={() => setExpanded(isOpen ? null : e.id)}
-                      className="w-full grid grid-cols-[auto_auto_minmax(0,1fr)] gap-x-4 gap-y-0.5 px-5 py-2 text-[12px] text-left hover:bg-lys-surface-2 cursor-pointer"
+                      className="w-full grid grid-cols-[80px_16px_110px_120px_minmax(0,1fr)_120px] items-center gap-3 px-5 py-2 text-[12px] text-left hover:bg-lys-surface-2 cursor-pointer transition-colors"
                       style={{ backgroundColor: severity === 'error' ? 'color-mix(in srgb, var(--lys-status-danger) 7%, transparent)' : severity === 'warn' ? 'color-mix(in srgb, var(--lys-status-warning) 5%, transparent)' : undefined }}
                     >
-                      <span className="font-mono-code text-lys-faint whitespace-nowrap pt-0.5">{eventTime(e)}</span>
-                      <span className="pt-1.5" aria-label={`severity ${severity}`} title={severity}>
+                      <span className="font-mono-code text-lys-faint whitespace-nowrap text-[11px]">{eventTime(e)}</span>
+                      <span className="flex items-center justify-center" aria-label={`severity ${severity}`} title={severity}>
                         <span className="inline-block w-1.5 h-1.5 rounded-full" style={{ backgroundColor: SEVERITY_COLOR[severity] }} />
                       </span>
-                      <span className="min-w-0 flex flex-col gap-0.5">
-                        <span className="flex flex-wrap items-baseline gap-x-3">
-                          <span className="font-semibold break-words" style={{ color: e.source.accentColor || 'var(--lys-text-muted)' }}>{traceSourceName(e.source)}</span>
-                          <span className="font-medium break-all" style={{ color: eventKindColor(e.kind) }}>{e.kind}</span>
-                        </span>
-                        <span className="text-lys-secondary break-words">{e.detail}</span>
-                        {(e.jobId || e.runId) && (
-                          <span className="font-mono-code text-[11px] text-lys-faint break-all">
-                            {e.jobId ? `job ${e.jobId}` : ''}{e.jobId && e.runId ? ' · ' : ''}{e.runId ? `run ${e.runId}` : ''}
-                          </span>
-                        )}
+                      <span className="font-semibold truncate text-[12px]" title={traceSourceName(e.source)} style={{ color: e.source.accentColor || 'var(--lys-text-muted)' }}>
+                        {traceSourceName(e.source)}
+                      </span>
+                      <span className="font-mono-code text-[11px] truncate" title={e.kind} style={{ color: eventKindColor(e.kind) }}>
+                        {e.kind}
+                      </span>
+                      <span className="text-lys-secondary truncate min-w-0" title={e.detail}>{e.detail}</span>
+                      <span className="font-mono-code text-[11px] text-lys-faint truncate text-right" title={e.jobId || e.runId || undefined}>
+                        {e.jobId ? e.jobId : e.runId ? e.runId : ''}
                       </span>
                     </button>
 
                     {isOpen && (
-                      <div className="px-5 pb-4 pt-1 bg-lys-surface-0 flex flex-col gap-2">
+                      <div className="px-5 pb-4 pt-2 bg-lys-surface-0 border-t border-lys-subtle flex flex-col gap-2">
                         <div className="flex flex-wrap items-center gap-4 text-[12px] text-lys-muted">
-                          <span>id <CopyId value={e.id} /></span>
+                          <span>id <CopyId value={e.id} truncate /></span>
                           {e.jobId && <span>job <button type="button" onClick={() => setActiveModalJobId(e.jobId!)} className="text-lys-gold underline cursor-pointer font-mono-code">{e.jobId}</button></span>}
-                          {e.runId && <span>run <CopyId value={e.runId} /></span>}
-                          {e.taskId && <span>task <CopyId value={e.taskId} /></span>}
-                          {e.actorId && <span>actor <CopyId value={e.actorId} /></span>}
+                          {e.runId && <span>run <CopyId value={e.runId} truncate /></span>}
+                          {e.taskId && <span>task <CopyId value={e.taskId} truncate /></span>}
+                          {e.actorId && <span>actor <CopyId value={e.actorId} truncate /></span>}
                         </div>
-                        <pre className="font-mono-code text-[11px] text-lys-secondary bg-lys-base border border-lys-subtle p-3 overflow-x-auto">
+                        <pre className="font-mono-code text-[11px] text-lys-secondary bg-lys-base border border-lys-subtle p-3 overflow-x-auto rounded-sm">
                           {JSON.stringify(e, null, 2)}
                         </pre>
                       </div>

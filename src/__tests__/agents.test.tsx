@@ -86,7 +86,7 @@ describe('Agent UI & Portrait Fallbacks', () => {
 
     // The name appears in the roster and as the dossier heading; the heading is the dossier.
     expect(await screen.findByRole('heading', { name: 'Claude' })).toBeInTheDocument();
-    expect(screen.getByText('view character sheet')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /character sheet/i })).toBeInTheDocument();
   });
 
   it('renders Agent Detail without view character sheet when characterCardUrl is not present', async () => {
@@ -99,6 +99,6 @@ describe('Agent UI & Portrait Fallbacks', () => {
     );
 
     expect(await screen.findByText('Unknown-subagent')).toBeInTheDocument();
-    expect(screen.queryByText('view character sheet')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /character sheet/i })).not.toBeInTheDocument();
   });
 });

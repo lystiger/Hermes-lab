@@ -176,7 +176,7 @@ describe('M2 provider telemetry: labelled as process lifetime, never daily', () 
   it('shows an honest empty state for an empty registry', async () => {
     installLiveHermes();
     renderIn(<ProviderTelemetryList />);
-    expect(await screen.findByText(/No provider usage reported by Hermes/)).toBeInTheDocument();
+    expect(await screen.findByText('No provider usage')).toBeInTheDocument();
   });
 
   it('shows the capacity error with retry when the report cannot be loaded', async () => {
@@ -200,7 +200,6 @@ describe('M2 recoverable jobs and thread errors', () => {
     expect(screen.getByText(/Recoverable · 1 · read-only/)).toBeInTheDocument();
     // Exact action names only: the queue's "Cancelled" status filter is not an action.
     expect(screen.queryByRole('button', { name: /^(resume|cancel)( job)?$/i })).not.toBeInTheDocument();
-    expect(screen.getByText('Resume and cancel are not available from this console.')).toBeInTheDocument();
   });
 
   it('shows a missing thread as an error, not as an empty conversation', async () => {

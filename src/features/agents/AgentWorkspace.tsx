@@ -40,14 +40,14 @@ export const AgentWorkspace: React.FC<{ selectedId?: string }> = ({ selectedId }
 
       <div className="flex-1 min-w-0 flex flex-col">
         {!effectiveId && !roster.loading && !roster.error && (
-          <EmptyState>Select an agent once Hermes reports one.</EmptyState>
+          <EmptyState>No agent selected</EmptyState>
         )}
         {effectiveId && detail.loading && !detail.agent && <LoadingState label={`Loading ${effectiveId}…`} />}
         {effectiveId && detail.error && !detail.agent && (
           <ErrorState label={`Agent ${effectiveId}`} error={detail.error} onRetry={detail.refetch} />
         )}
         {effectiveId && !detail.loading && !detail.error && !detail.agent && (
-          <EmptyState>Agent {effectiveId} is not in the Hermes registry.</EmptyState>
+          <EmptyState>Agent not found</EmptyState>
         )}
         {detail.agent && detail.stale && (
           <div className="p-3">

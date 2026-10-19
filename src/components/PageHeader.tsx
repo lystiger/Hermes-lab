@@ -1,5 +1,6 @@
 import React from 'react';
 import { Freshness } from './DataStates';
+import { HeaderNotReported, NotReportedItem } from './NotReported';
 
 export interface HeaderCount {
   label: string;
@@ -10,36 +11,45 @@ export interface HeaderCount {
   title?: string;
 }
 
-/** Page header (research §2.2): display-font title, subtitle, and live counts with small dim units. */
+/** Unified page header: title row with right-aligned freshness/actions, and an equal-column stat strip. */
 export const PageHeader: React.FC<{
   title: string;
   subtitle?: React.ReactNode;
   counts?: HeaderCount[];
   actions?: React.ReactNode;
+  notReported?: NotReportedItem[];
   /** When the page's data was last updated from Hermes (epoch ms). Shown as "updated HH:MM:SS". */
   updatedAt?: number | null;
-}> = ({ title, subtitle, counts = [], actions, updatedAt }) => (
-  <header className="sticky top-0 z-20 px-6 pt-6 pb-5 border-b border-lys-subtle bg-lys-surface-0 flex flex-col gap-4">
-    <div className="flex flex-wrap items-end justify-between gap-4">
-      <div className="min-w-0">
-        <h1 className="font-display text-[30px] leading-none font-semibold text-lys-primary break-words">{title}</h1>
-        {subtitle && <p className="mt-2 text-[13px] text-lys-muted break-words">{subtitle}</p>}
+}> = ({ title, subtitle, counts = [], actions, notReported, updatedAt }) => (
+  <header className="sticky top-0 z-20 px-6 pt-5 pb-4 border-b border-lys-subtle bg-lys-surface-0 flex flex-col gap-3">
+    <div className="flex flex-wrap items-center justify-between gap-4">
+      <div className="min-w-0 flex items-baseline gap-3">
+        <h1 className="font-display text-[26px] sm:text-[28px] leading-none font-semibold text-lys-primary truncate">
+          {title}
+        </h1>
+        {subtitle && <span className="text-[12px] text-lys-muted truncate">{subtitle}</span>}
       </div>
-      <div className="flex flex-wrap items-center gap-3">
+      <div className="flex items-center gap-3">
+        {notReported && notReported.length > 0 && <HeaderNotReported items={notReported} />}
         {updatedAt !== undefined && <Freshness at={updatedAt} />}
         {actions && <div className="flex items-center gap-2">{actions}</div>}
       </div>
     </div>
     {counts.length > 0 && (
-      <dl className="flex flex-wrap gap-x-10 gap-y-3">
+      <dl className="grid grid-flow-col auto-cols-fr gap-4 pt-3 border-t border-lys-subtle/50 min-h-[58px] items-end">
         {counts.map((c) => (
-          <div key={c.label} className="flex flex-col gap-1 min-w-[90px]" title={c.title}>
-            <dt className="text-[11px] tracking-wider uppercase text-lys-faint">{c.label}</dt>
+          <div key={c.label} className="flex flex-col gap-1 min-w-0" title={c.title}>
+            <dt className="text-[11px] font-medium tracking-wider uppercase text-lys-faint truncate">{c.label}</dt>
             <dd className="flex items-baseline gap-1.5">
-              <span className="font-display text-[28px] leading-none font-semibold lys-metric" style={{ color: c.tone ?? 'var(--lys-text-primary)' }}>
+              <span
+                className="font-display text-[26px] sm:text-[28px] leading-none font-semibold lys-metric"
+                style={{ color: c.tone ?? 'var(--lys-text-primary)' }}
+              >
                 {c.value}
               </span>
-              {c.unit && <span className="text-[12px] text-lys-faint">{c.unit}</span>}
+              {c.unit && c.value !== 0 && c.value !== '0' && (
+                <span className="text-[12px] text-lys-faint font-normal">{c.unit}</span>
+              )}
             </dd>
           </div>
         ))}

@@ -27,6 +27,9 @@ class AgentStateReducer:
         meta = metadata or {}
 
         if kind == "agent.started":
+            if "model" in meta:
+                from agent_models import model_registry
+                model_registry.record(source_id, meta)
             task_description = (
                 meta.get("task")
                 or meta.get("phase")

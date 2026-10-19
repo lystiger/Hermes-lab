@@ -55,6 +55,7 @@ class ClaudeAdapter(AgentAdapter):
     name = "claude"
 
     def build_command(self, prompt, options, worktree=None):
+        options = self.model_options(options)
         allowed_tools = options.get("allowed_tools", ["Bash", "Edit", "Write"])
         if isinstance(allowed_tools, str):
             allowed_tools = [allowed_tools]
@@ -64,12 +65,10 @@ class ClaudeAdapter(AgentAdapter):
         disallowed_tools = tuple(
             dict.fromkeys((*CLAUDE_GIT_MUTATION_DENIALS, *extra_denials))
         )
-        return [
+        command = [
             "claude",
             "-p",
             argv_safe_prompt(prompt),
-            "--model",
-            options.get("model", "sonnet"),
             "--max-turns",
             str(options.get("max_turns", 30)),
             "--permission-mode",
@@ -81,6 +80,10 @@ class ClaudeAdapter(AgentAdapter):
             "--disallowedTools",
             ",".join(disallowed_tools),
         ]
+
+        if options.get("model"):
+            command[3:3] = ["--model", options["model"]]
+        return command
 
     @staticmethod
     def parse_json(stdout_text, stderr_text="", options=None, metadata=None, phase=None, worktree=None):

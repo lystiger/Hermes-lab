@@ -602,3 +602,21 @@ free seat, one agent at a time per seat, with one reserved "hot seat" for priori
 10. **Follow-ups.** The long-lived sessionful hot seat (retaining agent session state across tasks) is out of scope here
     and tracked as a future follow-up.
 
+
+## D-020: Model registry (2026-10-19)
+
+### Decisions
+
+1. **Hermes owns model choices.** Each registered agent has an allowlist and a configured default in
+   `config/agent_models.json` (local, ignored); the example file ships safe fallback lists. Claude uses
+   `sonnet`, `opus`, `haiku`; Codex adds the local CLI config model; agy discovers models with a 60 s cache.
+2. **API.** `GET /agents/models` exposes configured default/effort, allowed models and lastUsed.
+   `PUT /agents/{id}/model` validates against the server allowlist and atomically persists the setting.
+   Browser model strings never reach a CLI without this validation.
+3. **Phase boundary.** Changes apply to the next phase only. Explicit phase model options win over
+   configured defaults; absent either, the CLI chooses. A running phase retains its resolved setting.
+4. **Configured and used are distinct.** `/agents` shows the configured default (or null).
+   `agent.started` records model, effort and source (`phase`, `config`, `cli-default`); lastUsed retains
+   that run setting separately. A CLI-selected model remains null when its identity is unknown.
+5. **Effort is part of the setting.** Codex reasoning effort and agy effort persist alongside the model;
+   Codex receives `model_reasoning_effort`, agy receives `--effort`. Claude has no effort setting here.

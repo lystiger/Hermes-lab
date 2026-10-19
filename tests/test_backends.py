@@ -7,6 +7,8 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import threading
+import time
 import unittest
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -21,7 +23,7 @@ HermesSprintRunner = RUNNER_MODULE.HermesSprintRunner
 SprintRunnerError = RUNNER_MODULE.SprintRunnerError
 
 from backends.base import ExecutionRequest
-from backends.herdr_backend import HerdrBackend
+from backends.herdr_backend import HerdrBackend, Seat, SeatPool
 from backends.registry import BackendRegistry, default_backend_registry
 from backends.subprocess_backend import SubprocessBackend
 
@@ -475,6 +477,363 @@ class TestHerdrBackend(BackendTestCase):
             command = backend._run_process.call_args.args[0]
             self.assertEqual(command, ["herdr", "workspace", "close", "owned-workspace"])
             self.assertNotIn("unrelated-workspace", command)
+
+
+class FakeHerdrForSeatPool:
+    def __init__(self, workspace_id="ws-pool", root_pane_id="root-pool"):
+        self.workspace_id = workspace_id
+        self.root_pane_id = root_pane_id
+        self._lock = threading.Lock()
+        self.pane_counter = 0
+        self.panes = {}
+        self.commands_run = []
+        self.banners_seen = []
+        self.interrupts = []
+        self.slow_delay = 0.0
+
+    def __call__(self, command, **kwargs):
+        with self._lock:
+            self.commands_run.append(list(command))
+            sub = command[1:3]
+            if sub == ["api", "snapshot"]:
+                return completed(command, stdout="{}")
+            if sub == ["workspace", "create"]:
+                return completed(
+                    command,
+                    stdout=json.dumps({
+                        "result": {
+                            "workspace": {"workspace_id": self.workspace_id},
+                            "root_pane": {"pane_id": self.root_pane_id},
+                        }
+                    }),
+                )
+            if sub == ["pane", "split"]:
+                self.pane_counter += 1
+                pid = f"pane-{self.pane_counter}"
+                self.panes[pid] = None
+                return completed(
+                    command,
+                    stdout=json.dumps({"result": {"pane": {"pane_id": pid}}}),
+                )
+            if sub == ["pane", "rename"]:
+                pid = command[3]
+                label = command[4]
+                self.panes[pid] = label
+                return completed(command, stdout="{}")
+            if sub == ["pane", "run"]:
+                wrapper_cmd = command[-1]
+                run_res = subprocess.run(
+                    shlex.split(wrapper_cmd),
+                    capture_output=True,
+                    text=True,
+                    timeout=10,
+                )
+                if run_res.stdout:
+                    for line in run_res.stdout.splitlines():
+                        if line.startswith("=== [seat:"):
+                            self.banners_seen.append(line)
+                return completed(command, stdout="")
+            if sub == ["pane", "wait-output"]:
+                if self.slow_delay > 0:
+                    time.sleep(self.slow_delay)
+                return completed(command, stdout="{}")
+            if sub == ["pane", "send-keys"]:
+                pid = command[3]
+                self.interrupts.append(pid)
+                return completed(command, stdout="{}")
+            if sub == ["workspace", "close"]:
+                return completed(command, stdout="{}")
+            raise AssertionError(f"Unexpected Herdr command: {command}")
+
+
+class TestHerdrSeatPool(BackendTestCase):
+    def setUp(self):
+        super().setUp()
+        SeatPool.reset()
+
+    def tearDown(self):
+        SeatPool.reset()
+        super().tearDown()
+
+    def test_disabled_by_default(self):
+        with tempfile.TemporaryDirectory() as temporary_dir:
+            fake = FakeHerdrForSeatPool()
+            events_seen = []
+            backend = HerdrBackend(
+                run_dir=temporary_dir,
+                sprint_id="lab-test",
+                run_process=fake,
+                which_func=lambda ex: f"/usr/bin/{ex}",
+                event_sink=events_seen.append,
+            )
+            self.assertIsNone(backend.seat_pool)
+            req = self.make_request(temporary_dir)
+            res = backend.execute(req)
+            self.assertEqual(res.returncode, 0)
+            self.assertNotIn("herdr_seat", res.runtime_metadata)
+            self.assertEqual(fake.banners_seen, [])
+            acquired_events = [e for e in events_seen if e.kind == "execution.resource_acquired"]
+            self.assertEqual(len(acquired_events), 1)
+            self.assertEqual(acquired_events[0].metadata["resource"]["kind"], "pane")
+
+    def test_two_concurrent_phases_get_different_seats(self):
+        with tempfile.TemporaryDirectory() as temporary_dir:
+            fake = FakeHerdrForSeatPool()
+            backend = HerdrBackend(
+                run_dir=temporary_dir,
+                sprint_id="lab-test",
+                run_process=fake,
+                which_func=lambda ex: f"/usr/bin/{ex}",
+                seat_pool={"size": 2, "hot": False},
+            )
+
+            results = []
+            errors = []
+
+            def worker(phase_name):
+                try:
+                    req = self.make_request(
+                        temporary_dir,
+                        command=[sys.executable, "-c", "import time; time.sleep(0.05); print('ok')"],
+                    )
+                    req.metadata["phase"] = phase_name
+                    res = backend.execute(req)
+                    results.append(res)
+                except Exception as exc:
+                    errors.append(exc)
+
+            t1 = threading.Thread(target=worker, args=("phase-1",))
+            t2 = threading.Thread(target=worker, args=("phase-2",))
+            t1.start()
+            t2.start()
+            t1.join()
+            t2.join()
+
+            self.assertEqual(errors, [])
+            self.assertEqual(len(results), 2)
+            seats = {r.runtime_metadata.get("herdr_seat") for r in results}
+            self.assertEqual(seats, {"seat-1", "seat-2"})
+
+    def test_third_phase_waits_and_gets_released_seat(self):
+        with tempfile.TemporaryDirectory() as temporary_dir:
+            fake = FakeHerdrForSeatPool()
+            backend = HerdrBackend(
+                run_dir=temporary_dir,
+                sprint_id="lab-test",
+                run_process=fake,
+                which_func=lambda ex: f"/usr/bin/{ex}",
+                seat_pool={"size": 2, "hot": False, "acquire_timeout_seconds": 5},
+            )
+
+            order = []
+            errors = []
+
+            def worker_slow(phase_name):
+                try:
+                    req = self.make_request(
+                        temporary_dir,
+                        command=[sys.executable, "-c", "import time; time.sleep(0.15); print('slow')"],
+                    )
+                    req.metadata["phase"] = phase_name
+                    res = backend.execute(req)
+                    order.append((phase_name, res.runtime_metadata.get("herdr_seat")))
+                except Exception as exc:
+                    errors.append(exc)
+
+            def worker_waiter(phase_name):
+                try:
+                    time.sleep(0.05)
+                    req = self.make_request(
+                        temporary_dir,
+                        command=[sys.executable, "-c", "print('fast')"],
+                    )
+                    req.metadata["phase"] = phase_name
+                    res = backend.execute(req)
+                    order.append((phase_name, res.runtime_metadata.get("herdr_seat")))
+                except Exception as exc:
+                    errors.append(exc)
+
+            t1 = threading.Thread(target=worker_slow, args=("slow-1",))
+            t2 = threading.Thread(target=worker_slow, args=("slow-2",))
+            t3 = threading.Thread(target=worker_waiter, args=("waiter-3",))
+
+            t1.start()
+            t2.start()
+            t3.start()
+            t1.join()
+            t2.join()
+            t3.join()
+
+            self.assertEqual(errors, [])
+            self.assertEqual(len(order), 3)
+            waiter_record = [item for item in order if item[0] == "waiter-3"][0]
+            self.assertIn(waiter_record[1], {"seat-1", "seat-2"})
+
+    def test_acquire_timeout(self):
+        with tempfile.TemporaryDirectory() as temporary_dir:
+            fake = FakeHerdrForSeatPool()
+            backend = HerdrBackend(
+                run_dir=temporary_dir,
+                sprint_id="lab-test",
+                run_process=fake,
+                which_func=lambda ex: f"/usr/bin/{ex}",
+                seat_pool={"size": 1, "hot": False, "acquire_timeout_seconds": 0.2},
+            )
+
+            started = threading.Event()
+            finish = threading.Event()
+
+            def holder():
+                seat = backend.seat_pool.acquire(
+                    is_hot=False, timeout=2.0, cwd=Path(temporary_dir), backend=backend
+                )
+                started.set()
+                finish.wait()
+                backend.seat_pool.release(seat)
+
+            t = threading.Thread(target=holder)
+            t.start()
+            started.wait()
+
+            try:
+                req = self.make_request(temporary_dir)
+                with self.assertRaises(SprintRunnerError) as ctx:
+                    backend.execute(req)
+                self.assertEqual(ctx.exception.code, "FAILED_SEAT_TIMEOUT")
+                self.assertIn("Timed out waiting for a free Herdr seat", str(ctx.exception))
+            finally:
+                finish.set()
+                t.join()
+
+    def test_hot_seat_only_for_hot_phases_and_available_when_pool_full(self):
+        with tempfile.TemporaryDirectory() as temporary_dir:
+            fake = FakeHerdrForSeatPool()
+            backend = HerdrBackend(
+                run_dir=temporary_dir,
+                sprint_id="lab-test",
+                run_process=fake,
+                which_func=lambda ex: f"/usr/bin/{ex}",
+                seat_pool={"size": 1, "hot": True, "acquire_timeout_seconds": 0.2},
+            )
+
+            seat1 = backend.seat_pool.acquire(is_hot=False, cwd=Path(temporary_dir), backend=backend)
+            self.assertEqual(seat1.label, "seat-1")
+
+            try:
+                normal_req = self.make_request(temporary_dir)
+                with self.assertRaises(SprintRunnerError) as ctx:
+                    backend.execute(normal_req)
+                self.assertEqual(ctx.exception.code, "FAILED_SEAT_TIMEOUT")
+
+                hot_req = self.make_request(temporary_dir)
+                hot_req.metadata["priority"] = "hot"
+                hot_res = backend.execute(hot_req)
+                self.assertEqual(hot_res.runtime_metadata.get("herdr_seat"), "hot")
+            finally:
+                backend.seat_pool.release(seat1)
+
+    def test_release_on_failure_and_cancel(self):
+        with tempfile.TemporaryDirectory() as temporary_dir:
+            fake = FakeHerdrForSeatPool()
+            backend = HerdrBackend(
+                run_dir=temporary_dir,
+                sprint_id="lab-test",
+                run_process=fake,
+                which_func=lambda ex: f"/usr/bin/{ex}",
+                seat_pool={"size": 1, "hot": False, "acquire_timeout_seconds": 1.0},
+            )
+
+            # 1. Non-zero exit code (failure)
+            fail_req = self.make_request(
+                temporary_dir,
+                command=[sys.executable, "-c", "import sys; sys.exit(7)"],
+            )
+            res = backend.execute(fail_req)
+            self.assertEqual(res.returncode, 7)
+            # Seat is released, next execute succeeds
+            ok_req = self.make_request(temporary_dir)
+            ok_res = backend.execute(ok_req)
+            self.assertEqual(ok_res.returncode, 0)
+
+            # 2. Command exception
+            with patch.object(backend, "_run_in_pane", side_effect=SprintRunnerError("FAILED_HERDR_COMMAND", "error")):
+                with self.assertRaises(SprintRunnerError):
+                    backend.execute(fail_req)
+            # Seat is released, next execute succeeds
+            ok_res2 = backend.execute(ok_req)
+            self.assertEqual(ok_res2.returncode, 0)
+
+            # 3. Cancel
+            cancel_backend = HerdrBackend(
+                run_dir=temporary_dir,
+                sprint_id="lab-test",
+                run_process=fake,
+                which_func=lambda ex: f"/usr/bin/{ex}",
+                seat_pool={"size": 1, "hot": False, "acquire_timeout_seconds": 1.0},
+            )
+            cancel_backend.cancel_event.set()
+            with self.assertRaises(SprintRunnerError) as ctx:
+                cancel_backend.execute(ok_req)
+            self.assertEqual(ctx.exception.code, "FAILED_CANCELLED")
+            # Seat is released, next execute with uncancelled backend succeeds
+            ok_res3 = backend.execute(ok_req)
+            self.assertEqual(ok_res3.returncode, 0)
+
+    def test_banner_written(self):
+        with tempfile.TemporaryDirectory() as temporary_dir:
+            fake = FakeHerdrForSeatPool()
+            backend = HerdrBackend(
+                run_dir=temporary_dir,
+                sprint_id="sprint-123",
+                run_process=fake,
+                which_func=lambda ex: f"/usr/bin/{ex}",
+                seat_pool={"size": 2, "hot": True},
+            )
+
+            req = self.make_request(temporary_dir)
+            req.metadata["phase"] = "scaffold"
+            req.metadata["persona"] = "Hermes"
+            backend.execute(req)
+
+            expected_banner = "=== [seat:seat-1] job:sprint-123 phase:scaffold agent:Hermes ==="
+            self.assertIn(expected_banner, fake.banners_seen)
+
+            log_text = backend.commands_log.read_text(encoding="utf-8")
+            self.assertIn("seat_banner", log_text)
+            self.assertIn(expected_banner, log_text)
+
+    def test_state_survives_across_backend_instances(self):
+        with tempfile.TemporaryDirectory() as temporary_dir:
+            fake = FakeHerdrForSeatPool()
+            backend1 = HerdrBackend(
+                run_dir=temporary_dir,
+                sprint_id="shared-sprint",
+                run_process=fake,
+                which_func=lambda ex: f"/usr/bin/{ex}",
+                seat_pool={"size": 2, "hot": True},
+            )
+            req1 = self.make_request(temporary_dir)
+            res1 = backend1.execute(req1)
+            self.assertEqual(res1.runtime_metadata["herdr_seat"], "seat-1")
+            self.assertEqual(res1.runtime_metadata["herdr_pane_id"], "pane-1")
+            self.assertEqual(fake.pane_counter, 1)
+
+            # Clear in-memory pool to simulate fresh process
+            SeatPool.clear_pool(temporary_dir, "shared-sprint")
+
+            backend2 = HerdrBackend(
+                run_dir=temporary_dir,
+                sprint_id="shared-sprint",
+                run_process=fake,
+                which_func=lambda ex: f"/usr/bin/{ex}",
+                seat_pool={"size": 2, "hot": True},
+            )
+            req2 = self.make_request(temporary_dir)
+            res2 = backend2.execute(req2)
+            self.assertEqual(res2.runtime_metadata["herdr_seat"], "seat-1")
+            self.assertEqual(res2.runtime_metadata["herdr_pane_id"], "pane-1")
+            # Did not split a new pane!
+            self.assertEqual(fake.pane_counter, 1)
 
 
 @unittest.skipUnless(

@@ -327,6 +327,35 @@ async def metrics():
     }
 
 
+class AgentModelSetting(BaseModel):
+    model: str
+    effort: Optional[str] = None
+
+
+def registered_model_agent(agent_id):
+    from agent_models import canonical
+    registered = agent_service._registry.supported_agents if agent_service._registry else ("antigravity", "claude", "codex")
+    if canonical(agent_id) not in registered:
+        raise HTTPException(status_code=404, detail="Unknown agent")
+    return canonical(agent_id)
+
+
+@app.get("/agents/models")
+async def get_agent_models():
+    from agent_models import model_registry
+    return {agent["id"]: model_registry.describe(agent["id"]) for agent in agent_service.get_all_agents()}
+
+
+@app.put("/agents/{agent_id}/model")
+async def put_agent_model(agent_id: str, setting: AgentModelSetting):
+    from agent_models import model_registry
+    agent = registered_model_agent(agent_id)
+    try:
+        return model_registry.set(agent, setting.model, setting.effort)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
 @app.get("/agents")
 async def get_agents():
     """

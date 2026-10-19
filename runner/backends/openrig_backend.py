@@ -367,19 +367,23 @@ class OpenRigBackend(ExecutionBackend):
         self._ledger_recorded = set()  # rigIds whose ledger write succeeded
         self._daemon_down = daemon_down or daemon_down_by_id
         # Set by the caller to stop this task out of band. Checked at step boundaries only.
-        self._cancel_event = cancel_event
+        self._cancel_event = cancel_event or threading.Event()
         self._preexisting_rig_ids = set()
 
     # -- contract -------------------------------------------------------------
 
     def execute(self, request):
         trace = self.trace(self.sprint_id, cancel_codes=(CANCELLED_CODE,))
+        from .execution_registry import default_execution_registry
+        default_execution_registry.register_execution(trace.execution_id, self.sprint_id, self, self._cancel_event.set)
         trace.started(f"OpenRig task for agent '{request.agent_name}' started")
         try:
             return self._execute(request, trace)
         except BaseException as exc:
             trace.fail(exc)
             raise
+        finally:
+            default_execution_registry.unregister_execution(trace.execution_id)
 
     def _execute(self, request, trace):
         deadline = self._monotonic() + request.timeout_seconds

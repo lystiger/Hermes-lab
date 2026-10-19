@@ -1,0 +1,5 @@
+{
+  "claude": {"default": null, "effort": null, "allowed": ["sonnet", "opus", "haiku"]},
+  "codex": {"default": null, "effort": null, "allowed": ["gpt-5-codex", "gpt-5.4", "gpt-5.3-codex"]},
+  "antigravity": {"default": null, "effort": null, "allowed": ["gemini-2.5-pro", "gemini-2.5-flash"]}
+}

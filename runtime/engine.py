@@ -424,6 +424,8 @@ class ReactiveJobEngine:
         if not self._pre_cancel_state and self.job.state != JobState.CANCELLED:
             self._pre_cancel_state = self.job.state
 
+        from runner.backends.execution_registry import default_execution_registry
+        default_execution_registry.cancel_job(self.job.job_id)
         self.job.transition_to(JobState.CANCELLED, reason=reason)
         for task in self.graph.list_tasks():
             if task.status in (TaskStatus.RUNNING, TaskStatus.READY, TaskStatus.PENDING):
@@ -450,6 +452,9 @@ class ReactiveJobEngine:
         """
         if self._durable_cancel_completed:
             return False
+
+        from runner.backends.execution_registry import default_execution_registry
+        default_execution_registry.cancel_job(self.job.job_id)
 
         # Milestone 1: Persist job.cancelled event once
         if not self._job_cancel_persisted:

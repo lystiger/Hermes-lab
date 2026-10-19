@@ -17,6 +17,7 @@ import sys
 import json
 import queue
 import threading
+import signal
 import time
 import argparse
 import subprocess
@@ -143,6 +144,7 @@ class HermesSprintRunner:
         self.summary_file = self.run_dir / "run_summary.json"
         self.job_id = os.environ.get("HERMES_JOB_ID") or f"run_{timestamp}_{self.sprint_id}"
         self._backend_cache = {}
+        self._cancel_event = threading.Event()
         self.thread_id = f"thread_job_{self.job_id}"
         self.local_messages = []
         self.local_artifacts = []
@@ -996,13 +998,23 @@ class HermesSprintRunner:
 
     def _get_backend(self, backend_name):
         if backend_name not in self._backend_cache:
+            backend_kwargs = {
+                "run_dir": self.run_dir,
+                "sprint_id": self.sprint_id,
+                "logger": self.logger,
+                "keep_workspace": self.spec.get("keep_herdr_workspace", True),
+                "event_sink": self._publish_execution_event,
+                "cancel_event": self._cancel_event,
+                "cancel_grace_seconds": float(os.environ.get("HERMES_CANCEL_GRACE_SECONDS", "5")),
+            }
+            if "seat_pool" in self.spec:
+                backend_kwargs["seat_pool"] = self.spec["seat_pool"]
+            elif "backend_settings" in self.spec and isinstance(self.spec["backend_settings"], dict) and "seat_pool" in self.spec["backend_settings"]:
+                backend_kwargs["seat_pool"] = self.spec["backend_settings"]["seat_pool"]
+
             self._backend_cache[backend_name] = self.backend_registry.get(
                 backend_name,
-                run_dir=self.run_dir,
-                sprint_id=self.sprint_id,
-                logger=self.logger,
-                keep_workspace=self.spec.get("keep_herdr_workspace", True),
-                event_sink=self._publish_execution_event,
+                **backend_kwargs,
             )
         return self._backend_cache[backend_name]
 
@@ -2350,6 +2362,13 @@ def main():
         export_report=args.export_report,
     )
     
+    # Agent children own separate sessions; forward termination while the runner is alive
+    # so each backend can stop and reap its own resources before the launcher escalates.
+    def cancel_runner(signum, frame):
+        runner._cancel_event.set()
+
+    signal.signal(signal.SIGTERM, cancel_runner)
+    signal.signal(signal.SIGINT, cancel_runner)
     success = runner.execute()
     sys.exit(0 if success else 1)
 

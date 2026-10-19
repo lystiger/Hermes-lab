@@ -2,6 +2,7 @@ import json
 
 from .base import AgentAdapter, argv_safe_prompt
 from .errors import SprintRunnerError
+from .denials import check_denials
 
 
 _CLAUDE_MUTATING_GIT_SUBCOMMANDS = (
@@ -54,6 +55,7 @@ class ClaudeAdapter(AgentAdapter):
     name = "claude"
 
     def build_command(self, prompt, options, worktree=None):
+        options = self.model_options(options)
         allowed_tools = options.get("allowed_tools", ["Bash", "Edit", "Write"])
         if isinstance(allowed_tools, str):
             allowed_tools = [allowed_tools]
@@ -63,12 +65,10 @@ class ClaudeAdapter(AgentAdapter):
         disallowed_tools = tuple(
             dict.fromkeys((*CLAUDE_GIT_MUTATION_DENIALS, *extra_denials))
         )
-        return [
+        command = [
             "claude",
             "-p",
             argv_safe_prompt(prompt),
-            "--model",
-            options.get("model", "sonnet"),
             "--max-turns",
             str(options.get("max_turns", 30)),
             "--permission-mode",
@@ -81,18 +81,16 @@ class ClaudeAdapter(AgentAdapter):
             ",".join(disallowed_tools),
         ]
 
-    def validate_result(self, result, context):
-        self.parse_json(result.stdout or "", result.stderr or "")
+        if options.get("model"):
+            command[3:3] = ["--model", options["model"]]
+        return command
 
     @staticmethod
-    def parse_json(stdout_text, stderr_text=""):
-        if "permission denied" in stderr_text.lower():
-            raise SprintRunnerError(
-                "FAILED_PERMISSION_DENIED",
-                f"Claude permission denied in stderr:\n{stderr_text}",
-            )
+    def parse_json(stdout_text, stderr_text="", options=None, metadata=None, phase=None, worktree=None):
+        stderr_denials = [line for line in stderr_text.splitlines() if "permission denied" in line.lower()]
         cleaned = stdout_text.strip()
         if not cleaned:
+            check_denials(stderr_denials, False, options, metadata, phase, worktree)
             raise SprintRunnerError("FAILED_CLAUDE_EMPTY_OUTPUT", "Claude emitted no output")
 
         try:
@@ -106,10 +104,14 @@ class ClaudeAdapter(AgentAdapter):
                 except json.JSONDecodeError:
                     continue
         if not isinstance(data, dict):
+            check_denials(stderr_denials, False, options, metadata, phase, worktree)
             raise SprintRunnerError(
                 "FAILED_CLAUDE_INVALID_JSON",
                 f"Failed to parse JSON response from Claude: {cleaned[:200]}",
             )
+        check_denials((data.get("permission_denials") or []) + stderr_denials,
+                      bool(str(data.get("result") or "").strip()) and data.get("type") == "result"
+                      and data.get("subtype") == "success" and data.get("is_error") is False, options, metadata, phase, worktree)
         if data.get("type") != "result":
             raise SprintRunnerError(
                 "FAILED_CLAUDE_ERROR",
@@ -131,15 +133,12 @@ class ClaudeAdapter(AgentAdapter):
                 "FAILED_CLAUDE_ERROR",
                 f"Claude execution returned is_error={data.get('is_error')}: {message}",
             )
-        denials = data.get("permission_denials") or []
-        if denials:
-            raise SprintRunnerError(
-                "FAILED_PERMISSION_DENIED", f"Claude encountered permission denials: {denials}"
-            )
         return data
 
     def validate_result(self, result, context):
-        data = self.parse_json(result.stdout or "", result.stderr or "")
+        data = self.parse_json(result.stdout or "", result.stderr or "",
+                               getattr(context, "options", {}), getattr(result, "runtime_metadata", None),
+                               getattr(context, "phase", {}), getattr(context, "worktree", None))
         if isinstance(data, dict):
             if not hasattr(result, "runtime_metadata") or result.runtime_metadata is None:
                 result.runtime_metadata = {}

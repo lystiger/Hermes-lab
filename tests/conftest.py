@@ -15,6 +15,7 @@ os.environ["HERMES_EXECUTION_STATE"] = str(_SESSION_STATE / "execution-registry.
 # Never post test events to a live Hermes API inherited from the developer's shell. Tests that need a
 # control URL (e.g. the cross-process a2a smoke test) start their own server and pass it explicitly.
 os.environ.pop("LYSSTACK_CONTROL_URL", None)
+os.environ["HERMES_AGENT_MODELS"] = str(_SESSION_STATE / "agent_models.json")
 
 ROOT_DIR = Path(__file__).resolve().parent.parent
 if str(ROOT_DIR) not in sys.path:
@@ -37,3 +38,10 @@ def _isolated_openrig_ledger(tmp_path_factory, monkeypatch):
     monkeypatch.setenv("OPENRIG_HOME", str(tmp_path_factory.mktemp("openrig-home")))
     # Never touch the real persisted Execution page state.
     monkeypatch.setenv("HERMES_EXECUTION_STATE", str(tmp_path_factory.mktemp("exec-state") / "registry.json"))
+
+
+@pytest.fixture(autouse=True)
+def _isolated_model_registry(tmp_path, monkeypatch):
+    import agent_models
+    monkeypatch.setattr(agent_models, "model_registry", agent_models.ModelRegistry(
+        tmp_path / "agent_models.json", tmp_path / "codex.toml"))

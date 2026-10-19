@@ -268,4 +268,12 @@ def test_sprint_runner_selects_new_backend_without_runner_changes():
     second = runner._get_backend(runner.resolve_backend_name({}))
 
     assert first is second
-    assert set(first.kwargs) == {"run_dir", "sprint_id", "logger", "keep_workspace", "event_sink"}
+    assert set(first.kwargs) == {
+        "run_dir",
+        "sprint_id",
+        "logger",
+        "keep_workspace",
+        "event_sink",
+        "cancel_event",
+        "cancel_grace_seconds",
+    }

@@ -24,7 +24,6 @@ KNOWN_AGENT_METADATA: Dict[str, Dict[str, Any]] = {
     "gemini": {
         "displayName": "Gemini",
         "provider": "Google AI Studio",
-        "model": "antigravity-2.5-pro",
         "role": "Implementation · scaffolding · migrations",
         "capabilities": ["build", "scaffolding", "migrations", "refactoring"],
         "accentColor": "#5B8CFF",
@@ -34,7 +33,6 @@ KNOWN_AGENT_METADATA: Dict[str, Dict[str, Any]] = {
     "claude": {
         "displayName": "Claude",
         "provider": "Anthropic API",
-        "model": "claude-sonnet-4-5",
         "role": "Architecture · review · hardening · docs",
         "capabilities": ["architecture", "security-review", "hardening", "documentation"],
         "accentColor": "#D9A05B",
@@ -44,7 +42,6 @@ KNOWN_AGENT_METADATA: Dict[str, Dict[str, Any]] = {
     "codex": {
         "displayName": "Codex",
         "provider": "OpenAI",
-        "model": "gpt-5-codex",
         "role": "Verification · tests · static analysis · regressions",
         "capabilities": ["verification", "unit-tests", "static-analysis", "regression-testing"],
         "accentColor": "#4EC9A0",
@@ -122,7 +119,8 @@ class AgentService:
 
             display_name = meta.get("displayName", agent_profile.displayName)
             provider = meta.get("provider", "Dynamic Provider")
-            model = meta.get("model", "unknown")
+            from agent_models import model_registry
+            model = model_registry.configured(raw_name)["default"]
             role = meta.get("role", "Specialized Operative")
             capabilities = meta.get("capabilities", ["general-execution"])
             accent_color = meta.get("accentColor", "#8C949F")

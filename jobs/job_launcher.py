@@ -606,7 +606,7 @@ class JobLauncher:
             pgid = os.getpgid(proc.pid)
             os.killpg(pgid, signal.SIGTERM)
             try:
-                proc.wait(timeout=2.0)
+                proc.wait(timeout=float(os.environ.get("HERMES_CANCEL_GRACE_SECONDS", "5")) + 2.0)
                 killed_successfully = True
             except subprocess.TimeoutExpired:
                 os.killpg(pgid, signal.SIGKILL)
@@ -649,6 +649,8 @@ class JobLauncher:
         Awaits engine.cancel() to guarantee durable event emissions before cancelling the driver task.
         """
         self.reap_finished()
+        from runner.backends.execution_registry import default_execution_registry
+        default_execution_registry.cancel_job(job_id)
 
         # 1. Check active ReactiveJobEngine
         engine = job_service.get_engine(job_id)
@@ -694,6 +696,8 @@ class JobLauncher:
         Synchronously cancels an active job (reactive engine or legacy process).
         """
         self.reap_finished()
+        from runner.backends.execution_registry import default_execution_registry
+        default_execution_registry.cancel_job(job_id)
 
         # 1. Check active ReactiveJobEngine
         engine = job_service.get_engine(job_id)

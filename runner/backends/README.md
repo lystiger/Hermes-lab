@@ -65,8 +65,29 @@ only when that instance's `cleanup()` is a no-op, as in the test doubles.
 - `request.timeout_seconds` is the authoritative bound, and the backend enforces it.
 - `ExecutionManager` also wraps runtime tasks in `asyncio.wait_for`. Because the backend runs in
   `asyncio.to_thread`, an outer timeout or cancel **does not reach the backend** by itself. The contract
-  still has no cancel channel. A backend that needs one takes an optional `cancel_event` at construction
-  (see `OpenRigBackend` → Cancellation). The runtime sets that event when the task's coroutine is cancelled.
+  supports out-of-band cancellation through an optional `cancel_event` at construction and the live
+  execution registry. The runtime sets the event when the task's coroutine is cancelled.
+
+### Job cancellation (M8)
+
+Subprocess agents run with `Popen(start_new_session=True)`. The execution registry keeps each live
+handle and cancellation callback under its executionId and job id, separately from the persisted
+resource rows. `cancel_execution(id)` is a no-op after completion; `cancel_job(job_id)` signals every
+owned live execution without touching another job. Engine and launcher cancellation both call it.
+
+The subprocess worker checks its cancel event every 100 ms, sends SIGTERM to the complete process
+group, waits up to `cancel_grace_seconds` (default 5 seconds), then sends SIGKILL and reaps the leader.
+`HERMES_CANCEL_GRACE_SECONDS` sets the default; a backend constructor can override it. stdout/stderr
+still go to the request's files, and timeout remains `FAILED_TIMEOUT` with partial output captured.
+Cancellation reports `FAILED_CANCELLED`, emits the existing `execution.cancelled` event, then
+`execution.resource_released` with a cancelled reason. No event kinds were added.
+
+Herdr watches the same event and interrupts only its owned worker pane through `_interrupt_pane`.
+Interrupt errors are logged without raising from the cancellation callback. OpenRig's registered
+callback sets its existing cancel event and its normal failure cleanup releases the owned rig by id.
+The registry is local to a process: for legacy jobs the launcher signals the runner, whose SIGTERM /
+SIGINT handlers forward a shared cancel event to its backends. The launcher allows the configured
+subprocess grace period plus two seconds before escalating against the runner itself.
 
 ### Runtime metadata
 
@@ -140,15 +161,33 @@ The endpoint runs the probe in a worker thread (`asyncio.to_thread`). Each reque
 
 - **Runtime path only.** The sprint runner (`run-hermes-sprint.py`) builds backends without an adapter or bridge,
   so it emits no events. Its runs are not visible on `/execution`.
-- **Subprocess resource id.** `subprocess.run` does not expose the child's pid, so the resource id is the
-  executionId and the label is the agent name.
-- **Herdr panes.** A pane is freed (`resource_released`) when its command finishes. The pane itself stays in the
-  workspace when `keep_workspace` is set, and the registry drops it.
+- **Subprocess resource id.** The resource id remains the executionId and the label is the agent name.
+  The live registry separately holds the `Popen` handle; handles are never serialized.
+- **Herdr panes and seats.** When seat pooling is disabled, a pane is freed (`resource_released`) when its command finishes, and the pane stays in the workspace when `keep_workspace` is set. When seat pooling is enabled (D-019), seats (`seat-1` … `seat-N`, `hot`) are leased exclusively and returned to the pool on completion, timeout, or cancellation.
 - **`task_id` is not set.** Backends do not know the runtime task. Events carry `job_id` and `executionId`.
 - **In-process registry.** The snapshot covers this process only. For openrig, the ledger summary covers rigs
   left behind by earlier processes. Other backends have no equivalent.
 - **Drain lifetime.** Events are persisted only while the adapter's loop runs. Events emitted after the loop
   closes (for example an `atexit` drain) reach the registry but not the store.
+
+### Herdr Seat Pool (D-019)
+
+Herdr backend supports pooling a fixed set of named seats (`seat-1` … `seat-N`, plus optional `hot` seat) in a single
+runner workspace, reusing panes across commands rather than splitting a new pane per phase.
+
+Configured via `seat_pool` in the sprint spec or backend settings (default off):
+```json
+"seat_pool": {"size": 5, "hot": true, "acquire_timeout_seconds": 600}
+```
+
+- **Seats:** Created on first use by splitting downward from the root pane and renaming to their seat label (`seat-1`, `hot`).
+- **Assignment:** Normal pool seats (`seat-1` … `seat-N`) are fungible and leased exclusively to any agent for the command duration.
+- **Hot seat:** Dedicated to phases with `"priority": "hot"`. Normal phases never acquire the hot seat; hot phases only use the hot seat, which may run even when all pool seats are busy.
+- **Queueing / Timeout:** When no eligible seat is free, callers wait up to `acquire_timeout_seconds` before raising `SprintRunnerError("FAILED_SEAT_TIMEOUT")`.
+- **Banner:** Each run in a seat prints a visible banner at startup (`=== [seat:<label>] job:<sprint_id> phase:<phase> agent:<agent_name> ===`).
+- **State:** Seat mappings and workspace survive across backend instances for a run via `runtime.json`.
+- **Visibility:** When seat pool is active, resource events report `kind="seat"`, `id="<label>"`, `label="<label>"`.
+
 
 ## Selection
 
@@ -280,8 +319,7 @@ A cancelled seat is never returned to the pool, so the next task launches a new 
 
 - **Who sets it.** `HermesActorAdapter.execute_task` creates one event per task and passes it to the
   backend. It sets the event when the task's coroutine is cancelled. That covers the engine's cancel and
-  the `ExecutionManager` timeout. The sprint runner has no cancel source, so its runs stop only at the
-  timeout.
+  the `ExecutionManager` timeout. The sprint runner also forwards SIGTERM/SIGINT through its shared cancel event.
 - **Latency.** A cancel takes effect at the next poll (about 2 s). If it arrives while a `rig up` or
   `rig send` subprocess is running, it takes effect when that call returns. `rig send` can block for up to
   30 s (`SEND_IDLE_WAIT_SECONDS`).
@@ -319,8 +357,7 @@ them into `TaskExecutionResult.metadata["backend_runtime_metadata"]`.
   `--host` daemons are not supported. The backend and the ledger also accept only canonical OpenRig rigIds (26-character ULIDs). A ledger entry like `kernel` makes the file unreadable: it is kept and
   never released. The ledger is serialized across processes with `flock` on `<ledger dir>/.lock`.
 - The granted root is the worktree parent, so a seat can technically reach sibling worktrees of its job.
-- Cancel is wired only on the runtime path (`HermesActorAdapter`). The sprint runner has no cancel source,
-  so a sprint-runner task still stops only at its timeout. Status polls are capped at
+- Cancel is wired on the runtime path (`HermesActorAdapter`) and through the sprint runner's SIGTERM/SIGINT handlers. Status polls are capped at
   `POLL_QUERY_SECONDS` (10 s) each, so a hung daemon delays a cancel by at most that long. `rig send` runs as an
   interruptible child that checks for cancel every 0.5 s and is killed on cancel. A cancel during an
   in-flight `rig up` is still honored only after that call returns.

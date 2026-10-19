@@ -4,6 +4,7 @@ from typing import Any, Dict, List, Mapping, Optional
 
 from .base import AgentAdapter, argv_safe_prompt
 from .errors import SprintRunnerError
+from .denials import check_denials
 
 
 class CodexAdapter(AgentAdapter):
@@ -23,6 +24,18 @@ class CodexAdapter(AgentAdapter):
         return command
 
     def validate_result(self, result, context):
+        denials = [line for line in (result.stderr or "").splitlines()
+                   if "permission denied" in line.lower()]
+        policy = (getattr(context, "options", {}), getattr(result, "runtime_metadata", None),
+                  getattr(context, "phase", {}), getattr(context, "worktree", None))
+        try:
+            self._validate_result(result, context)
+        except SprintRunnerError:
+            check_denials(denials, False, *policy)
+            raise
+        check_denials(denials, True, *policy)
+
+    def _validate_result(self, result, context):
         cleaned = (result.stdout or "").strip()
         if not cleaned:
             raise SprintRunnerError("FAILED_CODEX_EMPTY_OUTPUT", "Codex emitted no output")

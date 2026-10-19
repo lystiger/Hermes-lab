@@ -1,7 +1,7 @@
 import React, { useRef } from 'react';
 import { Activity, Ban, CircleHelp, CircleSlash, Clock, X, Check, OctagonAlert } from 'lucide-react';
 import { AgentSummary, Job } from '../../api/types';
-import { ACTIVE_JOB_STATUSES } from '../../api/adapters/httpAdapter';
+import { JOB_STATUS_GROUPS } from '../../api/adapters/httpAdapter';
 import { useAgents } from '../../api/hooks';
 import { resolveActorPresentation } from '../../api/actors';
 import { CopyId } from '../../components/CopyId';
@@ -16,13 +16,13 @@ import { formatDateTime } from '../time/format';
  * and by shape (research §2.1): every column header carries a glyph as well as its tone.
  */
 export const BOARD_GROUPS = [
-  { id: 'RUNNING', label: 'Running', icon: Activity, statuses: ACTIVE_JOB_STATUSES, tone: 'var(--lys-status-success)' },
-  { id: 'BLOCKED', label: 'Blocked', icon: OctagonAlert, statuses: ['BLOCKED'], tone: 'var(--lys-status-warning)' },
-  { id: 'QUEUED', label: 'Queued', icon: Clock, statuses: ['QUEUED', 'CLAIMED'], tone: 'var(--lys-text-muted)' },
-  { id: 'FAILED', label: 'Failed', icon: X, statuses: ['FAILED'], tone: 'var(--lys-status-danger)' },
-  { id: 'COMPLETED', label: 'Completed', icon: Check, statuses: ['COMPLETED'], tone: 'var(--lys-text-faint)' },
-  { id: 'CANCELLED', label: 'Cancelled', icon: CircleSlash, statuses: ['CANCELLED'], tone: 'var(--lys-text-faint)' }
-];
+  { id: 'RUNNING', label: 'Running', icon: Activity, tone: 'var(--lys-status-success)' },
+  { id: 'BLOCKED', label: 'Blocked', icon: OctagonAlert, tone: 'var(--lys-status-warning)' },
+  { id: 'QUEUED', label: 'Queued', icon: Clock, tone: 'var(--lys-text-muted)' },
+  { id: 'FAILED', label: 'Failed', icon: X, tone: 'var(--lys-status-danger)' },
+  { id: 'COMPLETED', label: 'Completed', icon: Check, tone: 'var(--lys-text-faint)' },
+  { id: 'CANCELLED', label: 'Cancelled', icon: CircleSlash, tone: 'var(--lys-text-faint)' }
+].map((group) => ({ ...group, statuses: JOB_STATUS_GROUPS[group.id as keyof typeof JOB_STATUS_GROUPS] }));
 
 const PRIORITY_COLOR: Record<string, string> = {
   P0: 'var(--lys-status-danger)',

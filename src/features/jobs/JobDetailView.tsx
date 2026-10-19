@@ -35,7 +35,7 @@ export const JobDetailView: React.FC<JobDetailViewProps> = ({ jobId = '' }) => {
   if (!job) {
     return (
       <div className="w-full p-12 bg-lys-base font-sans text-[12px] text-lys-muted flex items-center justify-center">
-        <span>Job '{jobId}' not found or not loaded.</span>
+        <span>No job loaded</span>
       </div>
     );
   }

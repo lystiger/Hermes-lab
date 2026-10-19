@@ -50,11 +50,15 @@ export const ExecutionResourceCard: React.FC<ExecutionResourceCardProps> = ({ re
         {expiry && <span className="text-lys-gold">{expiry}</span>}
       </div>
 
-      <div className="flex flex-col gap-0.5 text-lys-muted">
-        <span className="break-words">
+      <div className="flex flex-col gap-0.5 text-lys-muted min-w-0">
+        <span className="truncate" title={resource.jobId || '—'}>
           job <span className="text-lys-primary">{resource.jobId || '—'}</span>
-          {resource.taskId ? <> · task <span className="text-lys-primary">{resource.taskId}</span></> : null}
         </span>
+        {resource.taskId && (
+          <span className="truncate" title={resource.taskId}>
+            task <span className="text-lys-primary">{resource.taskId}</span>
+          </span>
+        )}
         {resource.executionId && (
           <span className="break-all text-lys-faint">exec {resource.executionId}</span>
         )}

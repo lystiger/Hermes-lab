@@ -39,7 +39,18 @@ import {
 } from '../mapping';
 
 /** Jobs that are being worked on right now. Anything else is queued, blocked, or terminal. */
-export const ACTIVE_JOB_STATUSES = ['RUNNING', 'PLANNING', 'PREPARING', 'VERIFYING', 'REPAIRING'];
+export const JOB_STATUS_GROUPS = {
+  RUNNING: ['EXECUTING', 'RUNNING', 'PLANNING', 'PREPARING', 'VERIFYING', 'REPAIRING'],
+  QUEUED: ['CREATED', 'QUEUED', 'CLAIMED', 'WAITING_FOR_CAPACITY'],
+  BLOCKED: ['BLOCKED'],
+  FAILED: ['FAILED'],
+  COMPLETED: ['COMPLETED'],
+  CANCELLED: ['CANCELLED']
+};
+export const ACTIVE_JOB_STATUSES = JOB_STATUS_GROUPS.RUNNING;
+export const TERMINAL_JOB_STATUSES = [
+  ...JOB_STATUS_GROUPS.COMPLETED, ...JOB_STATUS_GROUPS.FAILED, ...JOB_STATUS_GROUPS.CANCELLED
+];
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -336,7 +347,7 @@ export class HttpHermesApi implements HermesApi {
     // A failed job without a completion time cannot be placed in the 24h window, so the count is unknown.
     const cutoff = Date.now() - DAY_MS;
     let failed24hCount: number | null = 0;
-    for (const j of jobs.filter((job) => job.status === 'FAILED')) {
+    for (const j of jobs.filter((job) => JOB_STATUS_GROUPS.FAILED.includes(job.status))) {
       const endedAt = j.completedAt ? Date.parse(j.completedAt) : NaN;
       if (Number.isNaN(endedAt)) {
         failed24hCount = null;
@@ -349,8 +360,8 @@ export class HttpHermesApi implements HermesApi {
 
     return {
       runningJobsCount: countOf(...ACTIVE_JOB_STATUSES),
-      queuedJobsCount: countOf('QUEUED', 'CLAIMED'),
-      blockedJobsCount: countOf('BLOCKED'),
+      queuedJobsCount: countOf(...JOB_STATUS_GROUPS.QUEUED),
+      blockedJobsCount: countOf(...JOB_STATUS_GROUPS.BLOCKED),
       failed24hCount,
       sampleSize: jobs.length,
       tokensToday: UNKNOWN,

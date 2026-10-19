@@ -142,10 +142,13 @@ class AgentAdapter(ABC):
                 "requestedModel": model_metadata["model"], "requestedEffort": model_metadata["effort"],
                 "requestedSource": model_metadata["source"]}
             model_registry.record(self.name, model_metadata)
-        report_metadata.update(model_metadata)
-        runtime = dict(getattr(result, "runtime_metadata", None) or {})
-        runtime.update(report_metadata)
-        object.__setattr__(result, "runtime_metadata", runtime)
+        # Only a model the CLI reported is attached to the backend's runtime metadata; when nothing was
+        # reported the backend's own metadata passes through untouched (test_backend_contract pins this).
+        if reported:
+            report_metadata.update(model_metadata)
+            runtime = dict(getattr(result, "runtime_metadata", None) or {})
+            runtime.update(report_metadata)
+            object.__setattr__(result, "runtime_metadata", runtime)
 
         duration_s = f"{time.monotonic() - start_time:.2f}s"
         context.runner.logger.info(

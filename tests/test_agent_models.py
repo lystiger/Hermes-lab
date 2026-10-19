@@ -300,6 +300,7 @@ def test_no_report_keeps_cli_default(tmp_path, monkeypatch):
         runner=SimpleNamespace(logger=Mock()), backend=backend, timeout_seconds=1,
         stdout_file=tmp_path/'out', stderr_file=tmp_path/'err')
     result = CodexAdapter().execute(context)
-    assert result.runtime_metadata['reportedModel'] is None
+    # nothing reported: the backend's runtime metadata passes through untouched
+    assert 'reportedModel' not in (getattr(result, 'runtime_metadata', None) or {})
     assert agent_models.model_registry.describe('codex')['lastUsed'] == {
         'model': None, 'effort': None, 'source': 'cli-default'}

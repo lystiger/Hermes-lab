@@ -468,6 +468,16 @@ class HermesActorAdapter(ActorAdapter):
         res = self.run_cmd(["git", "status", "--porcelain", "--untracked-files=all"], cwd=worktree_path, check=False)
         return [line.strip() for line in res.stdout.splitlines() if line.strip()]
 
+    @staticmethod
+    def _handoff_path(task: TaskNode) -> Optional[str]:
+        """The phase's handoff file is evidence for the next agent, not product work."""
+        handoff = (task.metadata or {}).get("expected_handoff")
+        return str(handoff) if handoff else None
+
+    def _exclude_handoff(self, changed_files: List[str], task: TaskNode) -> List[str]:
+        handoff = self._handoff_path(task)
+        return [line for line in changed_files if not handoff or line.split(maxsplit=1)[-1] != handoff]
+
     def validate_python_syntax(self, worktree_path: Path) -> None:
         """
         Validates syntax of all Python files in the worktree.
@@ -510,13 +520,15 @@ class HermesActorAdapter(ActorAdapter):
             # 1. Verify execution fence before staging or inspecting files
             self._verify_execution_fence(task, context)
 
-            changed_files = self.inspect_changed_files(worktree_path)
+            changed_files = self._exclude_handoff(self.inspect_changed_files(worktree_path), task)
             if not changed_files or role == "verifier":
                 return None
 
             commit_msg = task.metadata.get("commit_message") or f"feat({task.task_id}): {task.description[:72]}"
             logger.info("Staging and committing %d files in %s: %s", len(changed_files), worktree_path.name, commit_msg)
-            self.run_cmd(["git", "add", "."], cwd=worktree_path)
+            handoff = self._handoff_path(task)
+            exclude = [f":(exclude,glob){handoff}"] if handoff else []
+            self.run_cmd(["git", "add", ".", *exclude], cwd=worktree_path)
 
             # 2. Verify execution fence before creating commit
             self._verify_execution_fence(task, context)
@@ -997,8 +1009,9 @@ class HermesActorAdapter(ActorAdapter):
 
             # Validate role constraints
             changed_files = self.inspect_changed_files(worktree_path)
-            if role == "verifier" and changed_files:
-                raise RuntimeError(f"Verifier task '{task.task_id}' modified {len(changed_files)} files; verifier role forbids mutations.")
+            mutations = self._exclude_handoff(changed_files, task)
+            if role == "verifier" and mutations:
+                raise RuntimeError(f"Verifier task '{task.task_id}' modified {len(mutations)} files; verifier role forbids mutations.")
 
             # Commit changes and merge into integration worktree with fence checks
             commit_sha = self._commit_and_integrate_changes(worktree_path, task, role, context)

@@ -85,7 +85,7 @@ def _agent_from_record(record: Dict[str, Any], filename: str, modified: datetime
         balance["currency"] = _text(raw_balance.get("currency"))
     if balance and balance["funded"] > 0:
         left = max(0.0, min(100.0, balance["remaining"] / balance["funded"] * 100))
-        used = max(used or 0.0, 100.0 - left)
+        used = 100.0 - left
     elif used is not None:
         left = max(0.0, min(100.0, 100.0 - used))
     else:

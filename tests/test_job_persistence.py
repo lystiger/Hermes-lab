@@ -163,3 +163,24 @@ def test_unreadable_record_does_not_stop_recovery(tmp_path, caplog):
         recovered = JobService(runs_root=tmp_path)
     assert [job["id"] for job in recovered.list_jobs()] == ["job-1"]
     assert "permission denied" in caplog.text
+
+
+def test_legacy_migration_does_not_consume_recovery_cap_twice(tmp_path, monkeypatch):
+    monkeypatch.setattr(JobService, "RECOVERY_LIMIT", 3)
+    for index in range(3):
+        directory = tmp_path / f"legacy_{index}"
+        directory.mkdir()
+        (directory / "run_summary.json").write_text(json.dumps({"sprint_id": str(index)}))
+    service = JobService(runs_root=tmp_path)
+    job = service.get_job("run_legacy_0")
+    job.title = "Persisted title absent from the legacy summary"
+    service.persist_job(job)
+    first = service.list_jobs(limit=100)
+    assert len(first) == 3
+    # Migration creates run_legacy_* record folders alongside the legacy folders.
+    # Make the original summaries newest so a folder-based cap excludes all records.
+    import os
+    for index in range(3):
+        os.utime(tmp_path / f"legacy_{index}", (2000000000, 2000000000))
+    second = JobService(runs_root=tmp_path).list_jobs(limit=100)
+    assert second == first

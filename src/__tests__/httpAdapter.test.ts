@@ -1,6 +1,9 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { HttpHermesApi } from '../api/adapters/httpAdapter';
 
+/** Every request carries a timeout signal (see REQUEST_TIMEOUT_MS in httpAdapter). */
+const TIMED = expect.objectContaining({ signal: expect.anything() });
+
 describe('HttpHermesApi Contract Implementation', () => {
   const baseUrl = 'http://localhost:8000';
   let api: HttpHermesApi;
@@ -29,7 +32,7 @@ describe('HttpHermesApi Contract Implementation', () => {
     } as any);
 
     const health = await api.getHealth();
-    expect(global.fetch).toHaveBeenCalledWith('http://localhost:8000/health');
+    expect(global.fetch).toHaveBeenCalledWith('http://localhost:8000/health', TIMED);
     expect(health.status).toBe('ok');
     expect(health.service).toBe('hermes');
     expect(health.uptimeSeconds).toBe(1842);
@@ -73,13 +76,13 @@ describe('HttpHermesApi Contract Implementation', () => {
     } as any);
 
     const agents = await api.getAgents();
-    expect(global.fetch).toHaveBeenCalledWith('http://localhost:8000/agents');
+    expect(global.fetch).toHaveBeenCalledWith('http://localhost:8000/agents', TIMED);
     expect(agents.length).toBe(2);
 
     const gemini = agents.find((a) => a.id === 'gemini');
     expect(gemini?.displayName).toBe('Gemini');
     expect(gemini?.status).toBe('RUNNING');
-    expect(gemini?.presentation?.characterCardUrl).toBe('/agents/gemini-card.webp');
+    expect(gemini?.presentation?.characterCardUrl).toBe('/portrait/gemini.png');
 
     const custom = agents.find((a) => a.id === 'custom-subagent');
     expect(custom?.displayName).toBe('Custom Subagent');
@@ -136,7 +139,7 @@ describe('HttpHermesApi Contract Implementation', () => {
     } as any);
 
     const jobs = await api.getJobs();
-    expect(global.fetch).toHaveBeenCalledWith('http://localhost:8000/jobs?');
+    expect(global.fetch).toHaveBeenCalledWith('http://localhost:8000/jobs?', TIMED);
     expect(jobs.length).toBe(1);
     expect(jobs[0].id).toBe('run_20260822_unigreen_01');
     expect(jobs[0].status).toBe('RUNNING');
@@ -184,9 +187,9 @@ describe('HttpHermesApi Contract Implementation', () => {
     } as any);
 
     const success = await api.triggerJobAction('run_test_01', 'cancel');
-    expect(global.fetch).toHaveBeenCalledWith('http://localhost:8000/jobs/run_test_01/cancel', {
+    expect(global.fetch).toHaveBeenCalledWith('http://localhost:8000/jobs/run_test_01/cancel', expect.objectContaining({
       method: 'POST'
-    });
+    }));
     expect(success).toBe(true);
   });
 
@@ -263,7 +266,7 @@ describe('HttpHermesApi Contract Implementation', () => {
     } as any);
 
     const threads = await api.getThreads("run_1");
-    expect(global.fetch).toHaveBeenCalledWith("http://localhost:8000/threads?jobId=run_1");
+    expect(global.fetch).toHaveBeenCalledWith("http://localhost:8000/threads?jobId=run_1", TIMED);
     expect(threads.length).toBe(1);
     expect(threads[0].id).toBe("thread_job_run_1");
     expect(threads[0].participants[0].displayName).toBe("Gemini");
@@ -290,7 +293,7 @@ describe('HttpHermesApi Contract Implementation', () => {
     } as any);
 
     const messages = await api.getMessages("thread_job_run_1");
-    expect(global.fetch).toHaveBeenCalledWith("http://localhost:8000/threads/thread_job_run_1/messages?");
+    expect(global.fetch).toHaveBeenCalledWith("http://localhost:8000/threads/thread_job_run_1/messages?", TIMED);
     expect(messages.length).toBe(1);
     expect(messages[0].text).toBe("BUILD completed.");
     expect(messages[0].intent).toBe("review_request");
@@ -347,7 +350,7 @@ describe('HttpHermesApi Contract Implementation', () => {
     } as any);
 
     const inbox = await api.getAgentInbox("claude");
-    expect(global.fetch).toHaveBeenCalledWith("http://localhost:8000/agents/claude/inbox?");
+    expect(global.fetch).toHaveBeenCalledWith("http://localhost:8000/agents/claude/inbox?", TIMED);
     expect(inbox.length).toBe(1);
     expect(inbox[0].recipientId).toBe("claude");
   });
@@ -360,7 +363,7 @@ describe('HttpHermesApi Contract Implementation', () => {
 
     const snapshot = await api.getExecutionSnapshot();
 
-    expect(global.fetch).toHaveBeenCalledWith('http://localhost:8000/execution');
+    expect(global.fetch).toHaveBeenCalledWith('http://localhost:8000/execution', TIMED);
     expect(snapshot.takenAt).toBe(1760420000.5);
   });
 

@@ -55,6 +55,8 @@ export const TERMINAL_JOB_STATUSES = [
 ];
 
 const DAY_MS = 24 * 60 * 60 * 1000;
+/** Upper bound for one JSON request to Hermes. The event stream is not a JSON request and is not limited. */
+const REQUEST_TIMEOUT_MS = 15_000;
 
 /** Job summary from GET /jobs or GET /jobs/recoverable. Keeps blocked and repair diagnostics; no invented estimates. */
 export function mapJobSummary(j: any): Job {
@@ -159,7 +161,8 @@ export class HttpHermesApi implements HermesApi {
   private async request(url: string, init?: RequestInit): Promise<Response> {
     let res: Response;
     try {
-      res = init ? await fetch(url, init) : await fetch(url);
+      // A request that never settles would leave its panel loading forever; after the limit it counts as unreachable.
+      res = await fetch(url, { ...init, signal: init?.signal ?? AbortSignal.timeout(REQUEST_TIMEOUT_MS) });
     } catch {
       recordUnreachable(this.baseUrl);
       throw new HermesUnreachableError(this.baseUrl);
@@ -202,8 +205,8 @@ export class HttpHermesApi implements HermesApi {
         presentation: {
           displayName: dto.presentation?.displayName || dto.displayName || actor.displayName,
           accentColor: actorAccent(dto.id, dto.presentation?.accentColor || actor.accentColor),
-          avatarUrl: dto.presentation?.avatarUrl || `/agents/${dto.id}.webp`,
-          characterCardUrl: dto.presentation?.characterCardUrl || (['gemini', 'claude', 'codex'].includes(dto.id) ? `/agents/${dto.id}-card.webp` : undefined),
+          avatarUrl: dto.presentation?.avatarUrl || `/portrait/${dto.id}.png`,
+          characterCardUrl: dto.presentation?.characterCardUrl || (['gemini', 'claude', 'codex'].includes(dto.id) ? `/portrait/${dto.id}.png` : undefined),
           sigil: dto.presentation?.sigil || dto.id.toUpperCase().slice(0, 4),
           code: dto.presentation?.code || dto.id.toUpperCase().slice(0, 4),
           subtitle: dto.presentation?.subtitle || dto.persona?.visual?.subtitle || dto.persona?.summary,

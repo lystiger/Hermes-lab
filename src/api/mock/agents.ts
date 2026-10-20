@@ -19,8 +19,8 @@ export const MOCK_AGENTS: Record<AgentId, AgentDetail> = {
     sessionTokens: '30.4k',
     presentation: {
       displayName: 'Gemini',
-      avatarUrl: '/agents/gemini.webp',
-      characterCardUrl: '/agents/gemini-card.webp',
+      avatarUrl: '/portrait/gemini.png',
+      characterCardUrl: '/portrait/gemini.png',
       accentColor: 'var(--lys-agent-gemini)',
       animationProfile: 'quick',
       sigil: 'BUILD',
@@ -86,8 +86,8 @@ export const MOCK_AGENTS: Record<AgentId, AgentDetail> = {
     sessionTokens: '13.7k',
     presentation: {
       displayName: 'Claude',
-      avatarUrl: '/agents/claude.webp',
-      characterCardUrl: '/agents/claude-card.webp',
+      avatarUrl: '/portrait/claude.png',
+      characterCardUrl: '/portrait/claude.png',
       accentColor: 'var(--lys-agent-claude)',
       animationProfile: 'relaxed',
       sigil: 'HARDEN',
@@ -153,8 +153,8 @@ export const MOCK_AGENTS: Record<AgentId, AgentDetail> = {
     sessionTokens: '0k',
     presentation: {
       displayName: 'Codex',
-      avatarUrl: '/agents/codex.webp',
-      characterCardUrl: '/agents/codex-card.webp',
+      avatarUrl: '/portrait/codex.png',
+      characterCardUrl: '/portrait/codex.png',
       accentColor: 'var(--lys-agent-codex)',
       animationProfile: 'slow',
       sigil: 'VERIFY',

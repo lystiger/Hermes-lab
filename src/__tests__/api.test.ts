@@ -22,7 +22,7 @@ describe('MockHermesApi Contract Implementation', () => {
     expect(agent).not.toBeNull();
     expect(agent?.id).toBe('claude');
     expect(agent?.role).toContain('Architecture');
-    expect(agent?.presentation?.characterCardUrl).toBe('/agents/claude-card.webp');
+    expect(agent?.presentation?.characterCardUrl).toBe('/portrait/claude.png');
     expect(agent?.allowance.length).toBeGreaterThan(0);
   });
 

@@ -42,6 +42,10 @@ const SCAN = `(() => {
       issues.push({ type: 'clipped-without-tooltip', a: label(el) });
   }
   if (document.documentElement.scrollWidth > window.innerWidth + 1) issues.push({ type: 'horizontal-page-overflow', a: document.documentElement.scrollWidth + 'px > ' + window.innerWidth + 'px' });
+  // A page still loading or connecting has little text to overlap, so it would pass the layout checks while
+  // showing no data. Count it as an issue so that 0 means every page rendered.
+  const pending = (document.body.innerText.match(/Loading\\b|not loaded yet|\\bconnecting\\b/gi) || []);
+  if (pending.length) issues.push({ type: 'still-loading', a: [...new Set(pending.map(s => s.toLowerCase()))].join(', ') });
   const scrollers = [...document.querySelectorAll('body *')].filter(el => { const s = getComputedStyle(el); return /(auto|scroll)/.test(s.overflowY) && el.scrollHeight > el.clientHeight + 1; });
   return { issues: issues.slice(0, 60), issueCount: issues.length, nestedScrollContainers: scrollers.length };
 })()`;

@@ -206,7 +206,7 @@ export class HttpHermesApi implements HermesApi {
           displayName: dto.presentation?.displayName || dto.displayName || actor.displayName,
           accentColor: actorAccent(dto.id, dto.presentation?.accentColor || actor.accentColor),
           avatarUrl: dto.presentation?.avatarUrl || `/portrait/${dto.id}.png`,
-          characterCardUrl: dto.presentation?.characterCardUrl || (['gemini', 'claude', 'codex'].includes(dto.id) ? `/agents/${dto.id}-card.webp` : undefined),
+          characterCardUrl: dto.presentation?.characterCardUrl || (['gemini', 'claude', 'codex'].includes(dto.id) ? `/portrait/${dto.id}.png` : undefined),
           sigil: dto.presentation?.sigil || dto.id.toUpperCase().slice(0, 4),
           code: dto.presentation?.code || dto.id.toUpperCase().slice(0, 4),
           subtitle: dto.presentation?.subtitle || dto.persona?.visual?.subtitle || dto.persona?.summary,

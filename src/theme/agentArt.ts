@@ -23,19 +23,19 @@ export interface AgentArt {
 export const AGENT_ART: Record<string, AgentArt> = {
   claude: {
     avatar: '/portrait/claude.png',
-    card: '/agents/claude-card.webp',
+    card: '/portrait/claude.png',
     avatarFocus: { x: 0.5, y: 0.4, zoom: 1.05 },
     cardFocus: { x: 0.36, y: 0.27, zoom: 2.4 }
   },
   codex: {
     avatar: '/portrait/codex.png',
-    card: '/agents/codex-card.webp',
+    card: '/portrait/codex.png',
     avatarFocus: { x: 0.5, y: 0.4, zoom: 1.05 },
     cardFocus: { x: 0.3, y: 0.22, zoom: 3.0 }
   },
   gemini: {
     avatar: '/portrait/gemini.png',
-    card: '/agents/gemini-card.webp',
+    card: '/portrait/gemini.png',
     avatarFocus: { x: 0.5, y: 0.4, zoom: 1.05 },
     cardFocus: { x: 0.27, y: 0.2, zoom: 3.0 }
   }

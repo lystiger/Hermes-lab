@@ -23,6 +23,11 @@ const Section: React.FC<{ title: string; updatedAt?: number | null; children: Re
 );
 
 /** Failure explanation: what Hermes reported as the reason, shown as an error, not as a neutral note. */
+/** File paths in failure text are shown by their file name; the full text stays in the tooltip. */
+export function shortenPaths(text: string): string {
+  return text.replace(/(?:\/[\w.-]+)+\/([\w.-]+\.md)/g, '$1');
+}
+
 export const JobFailure: React.FC<{ job: JobDetail }> = ({ job }) => {
   const explanation = explainFailure(job);
   if (!explanation) return null;
@@ -31,7 +36,7 @@ export const JobFailure: React.FC<{ job: JobDetail }> = ({ job }) => {
       <div className="text-lys-danger font-semibold">{explanation.headline}</div>
       <ul className="mt-1.5 flex flex-col gap-1 text-lys-primary break-words">
         {explanation.lines.map((line, i) => (
-          <li key={i} className="line-clamp-2" title={line}>{line}</li>
+          <li key={i} className="line-clamp-2" title={line}>{shortenPaths(line)}</li>
         ))}
       </ul>
     </div>

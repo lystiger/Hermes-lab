@@ -17,6 +17,11 @@ interface JobDetailViewProps {
   jobId?: string;
 }
 
+/** A phase is shown by its prompt file name without the folder or extension; the full path is in the tooltip. */
+function phaseLabel(name: string): string {
+  return name.split('/').pop()?.replace(/\.md$/, '') ?? name;
+}
+
 export const JobDetailView: React.FC<JobDetailViewProps> = ({ jobId = '' }) => {
   const { allEvents } = useConsoleStore();
   const { job, loading, error, stale, updatedAt, refetch } = useJob(jobId);
@@ -132,7 +137,7 @@ export const JobDetailView: React.FC<JobDetailViewProps> = ({ jobId = '' }) => {
                         transform: isActive ? 'translateZ(18px) rotateX(2deg)' : 'translateZ(0)',
                         boxShadow: isActive ? '0 14px 26px -14px color-mix(in srgb, var(--lys-agent-claude) 55%, transparent)' : 'none'
                       }}
-                      className="flex gap-3 items-start p-3 border"
+                      className={`flex gap-3 items-start p-3 border ${p.status === 'SUPERSEDED' ? 'opacity-60' : ''}`}
                     >
                       {/* Mark Icon */}
                       <div
@@ -148,21 +153,22 @@ export const JobDetailView: React.FC<JobDetailViewProps> = ({ jobId = '' }) => {
 
                       <div className="flex-1 min-w-0">
                         <div
+                          title={p.name}
                           style={{ color: isDone || isActive ? 'var(--lys-text-primary)' : 'var(--lys-text-faint)' }}
-                          className="font-sans text-[11px] tracking-wider font-semibold"
+                          className="truncate text-[13px] font-medium"
                         >
-                          {p.name}
+                          {phaseLabel(p.name)}
                         </div>
-                        <div style={{ color: col }} className="text-[12px] mt-0.5">
-                          {p.agentName || actor?.displayName || p.agentId || '—'}
-                        </div>
-                        <div className="font-sans text-[10.5px] text-lys-faint mt-0.5">
-                          {p.role} {p.commitSha ? `· ${p.commitSha.slice(0, 7)}` : ''}
+                        <div className="text-[12px] mt-0.5 truncate">
+                          <span style={{ color: col }}>{p.agentName || actor?.displayName || p.agentId || '—'}</span>
+                          <span className="text-lys-faint"> · {p.role}{p.commitSha ? ` · ${p.commitSha.slice(0, 7)}` : ''}</span>
                         </div>
                       </div>
 
-                      <div className="font-sans text-[11px] text-lys-faint text-right">
-                        {p.durationMs ? `${(p.durationMs / 1000).toFixed(1)}s` : p.status.toLowerCase()}
+                      <div
+                        className={`text-[11px] text-right whitespace-nowrap ${isFailed ? 'text-lys-danger' : isDone ? 'text-lys-success' : 'text-lys-faint'}`}
+                      >
+                        {p.status === 'SUPERSEDED' ? 'replaced' : p.durationMs ? `${(p.durationMs / 1000).toFixed(1)}s` : p.status.toLowerCase()}
                       </div>
                     </div>
 

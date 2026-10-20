@@ -18,7 +18,6 @@ Ownership is by exact rigId only. Nothing here matches rigs by name.
 """
 
 import contextlib
-import fcntl
 import json
 import logging
 import os
@@ -26,8 +25,35 @@ import re
 import socket
 import tempfile
 import threading
+import time
 from pathlib import Path
 
+try:
+    import fcntl
+except ImportError:  # Windows has no fcntl; msvcrt locks a byte range instead.
+    fcntl = None
+    import msvcrt
+
+
+def _lock_file(handle):
+    if fcntl is not None:
+        fcntl.flock(handle, fcntl.LOCK_EX)
+        return
+    handle.seek(0)
+    while True:
+        try:
+            msvcrt.locking(handle.fileno(), msvcrt.LK_LOCK, 1)
+            return
+        except OSError:
+            time.sleep(0.01)
+
+
+def _unlock_file(handle):
+    if fcntl is not None:
+        fcntl.flock(handle, fcntl.LOCK_UN)
+        return
+    handle.seek(0)
+    msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
 
 LEDGER_DIR_ENV = "HERMES_OPENRIG_LEDGER_DIR"
 logger = logging.getLogger("hermes.runtime.openrig_ledger")
@@ -321,11 +347,11 @@ class OwnershipLedger:
         with _LOCK:
             self.directory.mkdir(parents=True, exist_ok=True)
             with open(self.directory / ".lock", "a+") as handle:
-                fcntl.flock(handle, fcntl.LOCK_EX)
+                _lock_file(handle)
                 try:
                     yield
                 finally:
-                    fcntl.flock(handle, fcntl.LOCK_UN)
+                    _unlock_file(handle)
 
     def _files(self):
         if not self.directory.is_dir():

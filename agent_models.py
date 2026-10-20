@@ -1,5 +1,4 @@
 """Hermes-owned model settings, shared by the API and runner processes."""
-import fcntl
 import json
 import os
 import re
@@ -10,8 +9,34 @@ import threading
 import time
 import tomllib
 from contextlib import contextmanager
+try:
+    import fcntl
+except ImportError:  # Windows has no fcntl; msvcrt locks a byte range instead.
+    fcntl = None
+    import msvcrt
 
 ROOT = Path(__file__).resolve().parent
+
+
+def _lock_file(handle):
+    if fcntl is not None:
+        fcntl.flock(handle, fcntl.LOCK_EX)
+        return
+    handle.seek(0)
+    while True:
+        try:
+            msvcrt.locking(handle.fileno(), msvcrt.LK_LOCK, 1)
+            return
+        except OSError:
+            time.sleep(0.01)
+
+
+def _unlock_file(handle):
+    if fcntl is not None:
+        fcntl.flock(handle, fcntl.LOCK_UN)
+        return
+    handle.seek(0)
+    msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
 
 
 def canonical(agent):
@@ -37,11 +62,11 @@ class ModelRegistry:
     def _writing(self):
         self.path.parent.mkdir(parents=True, exist_ok=True)
         with self._lock, self.path.with_suffix(".lock").open("a") as lock:
-            fcntl.flock(lock, fcntl.LOCK_EX)
+            _lock_file(lock)
             try:
                 yield
             finally:
-                fcntl.flock(lock, fcntl.LOCK_UN)
+                _unlock_file(lock)
 
     @staticmethod
     def _atomic(path, data):

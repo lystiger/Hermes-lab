@@ -2,6 +2,8 @@ from dataclasses import dataclass, asdict, field
 from datetime import datetime, timezone
 import json
 import logging
+import os
+import tempfile
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 from capabilities.normalization import normalize_agent_id
@@ -98,6 +100,7 @@ class JobService:
     def __init__(self, runs_root: Optional[Path] = None, sprints_root: Optional[Path] = None, event_store: Optional[Any] = None):
         self._jobs: Dict[str, JobDetailDTO] = {}
         self._engines: Dict[str, Any] = {}
+        self._persisted: Dict[str, str] = {}
         self._store = event_store
         self.runs_root = runs_root or (Path(__file__).resolve().parent.parent / "hermes-runs")
         self.sprints_root = sprints_root or (Path(__file__).resolve().parent.parent / "sprints")
@@ -107,27 +110,108 @@ class JobService:
     def set_store(self, event_store: Any) -> None:
         self._store = event_store
 
+    RECOVERY_LIMIT = 2000
+    TERMINAL_STATUSES = {"COMPLETED", "BLOCKED", "FAILED", "CANCELLED"}
+
+    def persist_job(self, job: JobDetailDTO) -> None:
+        """Atomically save the detail DTO; unchanged snapshots require no disk write."""
+        temporary = None
+        try:
+            if not job.id or Path(job.id).name != job.id or job.id in {".", ".."}:
+                raise ValueError("job id must be a single path component")
+            payload = json.dumps(job.to_dict(), ensure_ascii=False, sort_keys=True)
+            if self._persisted.get(job.id) == payload:
+                return
+            directory = self.runs_root / job.id
+            if directory.resolve().parent != self.runs_root.resolve():
+                raise ValueError("job directory escapes runs root")
+            directory.mkdir(parents=True, exist_ok=True)
+            with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", dir=directory,
+                                             prefix=".job-", suffix=".tmp", delete=False) as stream:
+                temporary = Path(stream.name)
+                stream.write(payload)
+                stream.flush()
+                os.fsync(stream.fileno())
+            os.replace(temporary, directory / "job.json")
+            self._persisted[job.id] = payload
+        except Exception as exc:
+            logger.warning("Could not persist job %s: %s", job.id, exc)
+        finally:
+            if temporary is not None:
+                try:
+                    temporary.unlink(missing_ok=True)
+                except OSError as exc:
+                    logger.warning("Could not clean temporary job record %s: %s", temporary, exc)
+
     def _recover_recent_runs(self) -> None:
-        """Scan configured hermes-runs directory to reconstruct recent finished sprint jobs."""
+        """Recover durable records first, then legacy summaries lacking a record."""
         if not self.runs_root.exists():
             return
-
+        candidates = []
         try:
-            for run_dir in sorted(self.runs_root.glob("*_*"), reverse=True)[:30]:
-                if not run_dir.is_dir():
+            for directory in self.runs_root.iterdir():
+                try:
+                    if directory.is_dir() and ((directory / "job.json").exists()
+                                               or (directory / "run_summary.json").exists()):
+                        candidates.append((directory.stat().st_mtime, directory))
+                except OSError as exc:
+                    logger.warning("Could not inspect run directory %s: %s", directory, exc)
+            candidates.sort(key=lambda item: (item[0], item[1].name), reverse=True)
+            if len(candidates) > self.RECOVERY_LIMIT:
+                logger.warning("Job recovery capped at %s newest run folders (%s found)",
+                               self.RECOVERY_LIMIT, len(candidates))
+            directories = [directory for _, directory in candidates[:self.RECOVERY_LIMIT]]
+            for directory in directories:
+                record = directory / "job.json"
+                if not record.exists():
                     continue
-                summary_file = run_dir / "run_summary.json"
-                if summary_file.exists():
-                    try:
-                        with open(summary_file, "r", encoding="utf-8") as f:
-                            summary = json.load(f)
-                        job = self._build_job_from_run_summary(run_dir.name, summary, run_dir)
-                        if job:
-                            self._jobs[job.id] = job
-                    except Exception as exc:
-                        logger.debug("Could not recover run summary from %s: %s", summary_file, exc)
-        except Exception as exc:
-            logger.warning("Failed during startup run summary recovery: %s", exc)
+                try:
+                    data = json.loads(record.read_text(encoding="utf-8"))
+                    phases = [JobPhaseDTO(**phase) for phase in data.pop("phases", [])]
+                    artifacts = [ArtifactRefDTO(**artifact) for artifact in data.pop("artifacts", [])]
+                    job = JobDetailDTO(**data, phases=phases, artifacts=artifacts)
+                    if job.id != directory.name or not isinstance(job.status, str):
+                        raise ValueError("invalid job id or status")
+                    for name in ("sprintId", "title", "repository", "branch", "priority", "createdAt"):
+                        if not isinstance(getattr(job, name), str):
+                            raise ValueError(f"invalid {name}")
+                    for name in ("startedAt", "completedAt"):
+                        if getattr(job, name) is not None and not isinstance(getattr(job, name), str):
+                            raise ValueError(f"invalid {name}")
+                    for name in ("assignedAgentIds", "tasks", "errors", "retryHistory", "observations"):
+                        if not isinstance(getattr(job, name), list):
+                            raise ValueError(f"invalid {name}")
+                    # Validate serialization before admitting a record to the index.
+                    self._persisted[job.id] = json.dumps(job.to_dict(), ensure_ascii=False, sort_keys=True)
+                    if job.status.upper() not in self.TERMINAL_STATUSES:
+                        job.status = "FAILED"
+                        job.completedAt = datetime.now(timezone.utc).isoformat()
+                        job.errors.append({"error": "interrupted by runtime restart"})
+                        for phase in job.phases:
+                            if phase.status in {"PREPARING", "RUNNING"}:
+                                phase.status = "FAILED"
+                                phase.completedAt = job.completedAt
+                        self.persist_job(job)
+                    self._jobs[job.id] = job
+                    for artifact in job.artifacts:
+                        artifact_registry.register(ArtifactRef(**asdict(artifact), jobId=job.id))
+                except Exception as exc:
+                    logger.warning("Could not recover job record %s: %s", record, exc)
+            for directory in directories:
+                if (directory / "job.json").exists():
+                    continue
+                summary_file = directory / "run_summary.json"
+                if not summary_file.exists():
+                    continue
+                try:
+                    summary = json.loads(summary_file.read_text(encoding="utf-8"))
+                    job = self._build_job_from_run_summary(directory.name, summary, directory)
+                    if job and job.id not in self._jobs:
+                        self.register_job(job)
+                except Exception as exc:
+                    logger.warning("Could not recover run summary %s: %s", summary_file, exc)
+        except OSError as exc:
+            logger.warning("Failed during startup job recovery: %s", exc)
 
     def _build_job_from_run_summary(
         self, run_dir_name: str, summary: Dict[str, Any], run_dir: Path
@@ -266,11 +350,15 @@ class JobService:
 
     def register_job(self, job: JobDetailDTO) -> None:
         self._jobs[job.id] = job
+        self.persist_job(job)
 
     def register_engine(self, engine: Any) -> None:
         """Registers an active ReactiveJobEngine and synchronizes its JobDetailDTO."""
         job_id = engine.job.job_id
         self._engines[job_id] = engine
+        bridge = getattr(engine, "event_bridge", None)
+        if bridge is not None and hasattr(bridge, "add_listener"):
+            bridge.add_listener(self._on_runtime_event)
 
         job_dto = self.get_job(job_id)
         if not job_dto:
@@ -295,6 +383,12 @@ class JobService:
             job_dto.blockedReason = engine.job.blocked_reason
             job_dto.repairCount = engine.job.repair_count
             job_dto.replanCount = engine.job.replan_count
+
+        self.get_job(job_id)
+
+    def _on_runtime_event(self, event: Any) -> None:
+        if event.job_id in self._engines:
+            self.get_job(event.job_id)
 
     def get_engine(self, job_id: str) -> Optional[Any]:
         return self._engines.get(job_id)
@@ -341,6 +435,7 @@ class JobService:
                 if job.status == "COMPLETED":
                     job.progress = 1.0
 
+        self.persist_job(job)
         return job
 
     def list_jobs(self, status: Optional[str] = None, limit: int = 50) -> List[Dict[str, Any]]:
@@ -434,7 +529,7 @@ class JobService:
                         replanCount=state.job.replan_count,
                         observations=[o.to_dict() for o in state.observations],
                     )
-                    self._jobs[job_id] = job_dto
+                    self.register_job(job_dto)
                     return job_dto
             except Exception as exc:
                 logger.warning("Error reconstructing job %s from event store: %s", job_id, exc)

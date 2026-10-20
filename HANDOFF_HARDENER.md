@@ -1,54 +1,54 @@
 # Hermes M11 hardener handoff
 
-## Defect and fix
+Reviewed the durable job implementation and builder continuation at cc1553b.
+Two concrete defects fixed in `jobs/job_service.py`, each with a regression in
+`tests/test_job_persistence.py`:
 
-One concrete defect: migrated legacy runs consumed the recovery cap twice. Startup
-creates `run_<legacy-folder>/job.json` alongside the original summary folder. The
-next startup capped folders before suppressing duplicate IDs. Newer original
-summaries could exclude the durable records, rebuilding jobs with old details and
-new creation timestamps; mixed ordering could exclude other jobs altogether.
+1. Startup reconciled the job and phases but left serialized tasks RUNNING.
+   Recovery now marks running task dictionaries FAILED and sets `completed_at`
+   to the reconciled job completion timestamp. Completed tasks remain intact.
+   `test_restart_reconciles_running_task_records` checks both task states and
+   persistence across a second restart.
+2. Engine snapshots did not copy observations from the engine registry. A
+   committed observation event with no live event bus left `job.json` with an
+   empty observations array, losing the observation on restart. Snapshotting now
+   copies the job's registry observations before persisting.
+   `test_reactive_observation_survives_restart_without_polling` uses a real
+   engine, isolated registry, and bridge without a bus; checks the file before
+   any endpoint read and verifies recovered observations.
 
-`jobs/job_service.py` now suppresses summary folders with corresponding record
-folders before sorting and applying the cap. Persisted records retain precedence.
-No response fields or runner behavior changed.
+Before fixes, the focused suite reported `2 failed, 28 passed in 1.12s`:
+- `assert tasks[0]["status"] == "FAILED"`: `AssertionError: assert 'RUNNING' == 'FAILED'`.
+- `assert data["observations"] == [observation.to_dict()]`: `AssertionError: assert [] == [{'observation_id': ...}]`.
+Reproduction: run the focused command below with the regression tests and without
+these source fixes.
 
-Regression: `tests/test_job_persistence.py::test_legacy_migration_does_not_consume_recovery_cap_twice`.
-Reproduction uses a cap of three, three legacy runs, migration, a title update
-absent from the summaries, and summary mtimes newer than every record folder.
-It asserts all restarted summaries equal their persisted versions. Before the
-fix, the initial regression produced `1 failed, 25 passed`, with `AssertionError`
-on `assert second == first` and `Job recovery capped at 3 newest run folders (6 found)`.
-After the fix, the strengthened regression and existing persistence suite pass.
-
-## Validation
-
-- `/home/lystiger/Projects/Hermes-lab/.venv/bin/python -m pytest tests/test_job_persistence.py -q -p no:cacheprovider`: **26 passed in 0.93s**.
+Validation:
+- `/home/lystiger/Projects/Hermes-lab/.venv/bin/python -m pytest tests/test_job_persistence.py -q -p no:cacheprovider`:
+  **30 passed in 0.95s** after fixes.
 - `git diff --check`: passed.
-- Required gate executed exactly:
+- Required gate executed:
   `/home/lystiger/Projects/Hermes-lab/.venv/bin/python -m pytest tests -q --ignore=tests/smoke -p no:cacheprovider`.
-  It stopped progressing after 23 dots and was interrupted (exit 130).
-  Log: `/tmp/hermes-m11-hardener-gate.log`. No full-gate pass claimed.
+  Stalled after 23 dots; interrupted, exit **130**. No full-gate pass claimed.
+  Log: `/tmp/hermes-m11-hardener-current-gate.log`.
 - Isolated reproduction:
   `/home/lystiger/Projects/Hermes-lab/.venv/bin/python -m pytest tests/test_backend_contract.py::test_runtime_dispatches_new_backend_and_releases_it_once_on_success -vv -p no:cacheprovider -o faulthandler_timeout=10`.
-  Output: `Timeout (0:00:10)!`; main thread in `selectors.py:452 in select`,
-  through `tests/test_backend_contract.py:200 in _run_task`; asyncio worker idle
-  in `concurrent/futures/thread.py:116 in _worker`. Interrupted, exit 130.
-  Log: `/tmp/hermes-m11-hardener-hang.log`. Matches the builder's documented hang.
-- Additional related-suite attempt (`test_job_end_release.py`,
-  `test_phase9_api_and_durability.py`, `test_phase9_1_durability.py`) also stalled
-  without results and was interrupted, exit 130. No passing claim for it.
+  `Timeout (0:00:10)!`; main thread in `selectors.py:452 in select`, through
+  `tests/test_backend_contract.py:200 in _run_task`; executor worker idle in
+  `concurrent/futures/thread.py:116 in _worker`. Interrupted, exit **130**.
+  Matches the hang documented in the builder handoff.
+  Log: `/tmp/hermes-m11-hardener-current-hang.log`.
 
-## Commit
+No DTO fields or response shapes changed. Atomic write and legacy deduplication
+regressions remain passing in the focused suite.
 
-Requested trailer: `Co-Authored-By: Claude Haiku 5.5 <noreply@anthropic.com>`.
-
-Commit blocked: `git add jobs/job_service.py tests/test_job_persistence.py HANDOFF_HARDENER.md`
-exited 128:
+Commit blocked by workspace permissions. `git add jobs/job_service.py
+tests/test_job_persistence.py HANDOFF_HARDENER.md` exited 128:
 `fatal: Unable to create '/home/lystiger/Projects/Hermes-lab/.git/worktrees/hardener/index.lock': Read-only file system`.
-No commit created. Intended message:
+No commit created. Intended commit message:
 
 ```text
-fix(runtime): deduplicate migrated jobs before recovery cap
+fix(runtime): persist observations and reconcile interrupted tasks
 
 Co-Authored-By: Claude Haiku 5.5 <noreply@anthropic.com>
 ```

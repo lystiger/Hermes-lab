@@ -199,6 +199,10 @@ class JobService:
                             if phase.status in {"PREPARING", "RUNNING"}:
                                 phase.status = "FAILED"
                                 phase.completedAt = job.completedAt
+                        for task in job.tasks:
+                            if isinstance(task, dict) and task.get("status") == "RUNNING":
+                                task["status"] = "FAILED"
+                                task["completed_at"] = job.completedAt
                         self.persist_job(job)
                     self._jobs[job.id] = job
                     for artifact in job.artifacts:
@@ -415,6 +419,9 @@ class JobService:
             job.blockedReason = engine.job.blocked_reason
             job.repairCount = engine.job.repair_count
             job.replanCount = engine.job.replan_count
+
+            job.observations = [observation.to_dict() for observation in
+                                engine.observation_registry.list_for_job(job_id)]
 
             # Map tasks
             task_nodes = engine.graph.list_tasks()

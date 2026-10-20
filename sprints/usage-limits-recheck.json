@@ -4,8 +4,8 @@
   "target_repo": "../",
   "base_ref": "c15d5e5",
   "target_branch": "hermes/usage-limits-recheck/integration",
-  "worktree_root": "/home/lystiger/hermes-worktrees/usage-limits-recheck",
-  "runs_root": "/home/lystiger/hermes-runs",
+  "worktree_root": "~/hermes-worktrees/usage-limits-recheck",
+  "runs_root": "~/hermes-runs",
   "execution_backend": "subprocess",
   "limits": {
     "max_changed_files": 40,
@@ -15,7 +15,7 @@
     {
       "name": "pytest",
       "command": [
-        "/home/lystiger/Projects/Hermes-lab/.venv/bin/python",
+        "~/Projects/Hermes-lab/.venv/bin/python",
         "-m",
         "pytest",
         "tests",

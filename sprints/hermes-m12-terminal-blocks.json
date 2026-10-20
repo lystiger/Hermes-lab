@@ -4,8 +4,8 @@
   "target_repo": "../",
   "base_ref": "e82ffa4",
   "target_branch": "hermes/m12/integration",
-  "worktree_root": "/home/lystiger/hermes-worktrees/hermes-m12",
-  "runs_root": "/home/lystiger/hermes-runs",
+  "worktree_root": "~/hermes-worktrees/hermes-m12",
+  "runs_root": "~/hermes-runs",
   "execution_backend": "subprocess",
   "limits": {
     "max_changed_files": 40,
@@ -15,7 +15,7 @@
     {
       "name": "pytest",
       "command": [
-        "/home/lystiger/Projects/Hermes-lab/.venv/bin/python",
+        "~/Projects/Hermes-lab/.venv/bin/python",
         "-m",
         "pytest",
         "tests",

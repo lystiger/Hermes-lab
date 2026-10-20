@@ -5,8 +5,8 @@
   "target_subdir": "console",
   "base_ref": "4e06429",
   "target_branch": "hermes/lyscontrol-m9/integration",
-  "worktree_root": "/home/lystiger/hermes-worktrees/lyscontrol-m9",
-  "runs_root": "/home/lystiger/hermes-runs",
+  "worktree_root": "~/hermes-worktrees/lyscontrol-m9",
+  "runs_root": "~/hermes-runs",
   "execution_backend": "subprocess",
   "limits": {
     "max_changed_files": 40,

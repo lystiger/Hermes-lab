@@ -1,11 +1,11 @@
 {
   "sprint_id": "lab-s05",
   "name": "Three-Agent Operational API Delivery",
-  "canonical_repo": "/home/lystiger/hermes-lab",
+  "canonical_repo": "~/hermes-lab",
   "base_ref": "ae984e1a8cda766143a8c3e01dfeeef549d59ac2",
   "target_branch": "s05/integration",
-  "worktree_root": "/home/lystiger/hermes-worktrees/hermes-lab-s05",
-  "runs_root": "/home/lystiger/hermes-runs",
+  "worktree_root": "~/hermes-worktrees/hermes-lab-s05",
+  "runs_root": "~/hermes-runs",
   "execution_backend": "subprocess",
   "keep_herdr_workspace": true,
   "limits": {

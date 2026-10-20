@@ -232,7 +232,7 @@ class JobLauncher:
         def _resolve_spec_path(val: Optional[str], default: Path) -> Path:
             if not val:
                 return default.resolve()
-            p = Path(val)
+            p = Path(os.path.expanduser(val))
             if not p.is_absolute():
                 p = spec_dir / p
             return p.resolve()

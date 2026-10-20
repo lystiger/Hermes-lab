@@ -671,13 +671,14 @@ export interface CapacityTelemetry {
 /** One usage window of an agent, as computed by GET /capacity/limits. */
 export interface AgentLimitWindow {
   label: string;
-  usedPct: number;
-  leftPct: number;
+  usedPct: number | null;
+  leftPct: number | null;
   resetsAt: string | null;
   resetsInSeconds: number;
 }
 
-export type AgentLimitStatus = 'ok' | 'warn' | 'alarm';
+/** 'unknown' when the record has neither limit windows nor a funded balance. */
+export type AgentLimitStatus = 'ok' | 'warn' | 'alarm' | 'unknown';
 
 /** One agent in GET /capacity/limits. Percentages are computed by the backend. */
 export interface AgentLimit {
@@ -687,8 +688,8 @@ export interface AgentLimit {
   ready: boolean;
   stale: boolean;
   status: AgentLimitStatus | string;
-  usedPct: number;
-  leftPct: number;
+  usedPct: number | null;
+  leftPct: number | null;
   resetsAt: string | null;
   resetsInSeconds: number;
   windows: AgentLimitWindow[];

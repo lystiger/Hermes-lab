@@ -19,6 +19,15 @@ def _record(**extra):
     return base
 
 
+def test_agent_without_limits_or_balance_reports_no_left_value(tmp_path):
+    agents = _load(tmp_path, {"f.json": _record(id="fireworks", ready=False, limits=[])})
+
+    agent = agents["fireworks"]
+    assert agent["leftPct"] is None
+    assert agent["usedPct"] is None
+    assert agent["status"] == "unknown"
+
+
 def test_fullest_window_decides_headline_and_reset(tmp_path):
     agents = _load(tmp_path, {"a.json": _record(limits=[
         {"label": "5h", "percent": 0.20, "resetsAt": "2026-10-20T13:00:00Z"},

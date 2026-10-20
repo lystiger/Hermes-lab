@@ -26,7 +26,7 @@ const AgentLimitCard: React.FC<{ agent: AgentLimit }> = ({ agent }) => {
   const status = displayStatus(agent);
   // The bar keeps the backend's colour for a stale reading; only the badge says it is stale.
   const barColor = TONE_COLOR[statusTone(agent.status)];
-  const left = Math.max(0, Math.min(100, agent.leftPct));
+  const left = Math.max(0, Math.min(100, agent.leftPct ?? 0));
 
   return (
     <Card as="section" label={`Limits for ${agent.name}`} bodyClassName="p-4 flex flex-col gap-3">
@@ -41,8 +41,8 @@ const AgentLimitCard: React.FC<{ agent: AgentLimit }> = ({ agent }) => {
       {agent.ready ? (
         <>
           <div className="flex items-baseline gap-2">
-            <span className="font-display text-[34px] leading-none font-semibold lys-metric text-lys-primary">{agent.leftPct}%</span>
-            <span className="text-[12px] text-lys-faint">left</span>
+            <span className="font-display text-[34px] leading-none font-semibold lys-metric text-lys-primary">{agent.leftPct === null ? '—' : `${agent.leftPct}%`}</span>
+            {agent.leftPct !== null && <span className="text-[12px] text-lys-faint">left</span>}
           </div>
           <div
             role="progressbar"
@@ -60,7 +60,7 @@ const AgentLimitCard: React.FC<{ agent: AgentLimit }> = ({ agent }) => {
               {agent.windows.map((w) => (
                 <li key={w.label} className="flex items-baseline justify-between gap-2 text-[11px]">
                   <span className="text-lys-muted">{w.label}</span>
-                  <span className="text-lys-primary lys-metric">{w.leftPct}%</span>
+                  <span className="text-lys-primary lys-metric">{w.leftPct === null ? '—' : `${w.leftPct}%`}</span>
                 </li>
               ))}
             </ul>

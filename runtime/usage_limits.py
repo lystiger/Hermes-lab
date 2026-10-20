@@ -49,6 +49,12 @@ def _future(reset: Optional[datetime], now: datetime) -> Optional[datetime]:
     return reset if reset is not None and reset > now else None
 
 
+def _status(used: Optional[float]) -> str:
+    if used is None:
+        return "unknown"
+    return "alarm" if used >= ALARM_AT_PCT else "warn" if used >= WARN_AT_PCT else "ok"
+
+
 def _agent_from_record(record: Dict[str, Any], filename: str, modified: datetime, now: datetime) -> Dict[str, Any]:
     updated = _parse_time(record.get("updatedAt")) or modified
     limits = record.get("limits") if isinstance(record.get("limits"), list) else []
@@ -68,7 +74,7 @@ def _agent_from_record(record: Dict[str, Any], filename: str, modified: datetime
         })
 
     headline = max(windows, key=lambda window: window["usedRaw"], default=None)
-    used = headline["usedRaw"] if headline else 0.0
+    used = headline["usedRaw"] if headline else None
     reset = _parse_time(headline["resetsAt"]) if headline and headline["resetsAt"] else None
     for window in windows:
         del window["usedRaw"]
@@ -79,9 +85,12 @@ def _agent_from_record(record: Dict[str, Any], filename: str, modified: datetime
         balance["currency"] = _text(raw_balance.get("currency"))
     if balance and balance["funded"] > 0:
         left = max(0.0, min(100.0, balance["remaining"] / balance["funded"] * 100))
-        used = max(used, 100.0 - left)
-    else:
+        used = max(used or 0.0, 100.0 - left)
+    elif used is not None:
         left = max(0.0, min(100.0, 100.0 - used))
+    else:
+        # No window and no funded balance: the record says nothing about what is left.
+        left = None
 
     return {
         "id": _text(record.get("id")) or filename,
@@ -89,9 +98,9 @@ def _agent_from_record(record: Dict[str, Any], filename: str, modified: datetime
         "plan": _text(record.get("tierLabel")),
         "ready": record.get("ready") is True,
         "stale": (now - updated).total_seconds() > STALE_AFTER_SECONDS,
-        "status": "alarm" if used >= ALARM_AT_PCT else "warn" if used >= WARN_AT_PCT else "ok",
-        "usedPct": round(used),
-        "leftPct": round(left),
+        "status": _status(used),
+        "usedPct": None if used is None else round(used),
+        "leftPct": None if left is None else round(left),
         "resetsAt": _iso(reset) if reset else None,
         "resetsInSeconds": _seconds_until(reset, now),
         "windows": windows,

@@ -19,6 +19,8 @@ import { groupOf } from '../features/jobs/MissionBoard';
 import { installLiveHermes, LIVE_JOB_SUMMARY } from './support/liveHermes';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
+// Agent portraits are local-only (gitignored), so a clean checkout has no image files to check.
+const HAS_LOCAL_ART = fs.existsSync(path.join(ROOT, 'public', 'portrait'));
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -85,10 +87,8 @@ describe('M4b hierarchy and cards', () => {
 });
 
 describe('M4b agent art: focal crops of the existing files', () => {
-  it('each agent has avatar and card files that exist, with a focus inside the frame, and the card showing the whole image', () => {
+  it('each agent has a focus inside the frame, and the card showing the whole image', () => {
     for (const [id, art] of Object.entries(AGENT_ART)) {
-      expect(fs.existsSync(path.join(ROOT, 'public', art.avatar)), `${id} avatar`).toBe(true);
-      expect(fs.existsSync(path.join(ROOT, 'public', art.card)), `${id} card`).toBe(true);
       for (const focus of [art.avatarFocus, art.cardFocus]) {
         expect(focus.x).toBeGreaterThanOrEqual(0);
         expect(focus.x).toBeLessThanOrEqual(1);
@@ -101,7 +101,14 @@ describe('M4b agent art: focal crops of the existing files', () => {
     }
   });
 
-  it('the Hermes emblem used for empty states exists', () => {
+  it.skipIf(!HAS_LOCAL_ART)('each agent has avatar and card files that exist', () => {
+    for (const [id, art] of Object.entries(AGENT_ART)) {
+      expect(fs.existsSync(path.join(ROOT, 'public', art.avatar)), `${id} avatar`).toBe(true);
+      expect(fs.existsSync(path.join(ROOT, 'public', art.card)), `${id} card`).toBe(true);
+    }
+  });
+
+  it.skipIf(!HAS_LOCAL_ART)('the Hermes emblem used for empty states exists', () => {
     expect(fs.existsSync(path.join(ROOT, 'public', HERMES_ART))).toBe(true);
   });
 });

@@ -1,7 +1,7 @@
 # Usage limits: verifier
 
 Do not change source. Check the change on this branch:
-1. Run the verification gates listed in the sprint (pytest, console install, typecheck, console tests).
+1. Run the verification gates listed in the sprint. Run Python with `/home/lystiger/Projects/Hermes-lab/.venv/bin/python -m pytest`: the system Python has no pytest or FastAPI. Run the console gates inside `console/` after `npm ci`.
 2. Check that `/capacity/limits` returns the documented shape, and that the math matches the rules in the backend prompt: fullest window, `left = 100 − used`, thresholds 75 and 90.
 3. Browser checks are not required. If the sandbox blocks a check, record "NOT RUN: sandbox" and do not count it as a failure.
 

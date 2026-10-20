@@ -35,6 +35,7 @@ class RuntimeEventBridge:
     """
 
     def __init__(self, event_bus: Any = None, event_store: Optional[RuntimeEventStore] = None):
+        self._listeners = []
         self._bus = event_bus
         self._store = event_store
         self._captured_events: List[Dict[str, Any]] = []
@@ -43,6 +44,11 @@ class RuntimeEventBridge:
         self._last_persistence_error: Optional[Exception] = None
         self._cancelled_tasks: Dict[str, Set[str]] = {}
         self._cancelled_runs: Dict[str, Set[str]] = {}
+
+    def add_listener(self, listener) -> None:
+        """Observe committed events without affecting execution or publication."""
+        if listener not in self._listeners:
+            self._listeners.append(listener)
 
     def set_bus(self, event_bus: Any) -> None:
         self._bus = event_bus
@@ -175,6 +181,12 @@ class RuntimeEventBridge:
                     self._bus.publish(**publish_kwargs)  # a bus without runtime-id support
             except Exception as exc:
                 logger.debug("Failed publishing event to live event_bus: %s", exc)
+
+        for listener in self._listeners:
+            try:
+                listener(stored_event)
+            except Exception as exc:
+                logger.warning("Runtime event listener failed for %s: %s", kind, exc)
 
         return stored_event
 

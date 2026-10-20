@@ -62,7 +62,7 @@ class JobStateReducer:
                     )
                 )
 
-            new_job = JobDetailDTO(
+            job = JobDetailDTO(
                 id=jid,
                 sprintId=sprint_id,
                 title=title,
@@ -75,7 +75,7 @@ class JobStateReducer:
                 startedAt=now_iso,
                 phases=phases,
             )
-            self._service.register_job(new_job)
+            self._service.register_job(job)
 
         elif kind == "job.state_changed":
             new_state = meta.get("new_state", "").upper()
@@ -280,6 +280,9 @@ class JobStateReducer:
                 for p in job.phases:
                     if p.status in {"PENDING", "PREPARING", "RUNNING"}:
                         p.status = "CANCELLED"
+
+        if job is not None:
+            self._service.persist_job(job)
 
 
 job_state_reducer = JobStateReducer()

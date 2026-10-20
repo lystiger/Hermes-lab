@@ -1,6 +1,9 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { HttpHermesApi } from '../api/adapters/httpAdapter';
 
+/** Every request carries a timeout signal (see REQUEST_TIMEOUT_MS in httpAdapter). */
+const TIMED = expect.objectContaining({ signal: expect.anything() });
+
 describe('HttpHermesApi.getExecutionSnapshot (GET /execution)', () => {
   afterEach(() => {
     vi.restoreAllMocks();
@@ -29,7 +32,7 @@ describe('HttpHermesApi.getExecutionSnapshot (GET /execution)', () => {
 
     const snapshot = await new HttpHermesApi('http://localhost:8000').getExecutionSnapshot();
 
-    expect(global.fetch).toHaveBeenCalledWith('http://localhost:8000/execution');
+    expect(global.fetch).toHaveBeenCalledWith('http://localhost:8000/execution', TIMED);
     expect(snapshot.backends).toEqual([{ name: 'herdr', available: false, detail: 'socket down' }]);
     expect(snapshot.resources[0]).toMatchObject({ state: 'idle', jobId: null, taskId: null, executionId: null });
     expect(snapshot.openrig).toEqual({ daemon: 'up', ledger: { owners: 2, rigIds: ['rig-a'] } });

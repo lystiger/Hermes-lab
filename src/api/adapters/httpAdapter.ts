@@ -55,6 +55,8 @@ export const TERMINAL_JOB_STATUSES = [
 ];
 
 const DAY_MS = 24 * 60 * 60 * 1000;
+/** Upper bound for one JSON request to Hermes. The event stream is not a JSON request and is not limited. */
+const REQUEST_TIMEOUT_MS = 15_000;
 
 /** Job summary from GET /jobs or GET /jobs/recoverable. Keeps blocked and repair diagnostics; no invented estimates. */
 export function mapJobSummary(j: any): Job {
@@ -159,7 +161,8 @@ export class HttpHermesApi implements HermesApi {
   private async request(url: string, init?: RequestInit): Promise<Response> {
     let res: Response;
     try {
-      res = init ? await fetch(url, init) : await fetch(url);
+      // A request that never settles would leave its panel loading forever; after the limit it counts as unreachable.
+      res = await fetch(url, { ...init, signal: init?.signal ?? AbortSignal.timeout(REQUEST_TIMEOUT_MS) });
     } catch {
       recordUnreachable(this.baseUrl);
       throw new HermesUnreachableError(this.baseUrl);

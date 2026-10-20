@@ -16,6 +16,7 @@ import { resolveActorPresentation } from './actors';
 import { useConsoleStore } from '../stores/useConsoleStore';
 import { useExecutionStore } from '../stores/useExecutionStore';
 import { isExecutionEvent } from '../stores/executionReducer';
+import { loadOnce } from './inFlight';
 
 export function useHealth() {
   const [health, setHealth] = useState<HealthStatus | null>(null);
@@ -93,7 +94,7 @@ export function useResource<T>(key: string | null, load: (() => Promise<T>) | nu
       const same = prev.key === key;
       return { key, data: same ? prev.data : null, error: same ? prev.error : null, updatedAt: same ? prev.updatedAt : null, loading: true };
     });
-    load().then(
+    (key ? loadOnce(JSON.stringify([key, attempt, ...deps]), load) : load()).then(
       (result) => {
         if (!alive.current || token <= applied.current) return;
         applied.current = token;

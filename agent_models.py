@@ -78,11 +78,12 @@ class ModelRegistry:
                 stream.flush()
                 os.fsync(stream.fileno())
             os.replace(name, path)
-            directory = os.open(path.parent, os.O_RDONLY | os.O_DIRECTORY)
-            try:
-                os.fsync(directory)
-            finally:
-                os.close(directory)
+            if hasattr(os, "O_DIRECTORY"):  # Windows cannot fsync a directory
+                directory = os.open(path.parent, os.O_RDONLY | os.O_DIRECTORY)
+                try:
+                    os.fsync(directory)
+                finally:
+                    os.close(directory)
         finally:
             if os.path.exists(name):
                 os.unlink(name)

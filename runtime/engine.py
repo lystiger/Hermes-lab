@@ -629,6 +629,7 @@ class ReactiveJobEngine:
 
                 follow_up_observations: List[Observation] = []
                 explicit_replan_details: List[str] = []
+                environment_blocks: List[str] = []
 
                 for completed_task in done:
                     try:
@@ -659,6 +660,12 @@ class ReactiveJobEngine:
                                 if (registered.metadata or {}).get("requires_follow_up"):
                                     follow_up_observations.append(registered)
 
+                            if str((exec_res.metadata or {}).get("blocked_by") or "").lower() == "environment":
+                                environment_blocks.append(
+                                    (exec_res.metadata or {}).get("verification_summary") or exec_res.error or task_node.task_id
+                                )
+                                continue
+
                             # Check if execution result explicitly requests replan
                             if exec_res.metadata.get("trigger_replan"):
                                 explicit_replan_details.append(
@@ -669,6 +676,14 @@ class ReactiveJobEngine:
                     except Exception as exc:
                         logger.error("Error processing completed task: %s", exc)
                         raise
+
+                if environment_blocks:
+                    await self._transition_job(
+                        JobState.BLOCKED,
+                        reason=f"Blocked by environment: {'; '.join(str(b) for b in environment_blocks)}",
+                    )
+                    await self._cancel_active_tasks("Job blocked by environment")
+                    return False
 
                 new_follow_ups = [o for o in follow_up_observations if o.id not in self._discovery_triggered]
                 if new_follow_ups or explicit_replan_details:
@@ -747,6 +762,14 @@ class ReactiveJobEngine:
                 await self._transition_job(
                     JobState.COMPLETED,
                     reason=f"Verification passed: {ver_res.summary}",
+                )
+                return False
+
+            elif ver_res.blocked_by == "environment":
+                await self.event_bridge.emit_verification_blocked(self.job.job_id, ver_res)
+                await self._transition_job(
+                    JobState.BLOCKED,
+                    reason=f"Verification blocked by environment in phase 'VERIFYING': {ver_res.summary}",
                 )
                 return False
 

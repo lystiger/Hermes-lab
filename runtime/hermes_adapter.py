@@ -635,6 +635,7 @@ class HermesActorAdapter(ActorAdapter):
                 '  "verdict": "passed" | "failed",\n'
                 '  "summary": "short explanation",\n'
                 '  "repairable": true | false,\n'
+                '  "blocked_by": "environment" | null,\n'
                 '  "findings": ["finding 1", "finding 2"]\n'
                 "}\n\n"
                 "Do not omit verdict.\n"
@@ -1072,6 +1073,8 @@ class HermesActorAdapter(ActorAdapter):
                 exec_meta["verification_summary"] = runtime_meta.get("summary")
                 exec_meta["findings"] = runtime_meta.get("findings", [])
                 exec_meta["repairable"] = runtime_meta.get("repairable", False)
+                if runtime_meta.get("blocked_by"):
+                    exec_meta["blocked_by"] = runtime_meta["blocked_by"]
 
             error_msg = stderr_text if exit_code != 0 else (runtime_meta.get("summary") if status_str == "failed" else None)
 
@@ -1336,6 +1339,16 @@ class HermesVerifierAdapter(VerifierAdapter):
         checks_results: List[VerificationCheck] = []
         all_passed = True
         has_repairable_failure = False
+        blocked_by: Optional[str] = None
+
+        def is_environment_block(error_text: str = "", error: Optional[BaseException] = None) -> bool:
+            if isinstance(error, (PermissionError, FileNotFoundError)):
+                return True
+            text = error_text.lower()
+            return any(marker in text for marker in (
+                "eperm", "operation not permitted", "permission denied",
+                "chromium unavailable", "browser unavailable",
+            ))
 
         for step in self.verification_steps:
             check_name = step.get("name", "verification_check")
@@ -1379,6 +1392,7 @@ class HermesVerifierAdapter(VerifierAdapter):
                 passed = proc.returncode == 0
                 stdout_str = stdout.decode("utf-8", errors="replace").strip()
                 stderr_str = stderr.decode("utf-8", errors="replace").strip()
+                environment_block = not passed and is_environment_block(stderr_str, None)
                 logger.info("Verification check '%s' finished with rc=%s:\nSTDOUT:\n%s\nSTDERR:\n%s", check_name, proc.returncode, stdout_str, stderr_str)
 
                 msg = f"Exit {proc.returncode}"
@@ -1393,14 +1407,22 @@ class HermesVerifierAdapter(VerifierAdapter):
                         passed=passed,
                         detail=msg,
                         error=stderr_str if not passed else None,
-                        repairable=not passed,
-                        metadata={"stdout": stdout_str, "stderr": stderr_str, "returncode": proc.returncode},
+                        repairable=not passed and not environment_block,
+                        metadata={
+                            "stdout": stdout_str,
+                            "stderr": stderr_str,
+                            "returncode": proc.returncode,
+                            **({"blocked_by": "environment"} if environment_block else {}),
+                        },
                     )
                 )
 
                 if not passed:
                     all_passed = False
-                    has_repairable_failure = True
+                    if environment_block:
+                        blocked_by = "environment"
+                    else:
+                        has_repairable_failure = True
 
             except asyncio.TimeoutError:
                 logger.warning("Verification check '%s' timed out after %s seconds", check_name, timeout_sec)
@@ -1418,17 +1440,22 @@ class HermesVerifierAdapter(VerifierAdapter):
 
             except Exception as e:
                 logger.warning("Verification check '%s' raised exception: %s", check_name, e)
+                environment_block = is_environment_block(str(e), e)
                 checks_results.append(
                     VerificationCheck(
                         name=check_name,
                         passed=False,
                         detail=str(e),
                         error=str(e),
-                        repairable=True,
+                        repairable=not environment_block,
+                        metadata={"blocked_by": "environment"} if environment_block else {},
                     )
                 )
                 all_passed = False
-                has_repairable_failure = True
+                if environment_block:
+                    blocked_by = "environment"
+                else:
+                    has_repairable_failure = True
 
         if all_passed:
             return VerificationResult(
@@ -1458,6 +1485,8 @@ class HermesVerifierAdapter(VerifierAdapter):
             summary=summary_msg,
             checks=checks_results,
             repair_recommendations=repair_tasks,
+            # A genuine repairable failure must never be hidden by an environment block.
+            blocked_by=None if has_repairable_failure else blocked_by,
         )
 
 

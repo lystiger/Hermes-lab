@@ -548,6 +548,17 @@ class RuntimeEventBridge:
             accent_color="#EF4444",
         )
 
+    async def emit_verification_blocked(self, job_id: str, result: Any) -> StoredRuntimeEvent:
+        return await self.persist_and_publish(
+            source_id="hermes.verifier",
+            source_kind="runtime",
+            kind="verification.blocked",
+            detail=f"Verification blocked by environment in phase 'VERIFYING' for job {job_id}: {result.summary}",
+            job_id=job_id,
+            metadata=result.to_dict() if hasattr(result, "to_dict") else {},
+            accent_color="#F59E0B",
+        )
+
     async def emit_replan_requested(self, job_id: str, reason: str, remaining_budget: int) -> StoredRuntimeEvent:
         return await self.persist_and_publish(
             source_id="hermes.scheduler",

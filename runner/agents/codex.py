@@ -133,7 +133,7 @@ class CodexAdapter(AgentAdapter):
                         "repairable": repairable,
                         "blocked_by": blocked_by,
                         "findings": findings,
-                        "requires_follow_up": True,
+                        "requires_follow_up": blocked_by != "environment",
                     },
                 })
 
@@ -190,7 +190,7 @@ class CodexAdapter(AgentAdapter):
                         "repairable": repairable,
                         "blocked_by": blocked_by,
                         "findings": findings,
-                        "requires_follow_up": True,
+                        "requires_follow_up": blocked_by != "environment",
                     },
                 })
 

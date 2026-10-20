@@ -635,6 +635,7 @@ class HermesActorAdapter(ActorAdapter):
                 '  "verdict": "passed" | "failed",\n'
                 '  "summary": "short explanation",\n'
                 '  "repairable": true | false,\n'
+                '  "blocked_by": "environment" | null,\n'
                 '  "findings": ["finding 1", "finding 2"]\n'
                 "}\n\n"
                 "Do not omit verdict.\n"
@@ -1072,6 +1073,8 @@ class HermesActorAdapter(ActorAdapter):
                 exec_meta["verification_summary"] = runtime_meta.get("summary")
                 exec_meta["findings"] = runtime_meta.get("findings", [])
                 exec_meta["repairable"] = runtime_meta.get("repairable", False)
+                if runtime_meta.get("blocked_by"):
+                    exec_meta["blocked_by"] = runtime_meta["blocked_by"]
 
             error_msg = stderr_text if exit_code != 0 else (runtime_meta.get("summary") if status_str == "failed" else None)
 

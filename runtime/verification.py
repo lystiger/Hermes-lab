@@ -44,6 +44,7 @@ class VerificationResult:
     checks: List[VerificationCheck] = field(default_factory=list)
     repair_recommendations: List[Dict[str, Any]] = field(default_factory=list)
     metadata: Dict[str, Any] = field(default_factory=dict)
+    blocked_by: Optional[str] = None
 
     def __post_init__(self):
         if isinstance(self.status, str):
@@ -55,7 +56,7 @@ class VerificationResult:
 
     @property
     def is_repairable(self) -> bool:
-        return self.status == VerificationStatus.REPAIRABLE
+        return self.status == VerificationStatus.REPAIRABLE and self.blocked_by != "environment"
 
     def to_dict(self) -> Dict[str, Any]:
         data = asdict(self)
@@ -81,6 +82,7 @@ class VerificationResult:
             checks=checks,
             repair_recommendations=list(data.get("repair_recommendations", [])),
             metadata=dict(data.get("metadata", {})),
+            blocked_by=data.get("blocked_by"),
         )
 
 

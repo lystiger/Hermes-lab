@@ -12,6 +12,6 @@ Files changed:
 Tests:
 - Parser smoke checks for JSON and textual environment-blocked verdicts passed.
 - Python compilation and `git diff --check` passed.
-- Focused pytest invocation started and produced one passing test, then stalled in this environment and was interrupted; the full gate is unverified.
+- Required pytest gate was started with the specified venv; it reached 23 passing tests and then stalled in this sandbox with no failure output. It was not possible to obtain an exit code.
 
 Uncertain: no new dedicated pytest file was added because the existing focused suite stalls after its first test in this sandbox. Ordinary repairable failures remain on the existing repair/replan path.

@@ -4,7 +4,7 @@ from typing import Any, Dict, List, Mapping, Optional
 
 from .base import AgentAdapter, argv_safe_prompt
 from .errors import SprintRunnerError
-from .denials import check_denials
+from .denials import check_denials, denial_lines
 
 
 class CodexAdapter(AgentAdapter):
@@ -32,8 +32,7 @@ class CodexAdapter(AgentAdapter):
         return (model.group(1), effort.group(1) if effort else None) if model else (None, None)
 
     def validate_result(self, result, context):
-        denials = [line for line in (result.stderr or "").splitlines()
-                   if "permission denied" in line.lower()]
+        denials = denial_lines(result.stderr)
         policy = (getattr(context, "options", {}), getattr(result, "runtime_metadata", None),
                   getattr(context, "phase", {}), getattr(context, "worktree", None))
         try:

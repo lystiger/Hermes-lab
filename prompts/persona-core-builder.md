@@ -6,7 +6,7 @@ You are the BUILDER. Repository: LysControl (React 19, Vite, TypeScript, Vitest)
 The core console ships without character art. Character art moves to a separate theme repository, LysStack-persona, that will be loaded later. This sprint only removes the art from the core and makes the console render correctly without it.
 
 ## Steps
-1. Delete these tracked picture files with `git rm`:
+1. Delete these tracked picture files with `rm` (the controller stages the deletions):
    - public/agents/*.webp (seven files: claude, codex, gemini, hermes, and the three -card files)
    - design-reference/cards/*.png (claude, codex, gemini)
    - design-reference/screenshots/*.png (nine files)
@@ -25,4 +25,4 @@ The core console ships without character art. Character art moves to a separate 
 npm run typecheck, npm run lint, npm run test -- --run, npm run build.
 
 ## Handoff
-Write HANDOFF_BUILDER.md: the files deleted, the files changed, the test expectations you changed and why, gate results. Commit with `chore: remove character art from the core (moves to LysStack-persona)`, ending with `Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>`. Leave HANDOFF_BUILDER.md untracked.
+Write HANDOFF_BUILDER.md: the files deleted, the files changed, the test expectations you changed and why, gate results. Use your file-write tool, not a shell heredoc or redirect. Do not run git commands: the controller stages and commits your changes, and it excludes the handoff file.

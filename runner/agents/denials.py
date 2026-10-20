@@ -16,6 +16,14 @@ def denial_text(value):
     return str(value)
 
 
+def denial_lines(stderr):
+    """Stderr lines that report a denial. Diff-shaped lines echo file content, not denials."""
+    return [
+        line for line in (stderr or "").splitlines()
+        if "permission denied" in line.lower() and line[:1] not in (" ", "\t", "+", "-", "@")
+    ]
+
+
 def check_denials(denials, usable, options=None, metadata=None, phase=None, worktree=None):
     strict = bool((phase or {}).get("fail_on_permission_denial") or (options or {}).get("fail_on_permission_denial"))
     options = {**(phase or {}), **(options or {})}

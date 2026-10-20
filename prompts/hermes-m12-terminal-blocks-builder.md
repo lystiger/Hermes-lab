@@ -28,4 +28,4 @@ Relevant code: runner/agents/codex.py (verdict parsing, the `repairable` field),
 `/home/lystiger/Projects/Hermes-lab/.venv/bin/python -m pytest tests -q --ignore=tests/smoke -p no:cacheprovider` exits 0. Use the venv.
 
 ## Handoff
-Write HANDOFF_BUILDER.md: the contract change, the files changed, test results, and what you are unsure about. Commit with `feat(runtime): environment blocks end the job instead of replanning`, ending with `Co-Authored-By: Claude Haiku 5.5 <noreply@anthropic.com>`. Do not commit the handoff file itself: leave HANDOFF_BUILDER.md untracked.
+Write HANDOFF_BUILDER.md: the contract change, the files changed, test results, and what you are unsure about. Use your file-write tool, not a shell heredoc or redirect. Do not run git commands: the controller stages and commits your changes, and it excludes the handoff file.

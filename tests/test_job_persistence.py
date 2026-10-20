@@ -203,3 +203,40 @@ def test_legacy_migration_does_not_consume_recovery_cap_twice(tmp_path, monkeypa
         os.utime(tmp_path / f"legacy_{index}", (2000000000, 2000000000))
     second = JobService(runs_root=tmp_path).list_jobs(limit=100)
     assert second == first
+
+
+def test_restart_reconciles_running_task_records(tmp_path):
+    from runtime.task_graph import TaskNode, TaskStatus
+
+    service = JobService(runs_root=tmp_path)
+    job = make_job("RUNNING")
+    job.phases[0].status = "RUNNING"
+    job.tasks = [TaskNode(task_id="t1", status=TaskStatus.RUNNING).to_dict(),
+                 TaskNode(task_id="t2", status=TaskStatus.SUCCEEDED).to_dict()]
+    completed_task = dict(job.tasks[1])
+    service.register_job(job)
+    recovered = JobService(runs_root=tmp_path)
+    tasks = recovered.get_job_tasks(job.id)
+    assert tasks[0]["status"] == "FAILED"
+    assert tasks[0]["completed_at"] == recovered.get_job(job.id).completedAt
+    assert tasks[1] == completed_task
+    assert JobService(runs_root=tmp_path).get_job_tasks(job.id) == tasks
+
+
+@pytest.mark.anyio
+async def test_reactive_observation_survives_restart_without_polling(tmp_path):
+    from runtime.engine import ReactiveJobEngine
+    from runtime.events import RuntimeEventBridge
+    from runtime.observations import ObservationRegistry
+
+    service = JobService(runs_root=tmp_path)
+    registry = ObservationRegistry()
+    bridge = RuntimeEventBridge()
+    engine = ReactiveJobEngine(job_id="observed", goal="Persist observations",
+                               event_bridge=bridge, observation_registry=registry)
+    service.register_engine(engine)
+    observation = registry.add_observation(job_id="observed", kind="discovery", content="Keep me")
+    await bridge.emit_observation_created(observation)
+    data = json.loads((tmp_path / "observed" / "job.json").read_text())
+    assert data["observations"] == [observation.to_dict()]
+    assert JobService(runs_root=tmp_path).get_job_observations("observed") == [observation.to_dict()]

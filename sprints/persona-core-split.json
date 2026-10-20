@@ -1,8 +1,9 @@
 {
   "sprint_id": "persona-core-split",
   "name": "LysControl: remove character art from the core",
-  "target_repo": "../../LysControl",
-  "base_ref": "80ab429",
+  "target_repo": "../",
+  "target_subdir": "console",
+  "base_ref": "4e06429",
   "target_branch": "hermes/persona-core/integration",
   "worktree_root": "/home/lystiger/hermes-worktrees/persona-core",
   "runs_root": "/home/lystiger/hermes-runs",

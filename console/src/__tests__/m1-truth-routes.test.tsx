@@ -148,13 +148,13 @@ describe('M1 truth sweep: HTTP-mode screens render only real data', () => {
     expectNoFabrication(container);
   });
 
-  it('Usage: states that values are not measured instead of showing a demo banner or budget numbers', async () => {
+  it('Usage: shows dashes for missing totals and no demo banner or budget numbers', async () => {
     installLiveHermes();
     const { container } = renderIn(<UsageRoute />);
 
-    expect(await screen.findByText(/Since runtime start/i)).toBeInTheDocument();
-    expect(screen.getByText('run budget')).toBeInTheDocument();
-    expect(screen.getByText(/Unreported metrics/)).toBeInTheDocument();
+    expect(await screen.findByText('No agent limits')).toBeInTheDocument();
+    expect(screen.queryByText('run budget')).not.toBeInTheDocument();
+    expect(screen.queryByText(/Unreported metrics/)).not.toBeInTheDocument();
     expectNoFabrication(container);
   });
 

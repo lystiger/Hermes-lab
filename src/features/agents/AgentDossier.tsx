@@ -1,4 +1,6 @@
-import React from 'react';
+import React, { useState } from 'react';
+import { PanelRightClose, PanelRightOpen } from 'lucide-react';
+import { Icon } from '../../components/Icon';
 import { AgentDetail } from '../../api/types';
 import { Freshness, UnknownValue } from '../../components/DataStates';
 import { CopyId } from '../../components/CopyId';
@@ -35,6 +37,8 @@ export const AgentDossier: React.FC<{ agent: AgentDetail; updatedAt?: number | n
   const accent = presenceAccent(agent);
   const art = agentArt(agent.id);
   const isRunning = agent.status === 'RUNNING';
+  // The portrait is the hero; the specs and model panels fold away so it can take the full width.
+  const [detailsOpen, setDetailsOpen] = useState(true);
 
   return (
     <article aria-label={`Dossier for ${agent.displayName}`} className="flex flex-col min-w-0 min-h-full">
@@ -63,6 +67,18 @@ export const AgentDossier: React.FC<{ agent: AgentDetail; updatedAt?: number | n
           >
             Dispatch
           </button>
+          <button
+            type="button"
+            onClick={() => setDetailsOpen((open) => !open)}
+            aria-expanded={detailsOpen}
+            aria-controls="agent-details"
+            aria-label={detailsOpen ? 'Hide details' : 'Show details'}
+            title={detailsOpen ? 'Hide details' : 'Show details'}
+            className="flex items-center gap-2 text-[12px] px-3 py-1.5 border border-lys-default text-lys-muted hover:bg-lys-surface-2 cursor-pointer transition-colors"
+          >
+            <Icon icon={detailsOpen ? PanelRightClose : PanelRightOpen} />
+            Details
+          </button>
           {art && (
             <button
               type="button"
@@ -76,8 +92,10 @@ export const AgentDossier: React.FC<{ agent: AgentDetail; updatedAt?: number | n
         </div>
       </header>
 
-      <div className="flex-1 grid grid-cols-1 lg:grid-cols-[280px_1fr] xl:grid-cols-[320px_1fr] gap-5 p-6 items-start">
-        <Card accent={accent} label="Agent art" className="h-[380px] w-full">
+      <div
+        className={`flex-1 grid gap-5 p-6 items-stretch ${detailsOpen ? 'grid-cols-1 lg:grid-cols-[minmax(0,1fr)_minmax(280px,360px)] xl:grid-cols-[minmax(0,1fr)_340px]' : 'grid-cols-1'}`}
+      >
+        <Card accent={accent} label="Agent art" className="min-h-[460px] h-full w-full">
           {art ? (
             <FocalImage src={art.card} alt={`${agent.displayName} character art`} focus={art.cardFocus} className="absolute inset-0 h-full w-full" />
           ) : (
@@ -85,29 +103,30 @@ export const AgentDossier: React.FC<{ agent: AgentDetail; updatedAt?: number | n
           )}
         </Card>
 
-        <div className="flex flex-col gap-5 min-w-0">
-          <Card accent={accent} label="Specs">
-            <div className="p-6 flex flex-col gap-6">
-              <div className="grid grid-cols-2 md:grid-cols-3 gap-x-6 gap-y-5">
-                <Spec label="Provider">{agent.provider || <UnknownValue reason="Hermes did not report a provider" />}</Spec>
-                <Spec label="Model">{agent.model || <UnknownValue reason="Hermes did not report a model" />}</Spec>
-                <Spec label="Role">{agent.role || <UnknownValue reason="Hermes did not report a role" />}</Spec>
-                <Spec label="Phase">{agent.phase || <UnknownValue reason="Hermes reports no phase for this agent" />}</Spec>
-                <Spec label="Current task">{agent.currentTask || <UnknownValue reason="Hermes reports no current task for this agent" />}</Spec>
-                <Spec label="Active tool">{agent.activeTool || <UnknownValue reason="Hermes reports no active tool for this agent" />}</Spec>
-              </div>
-              <div className="flex flex-col gap-2">
-                <span className="text-[10px] font-medium tracking-wider uppercase text-lys-faint">Capabilities</span>
-                {agent.capabilities.length === 0 ? (
-                  <span className="text-[13px] text-lys-faint">none reported</span>
-                ) : (
-                  <div className="flex flex-wrap gap-2">
-                    {agent.capabilities.map((cap) => (
-                      <span key={cap} className="text-[12px] px-2 py-0.5 bg-lys-surface-2 text-lys-secondary rounded-sm">
-                        {cap}
-                      </span>
-                    ))}
-                  </div>
+        {detailsOpen && (
+        <div id="agent-details" className="flex flex-col gap-5 min-w-0">
+            <Card accent={accent} label="Specs">
+              <div className="p-6 flex flex-col gap-6">
+                <div className="grid grid-cols-2 md:grid-cols-3 gap-x-6 gap-y-5">
+                  <Spec label="Provider">{agent.provider || <UnknownValue reason="Hermes did not report a provider" />}</Spec>
+                  <Spec label="Model">{agent.model || <UnknownValue reason="Hermes did not report a model" />}</Spec>
+                  <Spec label="Role">{agent.role || <UnknownValue reason="Hermes did not report a role" />}</Spec>
+                  <Spec label="Phase">{agent.phase || <UnknownValue reason="Hermes reports no phase for this agent" />}</Spec>
+                  <Spec label="Current task">{agent.currentTask || <UnknownValue reason="Hermes reports no current task for this agent" />}</Spec>
+                  <Spec label="Active tool">{agent.activeTool || <UnknownValue reason="Hermes reports no active tool for this agent" />}</Spec>
+                </div>
+                <div className="flex flex-col gap-2">
+                  <span className="text-[10px] font-medium tracking-wider uppercase text-lys-faint">Capabilities</span>
+                  {agent.capabilities.length === 0 ? (
+                    <span className="text-[13px] text-lys-faint">none reported</span>
+                  ) : (
+                    <div className="flex flex-wrap gap-2">
+                      {agent.capabilities.map((cap) => (
+                        <span key={cap} className="text-[12px] px-2 py-0.5 bg-lys-surface-2 text-lys-secondary rounded-sm">
+                          {cap}
+                        </span>
+                      ))}
+                    </div>
                 )}
               </div>
               <AgentContextMeter agent={agent} />
@@ -116,6 +135,7 @@ export const AgentDossier: React.FC<{ agent: AgentDetail; updatedAt?: number | n
 
           <AgentModelSelector agentId={agent.id} accent={accent} />
         </div>
+        )}
       </div>
     </article>
   );

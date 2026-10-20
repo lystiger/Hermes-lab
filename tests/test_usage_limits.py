@@ -55,6 +55,15 @@ def test_balance_left_and_status(tmp_path):
     assert a["balance"] == {"funded": 20.0, "remaining": 1.5, "spent": 18.5, "currency": "USD"}
 
 
+def test_funded_balance_decides_headline_over_windows(tmp_path):
+    agents = _load(tmp_path, {"a.json": _record(
+        limits=[{"label": "window", "percent": 0.2}],
+        balance={"funded": 20, "remaining": 18, "spent": 2, "currency": "USD"},
+    )})
+    a = agents["a"]
+    assert (a["usedPct"], a["leftPct"], a["status"]) == (10, 90, "ok")
+
+
 def test_past_reset_is_not_shown(tmp_path):
     agents = _load(tmp_path, {"a.json": _record(limits=[{"label": "x", "percent": 0.5, "resetsAt": "2026-10-20T11:00:00Z"}])})
     a = agents["a"]

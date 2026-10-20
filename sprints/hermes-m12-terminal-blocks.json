@@ -1,0 +1,78 @@
+{
+  "sprint_id": "hermes-m12-terminal-blocks",
+  "name": "Hermes M12: environment blocks end the job instead of replanning",
+  "target_repo": "../",
+  "base_ref": "e82ffa4",
+  "target_branch": "hermes/m12/integration",
+  "worktree_root": "/home/lystiger/hermes-worktrees/hermes-m12",
+  "runs_root": "/home/lystiger/hermes-runs",
+  "execution_backend": "subprocess",
+  "limits": {
+    "max_changed_files": 40,
+    "timeout_seconds": 3000
+  },
+  "verification": [
+    {
+      "name": "pytest",
+      "command": [
+        "/home/lystiger/Projects/Hermes-lab/.venv/bin/python",
+        "-m",
+        "pytest",
+        "tests",
+        "-q",
+        "--ignore=tests/smoke",
+        "-p",
+        "no:cacheprovider"
+      ],
+      "timeout_seconds": 900
+    }
+  ],
+  "phases": [
+    {
+      "name": "m12_builder",
+      "role": "builder",
+      "agent": "codex",
+      "execution_backend": "subprocess",
+      "worktree_dir": "builder",
+      "branch": "hermes/m12/builder",
+      "prompt_file": "prompts/hermes-m12-terminal-blocks-builder.md",
+      "expected_handoff": "HANDOFF_BUILDER.md",
+      "cmd_options": {
+        "model": "gpt-reserve",
+        "sandbox": "workspace-write",
+        "ephemeral": true
+      },
+      "commit_message": "feat(runtime): environment blocks end the job instead of replanning"
+    },
+    {
+      "name": "m12_hardener",
+      "role": "hardener",
+      "agent": "claude",
+      "execution_backend": "subprocess",
+      "worktree_dir": "hardener",
+      "branch": "hermes/m12/hardener",
+      "prompt_file": "prompts/hermes-m12-terminal-blocks-hardener.md",
+      "expected_handoff": "HANDOFF_HARDENER.md",
+      "cmd_options": {
+        "model": "sonnet"
+      },
+      "commit_message": "fix(runtime): harden environment-block handling"
+    },
+    {
+      "name": "m12_verifier",
+      "role": "verifier",
+      "agent": "codex",
+      "execution_backend": "subprocess",
+      "worktree_dir": "verifier",
+      "branch": "hermes/m12/verifier",
+      "prompt_file": "prompts/hermes-m12-terminal-blocks-verifier.md",
+      "expected_handoff": "HANDOFF_CODEX.md",
+      "cmd_options": {
+        "model": "gpt-reserve",
+        "sandbox": "workspace-write",
+        "ephemeral": true
+      },
+      "commit_message": "chore: verifier evidence only (no commit expected)"
+    }
+  ]
+}

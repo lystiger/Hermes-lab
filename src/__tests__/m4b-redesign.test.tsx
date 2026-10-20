@@ -85,7 +85,7 @@ describe('M4b hierarchy and cards', () => {
 });
 
 describe('M4b agent art: focal crops of the existing files', () => {
-  it('each agent has avatar and card files that exist, with a focus inside the frame and a real zoom', () => {
+  it('each agent has avatar and card files that exist, with a focus inside the frame, and the card showing the whole image', () => {
     for (const [id, art] of Object.entries(AGENT_ART)) {
       expect(fs.existsSync(path.join(ROOT, 'public', art.avatar)), `${id} avatar`).toBe(true);
       expect(fs.existsSync(path.join(ROOT, 'public', art.card)), `${id} card`).toBe(true);
@@ -96,7 +96,8 @@ describe('M4b agent art: focal crops of the existing files', () => {
         expect(focus.y).toBeLessThanOrEqual(1);
         expect(focus.zoom).toBeGreaterThanOrEqual(1);
       }
-      expect(art.cardFocus.zoom, `${id} card crop`).toBeGreaterThan(1.5);
+      // The card art is the clean portrait, so it shows the whole image rather than a tight crop.
+      expect(art.cardFocus.zoom, `${id} card crop`).toBe(1);
     }
   });
 

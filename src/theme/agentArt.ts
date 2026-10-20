@@ -14,7 +14,7 @@ export interface Focus {
 export interface AgentArt {
   /** Square portrait used for roster thumbnails. */
   avatar: string;
-  /** Character sheet (contains text): cropped to the figure for dossier panes, never shown whole. */
+  /** Character art for dossier panes. The portrait files are clean figures with no text, so the card may show all of them. */
   card: string;
   avatarFocus: Focus;
   cardFocus: Focus;
@@ -25,19 +25,19 @@ export const AGENT_ART: Record<string, AgentArt> = {
     avatar: '/portrait/claude.png',
     card: '/portrait/claude.png',
     avatarFocus: { x: 0.5, y: 0.4, zoom: 1.05 },
-    cardFocus: { x: 0.36, y: 0.27, zoom: 2.4 }
+    cardFocus: { x: 0.5, y: 0.35, zoom: 1 }
   },
   codex: {
     avatar: '/portrait/codex.png',
     card: '/portrait/codex.png',
     avatarFocus: { x: 0.5, y: 0.4, zoom: 1.05 },
-    cardFocus: { x: 0.3, y: 0.22, zoom: 3.0 }
+    cardFocus: { x: 0.5, y: 0.35, zoom: 1 }
   },
   gemini: {
     avatar: '/portrait/gemini.png',
     card: '/portrait/gemini.png',
     avatarFocus: { x: 0.5, y: 0.4, zoom: 1.05 },
-    cardFocus: { x: 0.27, y: 0.2, zoom: 3.0 }
+    cardFocus: { x: 0.5, y: 0.35, zoom: 1 }
   }
 };
 

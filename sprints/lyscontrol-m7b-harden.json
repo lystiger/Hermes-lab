@@ -1,11 +1,12 @@
 {
   "sprint_id": "lyscontrol-m7b-harden",
   "name": "LysControl M7b: harden and verify the polish",
-  "target_repo": "../../LysControl",
-  "base_ref": "3fe86599694b86e6919599df6376317a8cc9dfd5",
+  "target_repo": "../",
+  "target_subdir": "console",
+  "base_ref": "4e06429",
   "target_branch": "hermes/lyscontrol-m7b/integration",
-  "worktree_root": "/home/lystiger/hermes-worktrees/lyscontrol-m7b",
-  "runs_root": "/home/lystiger/hermes-runs",
+  "worktree_root": "~/hermes-worktrees/lyscontrol-m7b",
+  "runs_root": "~/hermes-runs",
   "execution_backend": "subprocess",
   "limits": {
     "max_changed_files": 90,

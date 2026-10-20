@@ -33,6 +33,7 @@ from runtime.verification import VerifierAdapter, VerificationResult, Verificati
 from runtime.task_graph import TaskNode, TaskGraph, TaskStatus
 from runtime.job_state import JobRecord
 from runtime.observations import Observation
+from runtime.target_subdir import normalize_target_subdir, subdir_path
 from runtime.replanning import ProductionPlannerAdapter, PlannerAdapter, ReplanRequest, ReplanResult, GraphMutation, GraphMutationType
 from runtime.capacity import UsageSnapshotNormalizer, default_capacity_registry
 from runner.agents.errors import SprintRunnerError
@@ -180,6 +181,7 @@ class HermesActorAdapter(ActorAdapter):
         target_branch: str = "sprint/integration",
         observation_registry: Any = None,
         event_bridge: Any = None,
+        target_subdir: str = "",
     ):
         self.control_root = Path.cwd().resolve()
         self.target_repo = Path(target_repo).resolve() if target_repo else self.control_root
@@ -205,6 +207,8 @@ class HermesActorAdapter(ActorAdapter):
         self.thread_id = self.job_id
         self.base_ref = base_ref
         self.target_branch = target_branch
+        # Agents and verification run in this subfolder of each worktree; git stays at the root.
+        self.target_subdir = normalize_target_subdir(target_subdir)
         self.logger = logger
         self.persona_enabled = True
         self.controller_id = f"hermes.runtime:{self.job_id}"
@@ -468,6 +472,16 @@ class HermesActorAdapter(ActorAdapter):
         res = self.run_cmd(["git", "status", "--porcelain", "--untracked-files=all"], cwd=worktree_path, check=False)
         return [line.strip() for line in res.stdout.splitlines() if line.strip()]
 
+    @staticmethod
+    def _handoff_path(task: TaskNode) -> Optional[str]:
+        """The phase's handoff file is evidence for the next agent, not product work."""
+        handoff = (task.metadata or {}).get("expected_handoff")
+        return str(handoff) if handoff else None
+
+    def _exclude_handoff(self, changed_files: List[str], task: TaskNode) -> List[str]:
+        handoff = self._handoff_path(task)
+        return [line for line in changed_files if not handoff or line.split(maxsplit=1)[-1] != handoff]
+
     def validate_python_syntax(self, worktree_path: Path) -> None:
         """
         Validates syntax of all Python files in the worktree.
@@ -510,13 +524,15 @@ class HermesActorAdapter(ActorAdapter):
             # 1. Verify execution fence before staging or inspecting files
             self._verify_execution_fence(task, context)
 
-            changed_files = self.inspect_changed_files(worktree_path)
+            changed_files = self._exclude_handoff(self.inspect_changed_files(worktree_path), task)
             if not changed_files or role == "verifier":
                 return None
 
             commit_msg = task.metadata.get("commit_message") or f"feat({task.task_id}): {task.description[:72]}"
             logger.info("Staging and committing %d files in %s: %s", len(changed_files), worktree_path.name, commit_msg)
-            self.run_cmd(["git", "add", "."], cwd=worktree_path)
+            handoff = self._handoff_path(task)
+            exclude = [f":(exclude,glob){handoff}"] if handoff else []
+            self.run_cmd(["git", "add", ".", *exclude], cwd=worktree_path)
 
             # 2. Verify execution fence before creating commit
             self._verify_execution_fence(task, context)
@@ -635,6 +651,7 @@ class HermesActorAdapter(ActorAdapter):
                 '  "verdict": "passed" | "failed",\n'
                 '  "summary": "short explanation",\n'
                 '  "repairable": true | false,\n'
+                '  "blocked_by": "environment" | null,\n'
                 '  "findings": ["finding 1", "finding 2"]\n'
                 "}\n\n"
                 "Do not omit verdict.\n"
@@ -914,7 +931,7 @@ class HermesActorAdapter(ActorAdapter):
                     **({"priority": task.metadata["priority"]} if "priority" in task.metadata else {}),
                     **({"persona": task.metadata["persona"]} if "persona" in task.metadata else {}),
                 },
-                worktree=worktree_path,
+                worktree=subdir_path(worktree_path, self.target_subdir),
                 prompt=effective_prompt,
                 options=task.metadata.get("options", {}),
                 stdout_file=stdout_file,
@@ -996,8 +1013,9 @@ class HermesActorAdapter(ActorAdapter):
 
             # Validate role constraints
             changed_files = self.inspect_changed_files(worktree_path)
-            if role == "verifier" and changed_files:
-                raise RuntimeError(f"Verifier task '{task.task_id}' modified {len(changed_files)} files; verifier role forbids mutations.")
+            mutations = self._exclude_handoff(changed_files, task)
+            if role == "verifier" and mutations:
+                raise RuntimeError(f"Verifier task '{task.task_id}' modified {len(mutations)} files; verifier role forbids mutations.")
 
             # Commit changes and merge into integration worktree with fence checks
             commit_sha = self._commit_and_integrate_changes(worktree_path, task, role, context)
@@ -1072,6 +1090,8 @@ class HermesActorAdapter(ActorAdapter):
                 exec_meta["verification_summary"] = runtime_meta.get("summary")
                 exec_meta["findings"] = runtime_meta.get("findings", [])
                 exec_meta["repairable"] = runtime_meta.get("repairable", False)
+                if runtime_meta.get("blocked_by"):
+                    exec_meta["blocked_by"] = runtime_meta["blocked_by"]
 
             error_msg = stderr_text if exit_code != 0 else (runtime_meta.get("summary") if status_str == "failed" else None)
 
@@ -1297,7 +1317,9 @@ class HermesVerifierAdapter(VerifierAdapter):
         verification_steps: Optional[List[Dict[str, Any]]] = None,
         working_dir: Optional[Path] = None,
         worktree_root: Optional[Path] = None,
+        target_subdir: str = "",
     ):
+        self.target_subdir = normalize_target_subdir(target_subdir)
         self.verifier_id = verifier_id
         self.verification_steps = verification_steps or []
         self.working_dir = Path(working_dir).resolve() if working_dir else Path.cwd()
@@ -1336,6 +1358,16 @@ class HermesVerifierAdapter(VerifierAdapter):
         checks_results: List[VerificationCheck] = []
         all_passed = True
         has_repairable_failure = False
+        blocked_by: Optional[str] = None
+
+        def is_environment_block(error_text: str = "", error: Optional[BaseException] = None) -> bool:
+            if isinstance(error, (PermissionError, FileNotFoundError)):
+                return True
+            text = error_text.lower()
+            return any(marker in text for marker in (
+                "eperm", "operation not permitted", "permission denied",
+                "chromium unavailable", "browser unavailable",
+            ))
 
         for step in self.verification_steps:
             check_name = step.get("name", "verification_check")
@@ -1350,11 +1382,13 @@ class HermesVerifierAdapter(VerifierAdapter):
                 )
                 continue
 
-            step_cwd = target_dir
+            # Step cwd values are relative to the target subfolder, not the repository root.
+            step_root = subdir_path(target_dir, self.target_subdir)
+            step_cwd = step_root
             if step.get("cwd"):
                 rel_cwd = Path(step["cwd"])
                 if not rel_cwd.is_absolute():
-                    step_cwd = (target_dir / rel_cwd).resolve()
+                    step_cwd = (step_root / rel_cwd).resolve()
 
             timeout_sec = step.get("timeout_seconds", 300)
 
@@ -1379,6 +1413,7 @@ class HermesVerifierAdapter(VerifierAdapter):
                 passed = proc.returncode == 0
                 stdout_str = stdout.decode("utf-8", errors="replace").strip()
                 stderr_str = stderr.decode("utf-8", errors="replace").strip()
+                environment_block = not passed and is_environment_block(stderr_str, None)
                 logger.info("Verification check '%s' finished with rc=%s:\nSTDOUT:\n%s\nSTDERR:\n%s", check_name, proc.returncode, stdout_str, stderr_str)
 
                 msg = f"Exit {proc.returncode}"
@@ -1393,14 +1428,22 @@ class HermesVerifierAdapter(VerifierAdapter):
                         passed=passed,
                         detail=msg,
                         error=stderr_str if not passed else None,
-                        repairable=not passed,
-                        metadata={"stdout": stdout_str, "stderr": stderr_str, "returncode": proc.returncode},
+                        repairable=not passed and not environment_block,
+                        metadata={
+                            "stdout": stdout_str,
+                            "stderr": stderr_str,
+                            "returncode": proc.returncode,
+                            **({"blocked_by": "environment"} if environment_block else {}),
+                        },
                     )
                 )
 
                 if not passed:
                     all_passed = False
-                    has_repairable_failure = True
+                    if environment_block:
+                        blocked_by = "environment"
+                    else:
+                        has_repairable_failure = True
 
             except asyncio.TimeoutError:
                 logger.warning("Verification check '%s' timed out after %s seconds", check_name, timeout_sec)
@@ -1418,17 +1461,22 @@ class HermesVerifierAdapter(VerifierAdapter):
 
             except Exception as e:
                 logger.warning("Verification check '%s' raised exception: %s", check_name, e)
+                environment_block = is_environment_block(str(e), e)
                 checks_results.append(
                     VerificationCheck(
                         name=check_name,
                         passed=False,
                         detail=str(e),
                         error=str(e),
-                        repairable=True,
+                        repairable=not environment_block,
+                        metadata={"blocked_by": "environment"} if environment_block else {},
                     )
                 )
                 all_passed = False
-                has_repairable_failure = True
+                if environment_block:
+                    blocked_by = "environment"
+                else:
+                    has_repairable_failure = True
 
         if all_passed:
             return VerificationResult(
@@ -1458,6 +1506,8 @@ class HermesVerifierAdapter(VerifierAdapter):
             summary=summary_msg,
             checks=checks_results,
             repair_recommendations=repair_tasks,
+            # A genuine repairable failure must never be hidden by an environment block.
+            blocked_by=None if has_repairable_failure else blocked_by,
         )
 
 

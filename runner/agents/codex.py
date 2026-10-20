@@ -4,7 +4,7 @@ from typing import Any, Dict, List, Mapping, Optional
 
 from .base import AgentAdapter, argv_safe_prompt
 from .errors import SprintRunnerError
-from .denials import check_denials
+from .denials import check_denials, denial_lines
 
 
 class CodexAdapter(AgentAdapter):
@@ -32,8 +32,7 @@ class CodexAdapter(AgentAdapter):
         return (model.group(1), effort.group(1) if effort else None) if model else (None, None)
 
     def validate_result(self, result, context):
-        denials = [line for line in (result.stderr or "").splitlines()
-                   if "permission denied" in line.lower()]
+        denials = denial_lines(result.stderr)
         policy = (getattr(context, "options", {}), getattr(result, "runtime_metadata", None),
                   getattr(context, "phase", {}), getattr(context, "worktree", None))
         try:
@@ -113,6 +112,10 @@ class CodexAdapter(AgentAdapter):
                 # Do NOT fabricate or infer verdict from generic flags like {"success": true} or {"summary": "looks fine"}
                 return None
 
+            blocked_by = str(json_obj.get("blocked_by") or "").strip().lower() or None
+            if blocked_by == "environment":
+                repairable = False
+
             obs_list = []
             if is_pass:
                 obs_list.append({
@@ -127,8 +130,9 @@ class CodexAdapter(AgentAdapter):
                     "metadata": {
                         "verdict": "failed",
                         "repairable": repairable,
+                        "blocked_by": blocked_by,
                         "findings": findings,
-                        "requires_follow_up": True,
+                        "requires_follow_up": blocked_by != "environment",
                     },
                 })
 
@@ -136,9 +140,10 @@ class CodexAdapter(AgentAdapter):
                 "verdict": norm_verdict,
                 "summary": summary,
                 "repairable": repairable,
+                "blocked_by": blocked_by,
                 "findings": findings,
                 "structured_verdict": json_obj,
-                "trigger_replan": not is_pass,
+                "trigger_replan": not is_pass and blocked_by != "environment",
                 "replan_reason": f"Codex verification failure: {summary}" if not is_pass else None,
                 "observations": obs_list,
             }
@@ -155,6 +160,10 @@ class CodexAdapter(AgentAdapter):
 
             repairable_match = re.search(r"REPAIRABLE\s*:\s*(TRUE|FALSE)\b", cleaned, re.IGNORECASE)
             repairable = (repairable_match.group(1).upper() == "TRUE") if repairable_match else (not is_pass)
+            blocked_match = re.search(r"BLOCKED_BY\s*:\s*([A-Z_ -]+)", cleaned, re.IGNORECASE)
+            blocked_by = blocked_match.group(1).strip().lower().replace(" ", "_") if blocked_match else None
+            if blocked_by == "environment":
+                repairable = False
 
             findings = []
             findings_match = re.search(r"FINDINGS\s*:\s*(.*?)(?=\n[A-Z_]+\s*:|\Z)", cleaned, re.DOTALL | re.IGNORECASE)
@@ -178,8 +187,9 @@ class CodexAdapter(AgentAdapter):
                     "metadata": {
                         "verdict": "failed",
                         "repairable": repairable,
+                        "blocked_by": blocked_by,
                         "findings": findings,
-                        "requires_follow_up": True,
+                        "requires_follow_up": blocked_by != "environment",
                     },
                 })
 
@@ -187,14 +197,16 @@ class CodexAdapter(AgentAdapter):
                 "verdict": norm_verdict,
                 "summary": summary,
                 "repairable": repairable,
+                "blocked_by": blocked_by,
                 "findings": findings,
                 "structured_verdict": {
                     "verdict": norm_verdict,
                     "summary": summary,
                     "repairable": repairable,
+                    "blocked_by": blocked_by,
                     "findings": findings,
                 },
-                "trigger_replan": not is_pass,
+                "trigger_replan": not is_pass and blocked_by != "environment",
                 "replan_reason": f"Codex verification failure: {summary}" if not is_pass else None,
                 "observations": obs_list,
             }

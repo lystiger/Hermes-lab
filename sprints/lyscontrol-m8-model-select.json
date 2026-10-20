@@ -1,11 +1,12 @@
 {
   "sprint_id": "lyscontrol-m8-model-select",
   "name": "LysControl M8: model and effort selector",
-  "target_repo": "../../LysControl",
-  "base_ref": "39a77abd9f5879ffb1d9a7c3512f85bfb6bcff1e",
+  "target_repo": "../",
+  "target_subdir": "console",
+  "base_ref": "4e06429",
   "target_branch": "hermes/lyscontrol-m8/integration",
-  "worktree_root": "/home/lystiger/hermes-worktrees/lyscontrol-m8",
-  "runs_root": "/home/lystiger/hermes-runs",
+  "worktree_root": "~/hermes-worktrees/lyscontrol-m8",
+  "runs_root": "~/hermes-runs",
   "execution_backend": "subprocess",
   "limits": {
     "max_changed_files": 90,

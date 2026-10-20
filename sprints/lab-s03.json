@@ -1,11 +1,11 @@
 {
   "sprint_id": "lab-s03",
   "name": "Agent Abstraction + Codex Worker",
-  "canonical_repo": "/home/lystiger/hermes-lab",
+  "canonical_repo": "~/hermes-lab",
   "base_branch": "main",
   "target_branch": "s03/integration",
-  "worktree_root": "/home/lystiger/hermes-worktrees/hermes-lab-s03",
-  "runs_root": "/home/lystiger/hermes-runs",
+  "worktree_root": "~/hermes-worktrees/hermes-lab-s03",
+  "runs_root": "~/hermes-runs",
   "limits": {
     "max_changed_files": 20,
     "timeout_seconds": 600

@@ -208,7 +208,7 @@ class HermesSprintRunner:
 
     def _resolve_config_path(self, value, *, default):
         """Resolve configured paths relative to the sprint specification directory."""
-        path = Path(value) if value is not None else Path(default)
+        path = Path(os.path.expanduser(value)) if value is not None else Path(default)
         if not path.is_absolute():
             path = self.spec_path.parent / path
         return path.resolve()

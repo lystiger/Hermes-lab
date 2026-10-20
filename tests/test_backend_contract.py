@@ -254,10 +254,18 @@ def test_runtime_survives_cleanup_failure(tmp_path):
 # --- runner caller: HermesSprintRunner ----------------------------------------
 
 
-def test_sprint_runner_selects_new_backend_without_runner_changes():
+def test_sprint_runner_selects_new_backend_without_runner_changes(tmp_path):
+    import json
+
+    # Run records go under the test's own directory, not the home folder.
+    spec = json.loads((Path(__file__).resolve().parent.parent / "sprints" / "lab-s03.json").read_text())
+    spec["runs_root"] = str(tmp_path / "runs")
+    spec_path = tmp_path / "lab-s03.json"
+    spec_path.write_text(json.dumps(spec))
+
     registry = BackendRegistry({FakeSessionfulBackend.name: FakeSessionfulBackend})
     runner = HermesSprintRunner(
-        spec_path=Path(__file__).resolve().parent.parent / "sprints" / "lab-s03.json",
+        spec_path=spec_path,
         dry_run=True,
         skip_agent_exec=True,
         backend_registry=registry,

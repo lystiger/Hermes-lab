@@ -1,0 +1,96 @@
+{
+  "sprint_id": "usage-limits-recheck",
+  "name": "Usage limits: recheck the merged feature end to end",
+  "target_repo": "../",
+  "base_ref": "c15d5e5",
+  "target_branch": "hermes/usage-limits-recheck/integration",
+  "worktree_root": "~/hermes-worktrees/usage-limits-recheck",
+  "runs_root": "~/hermes-runs",
+  "execution_backend": "subprocess",
+  "limits": {
+    "max_changed_files": 40,
+    "timeout_seconds": 3000
+  },
+  "verification": [
+    {
+      "name": "pytest",
+      "command": [
+        "~/Projects/Hermes-lab/.venv/bin/python",
+        "-m",
+        "pytest",
+        "tests",
+        "-q",
+        "--ignore=tests/smoke",
+        "-p",
+        "no:cacheprovider"
+      ],
+      "timeout_seconds": 900
+    },
+    {
+      "name": "console-ci",
+      "cwd": "console",
+      "command": ["npm", "ci"],
+      "timeout_seconds": 600
+    },
+    {
+      "name": "console-typecheck",
+      "cwd": "console",
+      "command": ["npm", "run", "typecheck"],
+      "timeout_seconds": 300
+    },
+    {
+      "name": "console-test",
+      "cwd": "console",
+      "command": ["npm", "test", "--", "--run"],
+      "timeout_seconds": 600
+    }
+  ],
+  "phases": [
+    {
+      "name": "recheck_builder",
+      "role": "builder",
+      "agent": "codex",
+      "execution_backend": "subprocess",
+      "worktree_dir": "builder",
+      "branch": "hermes/usage-recheck/builder",
+      "prompt_file": "prompts/usage-limits-recheck-builder.md",
+      "expected_handoff": "HANDOFF_BUILDER.md",
+      "cmd_options": {
+        "model": "gpt-reserve",
+        "sandbox": "workspace-write",
+        "ephemeral": true
+      },
+      "commit_message": "fix(usage): recheck fixes for the usage limits feature"
+    },
+    {
+      "name": "recheck_hardener",
+      "role": "hardener",
+      "agent": "claude",
+      "execution_backend": "subprocess",
+      "worktree_dir": "hardener",
+      "branch": "hermes/usage-recheck/hardener",
+      "prompt_file": "prompts/usage-limits-recheck-hardener.md",
+      "expected_handoff": "HANDOFF_HARDENER.md",
+      "cmd_options": {
+        "model": "sonnet"
+      },
+      "commit_message": "fix(usage): harden usage limits after recheck"
+    },
+    {
+      "name": "recheck_verifier",
+      "role": "verifier",
+      "agent": "codex",
+      "execution_backend": "subprocess",
+      "worktree_dir": "verifier",
+      "branch": "hermes/usage-recheck/verifier",
+      "prompt_file": "prompts/usage-limits-recheck-verifier.md",
+      "expected_handoff": "HANDOFF_CODEX.md",
+      "cmd_options": {
+        "model": "gpt-reserve",
+        "sandbox": "workspace-write",
+        "ephemeral": true
+      },
+      "commit_message": "chore: verifier evidence only (no commit expected)"
+    }
+  ]
+}

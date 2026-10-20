@@ -1,11 +1,11 @@
 {
   "sprint_id": "lab-s06",
   "name": "Codex-First Sessionful Herdr Backend",
-  "canonical_repo": "/home/lystiger/hermes-lab",
+  "canonical_repo": "~/hermes-lab",
   "base_ref": "565c862aef1ee5fca20adebc2883580e70030257",
   "target_branch": "s06/integration",
-  "worktree_root": "/home/lystiger/hermes-worktrees/hermes-lab-s06",
-  "runs_root": "/home/lystiger/hermes-runs",
+  "worktree_root": "~/hermes-worktrees/hermes-lab-s06",
+  "runs_root": "~/hermes-runs",
   "execution_backend": "subprocess",
   "keep_herdr_workspace": true,
   "limits": {

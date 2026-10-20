@@ -4,8 +4,8 @@
   "target_repo": "../",
   "base_ref": "c3ecbee4da41ede29e568a385d524e8964f50bc6",
   "target_branch": "hermes/m8/integration",
-  "worktree_root": "/home/lystiger/hermes-worktrees/hermes-m8",
-  "runs_root": "/home/lystiger/hermes-runs",
+  "worktree_root": "~/hermes-worktrees/hermes-m8",
+  "runs_root": "~/hermes-runs",
   "execution_backend": "subprocess",
   "limits": {
     "max_changed_files": 60,
@@ -15,7 +15,7 @@
     {
       "name": "pytest",
       "command": [
-        "/home/lystiger/Projects/Hermes-lab/.venv/bin/python",
+        "~/Projects/Hermes-lab/.venv/bin/python",
         "-m",
         "pytest",
         "tests",
@@ -55,9 +55,9 @@
       "commit_message": "feat(herdr): seat pool with exclusive leases (D-019)",
       "permissions": {
         "commands": [
-          "/home/lystiger/Projects/Hermes-lab/.venv/bin/python -m pytest tests -q --ignore=tests/smoke",
-          "/home/lystiger/Projects/Hermes-lab/.venv/bin/python -m pytest tests/test_backends.py -q",
-          "/home/lystiger/Projects/Hermes-lab/.venv/bin/python -m pytest tests/test_backend_contract.py -q"
+          "~/Projects/Hermes-lab/.venv/bin/python -m pytest tests -q --ignore=tests/smoke",
+          "~/Projects/Hermes-lab/.venv/bin/python -m pytest tests/test_backends.py -q",
+          "~/Projects/Hermes-lab/.venv/bin/python -m pytest tests/test_backend_contract.py -q"
         ]
       },
       "cmd_options": {

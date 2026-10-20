@@ -18,6 +18,7 @@ from jobs.job_state_reducer import job_state_reducer
 from runtime.engine import ReactiveJobEngine
 from runtime.job_state import JobRecord, JobState
 from runtime.task_graph import TaskNode
+from runtime.target_subdir import normalize_target_subdir
 from runtime.hermes_adapter import (
     HermesActorAdapter,
     HermesVerifierAdapter,
@@ -231,7 +232,7 @@ class JobLauncher:
         def _resolve_spec_path(val: Optional[str], default: Path) -> Path:
             if not val:
                 return default.resolve()
-            p = Path(val)
+            p = Path(os.path.expanduser(val))
             if not p.is_absolute():
                 p = spec_dir / p
             return p.resolve()
@@ -242,6 +243,7 @@ class JobLauncher:
         run_dir = runs_root / f"run_{timestamp}_{sprint_id}"
         base_ref = spec.get("base_ref") or spec.get("base_branch", "main")
         target_branch = spec.get("target_branch", f"sprint/{sprint_id}/integration")
+        target_subdir = normalize_target_subdir(spec.get("target_subdir"))
 
         # Resolve and validate context.root here, at spec-normalization time, relative to the
         # sprint specification directory. The adapter must never re-resolve it against the
@@ -319,12 +321,14 @@ class JobLauncher:
             base_ref=base_ref,
             target_branch=target_branch,
             event_bridge=event_bridge,
+            target_subdir=target_subdir,
         )
 
         verifier_adapter = HermesVerifierAdapter(
             verification_steps=spec.get("verification_steps") or spec.get("verification", []),
             working_dir=target_repo,
             worktree_root=worktree_root,
+            target_subdir=target_subdir,
         )
 
         runtime_limits = RuntimeLimits(
@@ -340,6 +344,7 @@ class JobLauncher:
             "spec_name": spec.get("name"),
             "spec_file": str(spec_file),
             "target_repo": str(target_repo),
+            "target_subdir": target_subdir,
             "worktree_root": str(worktree_root),
             "runs_root": str(runs_root),
             "base_ref": base_ref,

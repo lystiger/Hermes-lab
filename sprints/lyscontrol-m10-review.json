@@ -1,11 +1,12 @@
 {
   "sprint_id": "lyscontrol-m10-review",
   "name": "LysControl M10 review: harden and verify the compact UI",
-  "target_repo": "../../LysControl",
-  "base_ref": "5725944",
+  "target_repo": "../",
+  "target_subdir": "console",
+  "base_ref": "4e06429",
   "target_branch": "hermes/lyscontrol-m10-review/integration",
-  "worktree_root": "/home/lystiger/hermes-worktrees/lyscontrol-m10-review",
-  "runs_root": "/home/lystiger/hermes-runs",
+  "worktree_root": "~/hermes-worktrees/lyscontrol-m10-review",
+  "runs_root": "~/hermes-runs",
   "execution_backend": "subprocess",
   "limits": {
     "max_changed_files": 60,

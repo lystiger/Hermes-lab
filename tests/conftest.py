@@ -1,3 +1,4 @@
+import asyncio
 import os
 import sys
 import tempfile
@@ -30,6 +31,35 @@ def pytest_configure(config):
     config.addinivalue_line("markers", "live_agents: opt-in live execution tests for local agent CLIs")
 
 
+class _TimerWakeSelector:
+    """Caps every selector wait at one tick.
+
+    Under a sandbox that denies socket writes, asyncio drops the wakeup a worker thread sends to
+    its loop, so the loop can sleep forever. Waking on a timer bounds that stall to one tick.
+    """
+
+    def __init__(self, selector):
+        self._selector = selector
+
+    def select(self, timeout=None):
+        if timeout is None or timeout > 0.01:
+            timeout = 0.01
+        return self._selector.select(timeout)
+
+    def __getattr__(self, name):
+        return getattr(self._selector, name)
+
+
+class _TimerWakePolicy(asyncio.DefaultEventLoopPolicy):
+    def new_event_loop(self):
+        loop = super().new_event_loop()
+        loop._selector = _TimerWakeSelector(loop._selector)
+        return loop
+
+
+asyncio.set_event_loop_policy(_TimerWakePolicy())
+
+
 @pytest.fixture(autouse=True)
 def _isolated_openrig_ledger(tmp_path_factory, monkeypatch):
     # Every test gets its own OpenRig ownership ledger, so no test writes to the real user state dir.
@@ -38,6 +68,22 @@ def _isolated_openrig_ledger(tmp_path_factory, monkeypatch):
     monkeypatch.setenv("OPENRIG_HOME", str(tmp_path_factory.mktemp("openrig-home")))
     # Never touch the real persisted Execution page state.
     monkeypatch.setenv("HERMES_EXECUTION_STATE", str(tmp_path_factory.mktemp("exec-state") / "registry.json"))
+
+
+@pytest.fixture(autouse=True)
+def _isolated_home(tmp_path_factory, monkeypatch):
+    # Path.home() drives the agent settings (~/.gemini) and default run folders (~/hermes-runs).
+    # A per-test home keeps them out of the real account, and out of reach of a read-only sandbox.
+    # It sits beside tmp_path, not inside it, so a test that checks tmp_path stays empty.
+    monkeypatch.setenv("HOME", str(tmp_path_factory.mktemp("home")))
+
+
+@pytest.fixture(autouse=True)
+def _isolated_job_runs(tmp_path, monkeypatch):
+    # The job service is a process-wide singleton. Without this, tests persist their jobs into the
+    # live repo's hermes-runs folder, where the running API reloads them on restart.
+    from jobs.job_service import job_service
+    monkeypatch.setattr(job_service, "runs_root", tmp_path / "hermes-runs")
 
 
 @pytest.fixture(autouse=True)

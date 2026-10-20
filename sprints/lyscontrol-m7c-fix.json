@@ -1,11 +1,12 @@
 {
   "sprint_id": "lyscontrol-m7c-fix",
   "name": "LysControl M7c: fix review findings, verify",
-  "target_repo": "../../LysControl",
-  "base_ref": "a00d27730c67b918e04afab5b6297849e5fcde61",
+  "target_repo": "../",
+  "target_subdir": "console",
+  "base_ref": "4e06429",
   "target_branch": "hermes/lyscontrol-m7c/integration",
-  "worktree_root": "/home/lystiger/hermes-worktrees/lyscontrol-m7c",
-  "runs_root": "/home/lystiger/hermes-runs",
+  "worktree_root": "~/hermes-worktrees/lyscontrol-m7c",
+  "runs_root": "~/hermes-runs",
   "execution_backend": "subprocess",
   "limits": {
     "max_changed_files": 90,

@@ -1,11 +1,12 @@
 {
   "sprint_id": "lyscontrol-m7-usability",
   "name": "LysControl M7 polish: fewer words, aligned cards",
-  "target_repo": "../../LysControl",
-  "base_ref": "a84d660d2810407a9f7e94c08ba9d19eaf57fef4",
+  "target_repo": "../",
+  "target_subdir": "console",
+  "base_ref": "4e06429",
   "target_branch": "hermes/lyscontrol-m7/integration",
-  "worktree_root": "/home/lystiger/hermes-worktrees/lyscontrol-m7",
-  "runs_root": "/home/lystiger/hermes-runs",
+  "worktree_root": "~/hermes-worktrees/lyscontrol-m7",
+  "runs_root": "~/hermes-runs",
   "execution_backend": "subprocess",
   "limits": {
     "max_changed_files": 90,

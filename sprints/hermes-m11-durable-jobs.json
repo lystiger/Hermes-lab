@@ -2,7 +2,7 @@
   "sprint_id": "hermes-m11-durable-jobs",
   "name": "Hermes M11: durable job history",
   "target_repo": "../",
-  "base_ref": "506af23",
+  "base_ref": "f65d71018d3e31155147383ee01168a6797360cb",
   "target_branch": "hermes/m11/integration",
   "worktree_root": "/home/lystiger/hermes-worktrees/hermes-m11",
   "runs_root": "/home/lystiger/hermes-runs",

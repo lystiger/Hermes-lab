@@ -1,1 +1,0 @@
-{"sprint_id": "test-phase8-1-prod", "name": "Phase 8.1 Production Integration Test", "phases": [{"name": "setup", "agent": "antigravity", "prompt_file": "prompts/setup.md"}, {"name": "build", "agent": "gemini", "prompt_file": "prompts/build.md", "dependencies": ["setup"]}]}

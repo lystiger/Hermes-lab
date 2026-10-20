@@ -1347,14 +1347,13 @@ class HermesVerifierAdapter(VerifierAdapter):
             text = error_text.lower()
             return any(marker in text for marker in (
                 "eperm", "operation not permitted", "permission denied",
-                "sandbox", "chromium unavailable", "browser unavailable",
+                "chromium unavailable", "browser unavailable",
             ))
 
         for step in self.verification_steps:
             check_name = step.get("name", "verification_check")
             raw_cmd = step.get("command") or step.get("cmd")
             if not raw_cmd:
-                environment_block = not passed and is_environment_block(stderr_str, None)
                 checks_results.append(
                     VerificationCheck(
                         name=check_name,
@@ -1393,6 +1392,7 @@ class HermesVerifierAdapter(VerifierAdapter):
                 passed = proc.returncode == 0
                 stdout_str = stdout.decode("utf-8", errors="replace").strip()
                 stderr_str = stderr.decode("utf-8", errors="replace").strip()
+                environment_block = not passed and is_environment_block(stderr_str, None)
                 logger.info("Verification check '%s' finished with rc=%s:\nSTDOUT:\n%s\nSTDERR:\n%s", check_name, proc.returncode, stdout_str, stderr_str)
 
                 msg = f"Exit {proc.returncode}"
@@ -1485,7 +1485,8 @@ class HermesVerifierAdapter(VerifierAdapter):
             summary=summary_msg,
             checks=checks_results,
             repair_recommendations=repair_tasks,
-            blocked_by=blocked_by,
+            # A genuine repairable failure must never be hidden by an environment block.
+            blocked_by=None if has_repairable_failure else blocked_by,
         )
 
 

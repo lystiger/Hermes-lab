@@ -1,0 +1,107 @@
+{
+  "sprint_id": "persona-core-split",
+  "name": "LysControl: remove character art from the core",
+  "target_repo": "../../LysControl",
+  "base_ref": "80ab429",
+  "target_branch": "hermes/persona-core/integration",
+  "worktree_root": "/home/lystiger/hermes-worktrees/persona-core",
+  "runs_root": "/home/lystiger/hermes-runs",
+  "execution_backend": "subprocess",
+  "limits": {
+    "max_changed_files": 120,
+    "timeout_seconds": 3000
+  },
+  "verification": [
+    {
+      "name": "npm-ci",
+      "command": [
+        "npm",
+        "ci"
+      ],
+      "timeout_seconds": 600
+    },
+    {
+      "name": "typecheck",
+      "command": [
+        "npm",
+        "run",
+        "typecheck"
+      ],
+      "timeout_seconds": 300
+    },
+    {
+      "name": "lint",
+      "command": [
+        "npm",
+        "run",
+        "lint"
+      ],
+      "timeout_seconds": 300
+    },
+    {
+      "name": "test",
+      "command": [
+        "npm",
+        "test"
+      ],
+      "timeout_seconds": 600
+    },
+    {
+      "name": "build",
+      "command": [
+        "npm",
+        "run",
+        "build"
+      ],
+      "timeout_seconds": 600
+    }
+  ],
+  "phases": [
+    {
+      "name": "persona_core_builder",
+      "role": "builder",
+      "agent": "claude",
+      "execution_backend": "subprocess",
+      "worktree_dir": "builder",
+      "branch": "hermes/persona-core/builder",
+      "prompt_file": "prompts/persona-core-builder.md",
+      "expected_handoff": "HANDOFF_BUILDER.md",
+      "commit_message": "chore: remove character art from the core (moves to LysStack-persona)",
+      "cmd_options": {
+        "model": "sonnet"
+      }
+    },
+    {
+      "name": "persona_core_hardener",
+      "role": "hardener",
+      "agent": "codex",
+      "execution_backend": "subprocess",
+      "worktree_dir": "hardener",
+      "branch": "hermes/persona-core/hardener",
+      "prompt_file": "prompts/persona-core-hardener.md",
+      "expected_handoff": "HANDOFF_HARDENER.md",
+      "commit_message": "fix: harden the core without character art",
+      "cmd_options": {
+        "model": "gpt-reserve",
+        "sandbox": "workspace-write",
+        "ephemeral": true
+      }
+    },
+    {
+      "name": "persona_core_verifier",
+      "role": "verifier",
+      "agent": "codex",
+      "execution_backend": "subprocess",
+      "worktree_dir": "verifier",
+      "branch": "hermes/persona-core/verifier",
+      "prompt_file": "prompts/persona-core-verifier.md",
+      "expected_handoff": "HANDOFF_CODEX.md",
+      "commit_message": "chore: verifier evidence only (no commit expected)",
+      "cmd_options": {
+        "model": "gpt-reserve",
+        "sandbox": "workspace-write",
+        "ephemeral": true
+      }
+    }
+  ]
+}

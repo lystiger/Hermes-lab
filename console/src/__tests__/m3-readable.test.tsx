@@ -11,7 +11,10 @@ import { JobModal } from '../components/JobModal';
 import { CopyId } from '../components/CopyId';
 import { QueueRoute } from '../routes/queue';
 import { EventsRoute } from '../routes/events';
-import { UsageRoute } from '../routes/usage';
+import { Card } from '../components/Card';
+import { ProviderMeters } from '../features/telemetry/UsageMeters';
+import { CAPACITY_WINDOW_LABEL } from '../api/mapping';
+import { useCapacityTelemetry } from '../api/hooks';
 import { AgentsListRoute } from '../routes/agents/index';
 import { AgentDetailRoute } from '../routes/agents/$agentId';
 import { ExecutionResourceCard } from '../features/execution/ExecutionResourceCard';
@@ -266,6 +269,12 @@ describe('M3 events: filterable log with the failure taxonomy', () => {
   });
 });
 
+/** The provider meters used to live on the Usage page; they are kept as a component and tested here directly. */
+const ProviderMetersHarness: React.FC = () => {
+  const { capacity } = useCapacityTelemetry();
+  return <><div>{CAPACITY_WINDOW_LABEL}</div>{(capacity?.providers ?? []).map((p) => <Card key={p.providerId} label={`Meters for ${p.providerId}`}><ProviderMeters provider={p} /></Card>)}</>;
+};
+
 describe('M3 usage: meters with window labels', () => {
   it('labels each total with its window and draws no bar for an unreported limit', async () => {
     installLiveHermes({
@@ -280,7 +289,7 @@ describe('M3 usage: meters with window labels', () => {
         jobs_tracked: 1
       }
     });
-    renderIn(<UsageRoute />);
+    renderIn(<ProviderMetersHarness />);
 
     const providerSection = await screen.findByRole('region', { name: 'Meters for claude' });
     // Tokens are reported without a limit: a value, a window label, and no meter bar.
@@ -290,8 +299,6 @@ describe('M3 usage: meters with window labels', () => {
     expect(within(providerSection).getByLabelText('unknown: Provider did not report context use')).toBeInTheDocument();
     // Window covers since runtime start.
     expect(screen.getAllByText(/since runtime start \(process lifetime, not daily\)/).length).toBeGreaterThanOrEqual(1);
-    // Aggregate success rate in stat strip and provider success rate in meter are both 3 of 4.
-    expect(screen.getByText('75')).toBeInTheDocument();
     expect(within(providerSection).getByRole('progressbar', { name: 'SUCCESS RATE' })).toHaveAttribute('aria-valuenow', '75');
   });
 });

@@ -123,6 +123,8 @@ export interface LiveOptions {
   failSub?: string;
   /** Make the sample job's telemetry return the given token totals. */
   jobTokens?: { input_tokens: number; output_tokens: number; cached_tokens: number; total_tokens: number };
+  /** GET /capacity/limits override. */
+  limits?: unknown;
   /** Capacity report override (e.g. providers recorded). */
   capacity?: unknown;
   /** Recoverable job list. */
@@ -169,6 +171,7 @@ export function respond(pathname: string, options: LiveOptions): LiveResponse {
   if (pathname === '/events') return { status: 200, body: [] };
   if (pathname === '/execution') return { status: 200, body: LIVE_EXECUTION };
   if (pathname === '/capacity/telemetry') return { status: 200, body: options.capacity ?? LIVE_CAPACITY };
+  if (pathname === '/capacity/limits') return { status: 200, body: options.limits ?? { timestamp: '2026-10-14T07:36:00Z', agents: [] } };
   if (pathname === '/jobs/recoverable') return { status: 200, body: options.recoverable ?? [] };
   if (pathname === `/jobs/${LIVE_JOB_ID}/telemetry`) {
     return {

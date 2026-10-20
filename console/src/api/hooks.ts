@@ -234,6 +234,21 @@ export function useCapacityTelemetry() {
   return { capacity: data, loading, error, updatedAt, stale, refetch };
 }
 
+/** Per-agent usage limits. The backend computes the numbers; this refreshes them every 60 seconds. */
+export function useAgentLimits() {
+  const [tick, setTick] = useState(0);
+  useEffect(() => {
+    const id = setInterval(() => setTick((n) => n + 1), 60_000);
+    return () => clearInterval(id);
+  }, []);
+  const { data, loading, error, updatedAt, stale, refetch } = useResource(
+    'agent-limits',
+    () => hermesApi.getAgentLimits(),
+    [tick]
+  );
+  return { limits: data, loading, error, updatedAt, stale, refetch };
+}
+
 /** Token telemetry for one job. Keyed by job, so another job's totals are never shown. */
 export function useJobTelemetry(jobId: string | null) {
   const { jobRuntimeVersion, agentRuntimeVersion } = useConsoleStore();

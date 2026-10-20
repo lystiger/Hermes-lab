@@ -15,6 +15,7 @@ import {
   MailboxEntry,
   ExecutionSnapshot,
   CapacityTelemetry,
+  AgentLimitsReport,
   JobTokenTelemetry,
   TaskNode,
   AgentRun,
@@ -36,6 +37,7 @@ export interface HermesApi {
   getPipeline(): Promise<PipelineStep[]>;
   getTelemetry(): Promise<OverviewTelemetry>;
   getCapacityTelemetry(): Promise<CapacityTelemetry>;
+  getAgentLimits(): Promise<AgentLimitsReport>;
   getJobTelemetry(jobId: string): Promise<JobTokenTelemetry>;
   getJobTasks(jobId: string): Promise<TaskNode[]>;
   getJobRuns(jobId: string): Promise<AgentRun[]>;

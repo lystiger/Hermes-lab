@@ -8,6 +8,7 @@ import {
   PipelineStep,
   ProjectionItem,
   CapacityTelemetry,
+  AgentLimitsReport,
   JobTokenTelemetry,
   TaskNode,
   AgentRun,
@@ -135,6 +136,28 @@ export class MockHermesApi implements HermesApi {
   // M2 endpoints: mock fixtures carry no capacity, task, run or observation records.
   async getCapacityTelemetry(): Promise<CapacityTelemetry> {
     return { timestamp: null, summary: null, providers: [], jobsTracked: 0 };
+  }
+
+  async getAgentLimits(): Promise<AgentLimitsReport> {
+    return {
+      timestamp: '2026-10-20T08:00:00Z',
+      agents: [
+        {
+          id: 'claude', name: 'Claude', plan: 'Max 5x', ready: true, stale: false, status: 'ok',
+          usedPct: 14, leftPct: 86, resetsAt: '2026-10-20T10:10:00Z', resetsInSeconds: 7800,
+          windows: [
+            { label: '5h', usedPct: 14, leftPct: 86, resetsAt: '2026-10-20T10:10:00Z', resetsInSeconds: 7800 },
+            { label: 'Weekly', usedPct: 6, leftPct: 94, resetsAt: '2026-10-25T08:00:00Z', resetsInSeconds: 432000 }
+          ],
+          updatedAt: '2026-10-20T07:59:00Z', authHelp: ''
+        },
+        {
+          id: 'codex', name: 'Codex', plan: '', ready: false, stale: false, status: 'ok',
+          usedPct: 0, leftPct: 100, resetsAt: null, resetsInSeconds: 0, windows: [],
+          updatedAt: '2026-10-20T07:59:00Z', authHelp: 'Run `codex login` to sign in.'
+        }
+      ]
+    };
   }
 
   async getJobTelemetry(jobId: string): Promise<JobTokenTelemetry> {

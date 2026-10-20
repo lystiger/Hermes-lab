@@ -156,6 +156,14 @@ class JobService:
                         candidates.append((directory.stat().st_mtime, directory))
                 except OSError as exc:
                     logger.warning("Could not inspect run directory %s: %s", directory, exc)
+            # Legacy migration writes run_<folder>/job.json beside the original
+            # summary folder. Count that pair once, retaining the durable record.
+            record_ids = {directory.name for _, directory in candidates
+                          if (directory / "job.json").exists()}
+            candidates = [(mtime, directory) for mtime, directory in candidates
+                          if directory.name in record_ids
+                          or (f"run_{directory.name}" if not directory.name.startswith("run_")
+                              else directory.name) not in record_ids]
             candidates.sort(key=lambda item: (item[0], item[1].name), reverse=True)
             if len(candidates) > self.RECOVERY_LIMIT:
                 logger.warning("Job recovery capped at %s newest run folders (%s found)",

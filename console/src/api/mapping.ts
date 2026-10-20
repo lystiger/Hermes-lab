@@ -202,15 +202,15 @@ export function mapAgentLimits(raw: any): AgentLimitsReport {
         ready: a.ready === true,
         stale: a.stale === true,
         status: typeof a.status === 'string' ? a.status : 'ok',
-        usedPct: num(a.usedPct),
-        leftPct: num(a.leftPct),
+        usedPct: nullableNumber(a.usedPct),
+        leftPct: nullableNumber(a.leftPct),
         resetsAt: nullableString(a.resetsAt),
         resetsInSeconds: num(a.resetsInSeconds),
         windows: Array.isArray(a.windows)
           ? a.windows.filter((w: any) => w && typeof w === 'object').map((w: any) => ({
               label: String(w.label ?? ''),
-              usedPct: num(w.usedPct),
-              leftPct: num(w.leftPct),
+              usedPct: nullableNumber(w.usedPct),
+              leftPct: nullableNumber(w.leftPct),
               resetsAt: nullableString(w.resetsAt),
               resetsInSeconds: num(w.resetsInSeconds)
             }))

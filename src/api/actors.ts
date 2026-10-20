@@ -7,7 +7,7 @@ export const SYSTEM_ACTORS: Record<string, ActorRef> = {
     kind: 'runtime',
     displayName: 'Hermes',
     accentColor: agentAccent('hermes'),
-    avatarUrl: '/agents/hermes.webp',
+    avatarUrl: '/portrait/hermes.png',
     subtitle: 'Orchestrator'
   },
   hermes_runner: {
@@ -41,7 +41,7 @@ export const SYSTEM_ACTORS: Record<string, ActorRef> = {
     kind: 'runtime',
     displayName: 'Hermes',
     accentColor: agentAccent('hermes'),
-    avatarUrl: '/agents/hermes.webp',
+    avatarUrl: '/portrait/hermes.png',
     subtitle: 'Orchestrator'
   },
   lyscontrol: {

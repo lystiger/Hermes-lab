@@ -48,7 +48,7 @@ describe('Agent UI & Portrait Fallbacks', () => {
         displayName="Gemini"
         presentation={{
           displayName: 'Gemini',
-          avatarUrl: '/agents/gemini.webp',
+          avatarUrl: '/portrait/gemini.png',
           characterCardUrl: '/agents/gemini-card.webp',
           accentColor: '#5B8CFF',
           sigil: 'BUILD'

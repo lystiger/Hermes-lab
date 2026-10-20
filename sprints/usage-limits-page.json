@@ -1,0 +1,110 @@
+{
+  "sprint_id": "usage-limits-page",
+  "name": "Usage page: what is left per agent, from the Omarchy usage records",
+  "target_repo": "../",
+  "base_ref": "699f596",
+  "target_branch": "hermes/usage-limits/integration",
+  "worktree_root": "/home/lystiger/hermes-worktrees/usage-limits",
+  "runs_root": "/home/lystiger/hermes-runs",
+  "execution_backend": "subprocess",
+  "limits": {
+    "max_changed_files": 40,
+    "timeout_seconds": 3000
+  },
+  "verification": [
+    {
+      "name": "pytest",
+      "command": [
+        "/home/lystiger/Projects/Hermes-lab/.venv/bin/python",
+        "-m",
+        "pytest",
+        "tests",
+        "-q",
+        "--ignore=tests/smoke",
+        "-p",
+        "no:cacheprovider"
+      ],
+      "timeout_seconds": 900
+    },
+    {
+      "name": "console-ci",
+      "cwd": "console",
+      "command": ["npm", "ci"],
+      "timeout_seconds": 600
+    },
+    {
+      "name": "console-typecheck",
+      "cwd": "console",
+      "command": ["npm", "run", "typecheck"],
+      "timeout_seconds": 300
+    },
+    {
+      "name": "console-test",
+      "cwd": "console",
+      "command": ["npm", "test", "--", "--run"],
+      "timeout_seconds": 600
+    }
+  ],
+  "phases": [
+    {
+      "name": "usage_backend",
+      "role": "builder",
+      "agent": "codex",
+      "execution_backend": "subprocess",
+      "worktree_dir": "backend",
+      "branch": "hermes/usage-limits/backend",
+      "prompt_file": "prompts/usage-limits-backend-builder.md",
+      "expected_handoff": "HANDOFF_BUILDER.md",
+      "cmd_options": {
+        "model": "gpt-reserve",
+        "sandbox": "workspace-write",
+        "ephemeral": true
+      },
+      "commit_message": "feat(usage): /capacity/limits from the Omarchy usage records"
+    },
+    {
+      "name": "usage_frontend",
+      "role": "builder",
+      "agent": "claude",
+      "execution_backend": "subprocess",
+      "worktree_dir": "frontend",
+      "branch": "hermes/usage-limits/frontend",
+      "prompt_file": "prompts/usage-limits-frontend-builder.md",
+      "expected_handoff": "HANDOFF_BUILDER.md",
+      "cmd_options": {
+        "model": "sonnet"
+      },
+      "commit_message": "feat(console): usage page shows what is left per agent"
+    },
+    {
+      "name": "usage_hardener",
+      "role": "hardener",
+      "agent": "claude",
+      "execution_backend": "subprocess",
+      "worktree_dir": "hardener",
+      "branch": "hermes/usage-limits/hardener",
+      "prompt_file": "prompts/usage-limits-hardener.md",
+      "expected_handoff": "HANDOFF_HARDENER.md",
+      "cmd_options": {
+        "model": "sonnet"
+      },
+      "commit_message": "fix(usage): harden limit math and page display"
+    },
+    {
+      "name": "usage_verifier",
+      "role": "verifier",
+      "agent": "codex",
+      "execution_backend": "subprocess",
+      "worktree_dir": "verifier",
+      "branch": "hermes/usage-limits/verifier",
+      "prompt_file": "prompts/usage-limits-verifier.md",
+      "expected_handoff": "HANDOFF_CODEX.md",
+      "cmd_options": {
+        "model": "gpt-reserve",
+        "sandbox": "workspace-write",
+        "ephemeral": true
+      },
+      "commit_message": "chore: verifier evidence only (no commit expected)"
+    }
+  ]
+}

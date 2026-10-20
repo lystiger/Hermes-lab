@@ -1,8 +1,9 @@
 {
   "sprint_id": "lyscontrol-m7d-status-fixes",
   "name": "LysControl M7d: job status mapping and layout fixes",
-  "target_repo": "../../LysControl",
-  "base_ref": "6cdc56f9078511dc2006432d73dcd8ec19f85230",
+  "target_repo": "../",
+  "target_subdir": "console",
+  "base_ref": "4e06429",
   "target_branch": "hermes/lyscontrol-m7d/integration",
   "worktree_root": "/home/lystiger/hermes-worktrees/lyscontrol-m7d",
   "runs_root": "/home/lystiger/hermes-runs",

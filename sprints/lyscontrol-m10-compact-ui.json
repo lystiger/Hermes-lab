@@ -1,8 +1,9 @@
 {
   "sprint_id": "lyscontrol-m10-compact-ui",
   "name": "LysControl M10: summary-first UI, no overlapping long text",
-  "target_repo": "../../LysControl",
-  "base_ref": "4142d0b",
+  "target_repo": "../",
+  "target_subdir": "console",
+  "base_ref": "4e06429",
   "target_branch": "hermes/lyscontrol-m10/integration",
   "worktree_root": "/home/lystiger/hermes-worktrees/lyscontrol-m10",
   "runs_root": "/home/lystiger/hermes-runs",

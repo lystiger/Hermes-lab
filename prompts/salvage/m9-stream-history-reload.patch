@@ -1,0 +1,52 @@
+diff --git i/src/__tests__/m9-stream-start.test.tsx w/src/__tests__/m9-stream-start.test.tsx
+index 02103fc..046c7dc 100644
+--- i/src/__tests__/m9-stream-start.test.tsx
++++ w/src/__tests__/m9-stream-start.test.tsx
+@@ -108,4 +108,19 @@ describe('M9 stream startup idle barrier', () => {
+     await Promise.all([secondRequest, barrier]);
+     expect(idle).toBe(true);
+   });
++
++  it('reloads history after the wait when it had no cursor, so events from the wait are not lost', async () => {
++    const pending = deferred<Response>();
++    vi.mocked(fetch).mockReturnValueOnce(pending.promise);
++    const agents = hermesApi.getAgents();
++    vi.mocked(hermesApi.getTraceEvents).mockResolvedValueOnce([]).mockResolvedValueOnce([event('during-wait', 60)]);
++    const subscribe = vi.spyOn(hermesApi, 'subscribeEvents').mockReturnValue({ unsubscribe: vi.fn() });
++    const { unmount } = renderHook(() => useEventStream());
++    await waitFor(() => expect(hermesApi.getTraceEvents).toHaveBeenCalledOnce());
++    await act(async () => { pending.resolve(response([])); await agents; });
++    await waitFor(() => expect(subscribe).toHaveBeenCalledOnce());
++    expect(hermesApi.getTraceEvents).toHaveBeenCalledTimes(2);
++    expect(subscribe).toHaveBeenCalledWith(expect.any(Function), expect.any(Function), 'during-wait');
++    unmount();
++  });
+ });
+diff --git i/src/api/hooks.ts w/src/api/hooks.ts
+index 6cd7b17..a64d1a6 100644
+--- i/src/api/hooks.ts
++++ w/src/api/hooks.ts
+@@ -340,7 +340,7 @@ export function useEventStream() {
+ 
+       // 2. Load historical events from API first (Task 9 & Item 2: Establish cursor = newest event ID)
+       let initialCursor: string | undefined;
+-      try {
++      const loadHistory = async () => { try {
+         const history = await hermesApi.getTraceEvents(100);
+         if (isSubscribed) {
+           setInitialEvents(history);
+@@ -362,10 +362,13 @@ export function useEventStream() {
+         if (isSubscribed && isRealApiMode) {
+           setConnectionStatus('DISCONNECTED');
+         }
+-      }
++      } };
++      await loadHistory();
+ 
+       // Let the initial HTTP burst release its connections before reserving one for SSE.
+       await hermesApi.waitForIdle?.(startup.signal);
++      // Without a cursor the stream starts at "now", so events from the wait would be lost; reload to get one.
++      if (!initialCursor && isSubscribed && !startup.signal.aborted) await loadHistory();
+ 
+       // 3. Open SSE stream starting strictly after newest historical event
+       if (isSubscribed) {

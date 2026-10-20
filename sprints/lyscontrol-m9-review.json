@@ -1,0 +1,91 @@
+{
+  "sprint_id": "lyscontrol-m9-review",
+  "name": "LysControl M9 review: harden and verify the stream-start builder commit",
+  "target_repo": "../../LysControl",
+  "base_ref": "57d8242",
+  "target_branch": "hermes/lyscontrol-m9/review",
+  "worktree_root": "/home/lystiger/hermes-worktrees/lyscontrol-m9-review",
+  "runs_root": "/home/lystiger/hermes-runs",
+  "execution_backend": "subprocess",
+  "limits": {
+    "max_changed_files": 40,
+    "timeout_seconds": 3000
+  },
+  "verification": [
+    {
+      "name": "npm-ci",
+      "command": [
+        "npm",
+        "ci"
+      ],
+      "timeout_seconds": 600
+    },
+    {
+      "name": "typecheck",
+      "command": [
+        "npm",
+        "run",
+        "typecheck"
+      ],
+      "timeout_seconds": 300
+    },
+    {
+      "name": "lint",
+      "command": [
+        "npm",
+        "run",
+        "lint"
+      ],
+      "timeout_seconds": 300
+    },
+    {
+      "name": "test",
+      "command": [
+        "npm",
+        "test"
+      ],
+      "timeout_seconds": 600
+    },
+    {
+      "name": "build",
+      "command": [
+        "npm",
+        "run",
+        "build"
+      ],
+      "timeout_seconds": 600
+    }
+  ],
+  "phases": [
+    {
+      "name": "m9_hardener",
+      "role": "hardener",
+      "agent": "codex",
+      "execution_backend": "subprocess",
+      "worktree_dir": "hardener",
+      "branch": "hermes/lyscontrol-m9-review/hardener",
+      "prompt_file": "prompts/lyscontrol-m9-review-hardener.md",
+      "expected_handoff": "HANDOFF_HARDENER.md",
+      "commit_message": "fix(console): harden the event stream start",
+      "cmd_options": {
+        "sandbox": "workspace-write",
+        "ephemeral": true
+      }
+    },
+    {
+      "name": "m9_verifier",
+      "role": "verifier",
+      "agent": "codex",
+      "execution_backend": "subprocess",
+      "worktree_dir": "verifier",
+      "branch": "hermes/lyscontrol-m9-review/verifier",
+      "prompt_file": "prompts/lyscontrol-m9-stream-start-verifier.md",
+      "expected_handoff": "HANDOFF_CODEX.md",
+      "cmd_options": {
+        "sandbox": "workspace-write",
+        "ephemeral": true
+      },
+      "commit_message": "chore: verifier evidence only (no commit expected)"
+    }
+  ]
+}

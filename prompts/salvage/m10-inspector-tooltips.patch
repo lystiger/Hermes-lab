@@ -1,0 +1,67 @@
+diff --git i/src/__tests__/m10-long-text.test.tsx w/src/__tests__/m10-long-text.test.tsx
+index f99b479..fc6cdf0 100644
+--- i/src/__tests__/m10-long-text.test.tsx
++++ w/src/__tests__/m10-long-text.test.tsx
+@@ -1,10 +1,14 @@
+ import { describe, it, expect, vi } from 'vitest';
++import { MemoryRouter } from 'react-router-dom';
++import * as hooks from '../api/hooks';
++import { useConsoleStore } from '../stores/useConsoleStore';
++import { JobDetailView } from '../features/jobs/JobDetailView';
+ import { render, screen } from '@testing-library/react';
+ import { QueueTable } from '../features/jobs/QueueTable';
+ import { MissionBoard } from '../features/jobs/MissionBoard';
+ import { LONG_TEXT_JOB, LONG_PROMPT_PATH, LONG_JOB_ID, MockHermesApi } from '../api/adapters/mockAdapter';
+ 
+-vi.mock('../api/hooks', () => ({ useAgents: () => ({ agents: [] }) }));
++vi.mock('../api/hooks', async (orig) => ({ ...(await orig<typeof import('../api/hooks')>()), useAgents: () => ({ agents: [] }) }));
+ 
+ describe('Long queue values', () => {
+   it('keeps a 90+ character path and 60 character ID in bounded cells with full tooltips', () => {
+@@ -33,3 +37,19 @@ describe('Long queue values', () => {
+     expect(await api.getJobEvents(LONG_JOB_ID)).toHaveLength(1);
+   });
+ });
++
++describe('Inspector long values', () => {
++  it('keeps the full phase path in the tooltip and duration/durability reachable below xl', async () => {
++    const api = new MockHermesApi();
++    const job = (await api.getJob(LONG_JOB_ID))!;
++    vi.spyOn(hooks, 'useJob').mockReturnValue({ job, loading: false, error: null, updatedAt: null, stale: false, refetch: vi.fn() });
++    const [event] = await api.getJobEvents(LONG_JOB_ID);
++    useConsoleStore.setState({ allEvents: [{ ...event, dur: '1.2s' }], activeModalJobId: LONG_JOB_ID });
++    render(<MemoryRouter><JobDetailView jobId={LONG_JOB_ID} /></MemoryRouter>);
++    // The phase shows the file name but its tooltip must hold the whole path.
++    const phase = screen.getByText(LONG_PROMPT_PATH.split('/').pop()!);
++    expect(phase).toHaveAttribute('title', LONG_PROMPT_PATH);
++    // Duration and durability columns are hidden below xl (e.g. 900 px), so the kind tooltip carries them.
++    expect(screen.getByTitle('task.created · 1.2s · live')).toHaveTextContent('task.created');
++  });
++});
+diff --git i/src/features/jobs/JobDetailView.tsx w/src/features/jobs/JobDetailView.tsx
+index 1a4439d..57e2248 100644
+--- i/src/features/jobs/JobDetailView.tsx
++++ w/src/features/jobs/JobDetailView.tsx
+@@ -149,7 +149,7 @@ export const JobDetailView: React.FC<JobDetailViewProps> = ({ jobId = '' }) => {
+                       <div className="flex-1 min-w-0">
+                         <div
+                           style={{ color: isDone || isActive ? 'var(--lys-text-primary)' : 'var(--lys-text-faint)' }}
+-                          title={p.name.split('/').pop()} className="min-w-0 truncate font-sans text-[11px] tracking-wider font-semibold"
++                          title={p.name} className="min-w-0 truncate font-sans text-[11px] tracking-wider font-semibold"
+                         >
+                           {p.name.split('/').pop()}
+                         </div>
+@@ -240,7 +240,12 @@ export const JobDetailView: React.FC<JobDetailViewProps> = ({ jobId = '' }) => {
+                   >
+                     {e.source.displayName}
+                   </span>
+-                  <span title={e.kind} className="min-w-0 truncate text-lys-muted">{e.kind}</span>
++                  <span
++                    title={`${e.kind} · ${e.dur} · ${origin === 'stored' ? 'durable' : origin === 'bus' ? 'in-memory' : 'live'}`}
++                    className="min-w-0 truncate text-lys-muted"
++                  >
++                    {e.kind}
++                  </span>
+                   <span className="flex-1 min-w-0 text-lys-secondary break-words font-sans line-clamp-2" title={e.detail}>
+                     {e.detail}
+                   </span>

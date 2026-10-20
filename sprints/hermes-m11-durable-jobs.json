@@ -1,0 +1,77 @@
+{
+  "sprint_id": "hermes-m11-durable-jobs",
+  "name": "Hermes M11: durable job history",
+  "target_repo": "../",
+  "base_ref": "HEAD",
+  "target_branch": "hermes/m11/integration",
+  "worktree_root": "/home/lystiger/hermes-worktrees/hermes-m11",
+  "runs_root": "/home/lystiger/hermes-runs",
+  "execution_backend": "subprocess",
+  "limits": {
+    "max_changed_files": 40,
+    "timeout_seconds": 3000
+  },
+  "verification": [
+    {
+      "name": "pytest",
+      "command": [
+        "/home/lystiger/Projects/Hermes-lab/.venv/bin/python",
+        "-m",
+        "pytest",
+        "tests",
+        "-q",
+        "--ignore=tests/smoke",
+        "-p",
+        "no:cacheprovider"
+      ],
+      "timeout_seconds": 900
+    }
+  ],
+  "phases": [
+    {
+      "name": "m11_builder",
+      "role": "builder",
+      "agent": "codex",
+      "execution_backend": "subprocess",
+      "worktree_dir": "builder",
+      "branch": "hermes/m11/builder",
+      "prompt_file": "prompts/hermes-m11-durable-jobs-builder.md",
+      "expected_handoff": "HANDOFF_BUILDER.md",
+      "commit_message": "feat(runtime): persist job records and reload them on restart",
+      "cmd_options": {
+        "sandbox": "workspace-write",
+        "ephemeral": true
+      }
+    },
+    {
+      "name": "m11_hardener",
+      "role": "hardener",
+      "agent": "codex",
+      "execution_backend": "subprocess",
+      "worktree_dir": "hardener",
+      "branch": "hermes/m11/hardener",
+      "prompt_file": "prompts/hermes-m11-durable-jobs-hardener.md",
+      "expected_handoff": "HANDOFF_HARDENER.md",
+      "commit_message": "fix(runtime): harden durable job records",
+      "cmd_options": {
+        "sandbox": "workspace-write",
+        "ephemeral": true
+      }
+    },
+    {
+      "name": "m11_verifier",
+      "role": "verifier",
+      "agent": "codex",
+      "execution_backend": "subprocess",
+      "worktree_dir": "verifier",
+      "branch": "hermes/m11/verifier",
+      "prompt_file": "prompts/hermes-m11-durable-jobs-verifier.md",
+      "expected_handoff": "HANDOFF_CODEX.md",
+      "commit_message": "chore: verifier evidence only (no commit expected)",
+      "cmd_options": {
+        "sandbox": "workspace-write",
+        "ephemeral": true
+      }
+    }
+  ]
+}

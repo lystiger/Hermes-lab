@@ -750,6 +750,14 @@ class ReactiveJobEngine:
                 )
                 return False
 
+            elif ver_res.blocked_by == "environment":
+                await self.event_bridge.emit_verification_blocked(self.job.job_id, ver_res)
+                await self._transition_job(
+                    JobState.BLOCKED,
+                    reason=f"Verification blocked by environment in phase 'VERIFYING': {ver_res.summary}",
+                )
+                return False
+
             elif ver_res.is_repairable:
                 await self.event_bridge.emit_verification_failed(self.job.job_id, ver_res)
 

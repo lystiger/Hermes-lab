@@ -33,6 +33,7 @@ from runtime.verification import VerifierAdapter, VerificationResult, Verificati
 from runtime.task_graph import TaskNode, TaskGraph, TaskStatus
 from runtime.job_state import JobRecord
 from runtime.observations import Observation
+from runtime.target_subdir import normalize_target_subdir, subdir_path
 from runtime.replanning import ProductionPlannerAdapter, PlannerAdapter, ReplanRequest, ReplanResult, GraphMutation, GraphMutationType
 from runtime.capacity import UsageSnapshotNormalizer, default_capacity_registry
 from runner.agents.errors import SprintRunnerError
@@ -180,6 +181,7 @@ class HermesActorAdapter(ActorAdapter):
         target_branch: str = "sprint/integration",
         observation_registry: Any = None,
         event_bridge: Any = None,
+        target_subdir: str = "",
     ):
         self.control_root = Path.cwd().resolve()
         self.target_repo = Path(target_repo).resolve() if target_repo else self.control_root
@@ -205,6 +207,8 @@ class HermesActorAdapter(ActorAdapter):
         self.thread_id = self.job_id
         self.base_ref = base_ref
         self.target_branch = target_branch
+        # Agents and verification run in this subfolder of each worktree; git stays at the root.
+        self.target_subdir = normalize_target_subdir(target_subdir)
         self.logger = logger
         self.persona_enabled = True
         self.controller_id = f"hermes.runtime:{self.job_id}"
@@ -927,7 +931,7 @@ class HermesActorAdapter(ActorAdapter):
                     **({"priority": task.metadata["priority"]} if "priority" in task.metadata else {}),
                     **({"persona": task.metadata["persona"]} if "persona" in task.metadata else {}),
                 },
-                worktree=worktree_path,
+                worktree=subdir_path(worktree_path, self.target_subdir),
                 prompt=effective_prompt,
                 options=task.metadata.get("options", {}),
                 stdout_file=stdout_file,
@@ -1313,7 +1317,9 @@ class HermesVerifierAdapter(VerifierAdapter):
         verification_steps: Optional[List[Dict[str, Any]]] = None,
         working_dir: Optional[Path] = None,
         worktree_root: Optional[Path] = None,
+        target_subdir: str = "",
     ):
+        self.target_subdir = normalize_target_subdir(target_subdir)
         self.verifier_id = verifier_id
         self.verification_steps = verification_steps or []
         self.working_dir = Path(working_dir).resolve() if working_dir else Path.cwd()
@@ -1376,11 +1382,13 @@ class HermesVerifierAdapter(VerifierAdapter):
                 )
                 continue
 
-            step_cwd = target_dir
+            # Step cwd values are relative to the target subfolder, not the repository root.
+            step_root = subdir_path(target_dir, self.target_subdir)
+            step_cwd = step_root
             if step.get("cwd"):
                 rel_cwd = Path(step["cwd"])
                 if not rel_cwd.is_absolute():
-                    step_cwd = (target_dir / rel_cwd).resolve()
+                    step_cwd = (step_root / rel_cwd).resolve()
 
             timeout_sec = step.get("timeout_seconds", 300)
 

@@ -1339,11 +1339,22 @@ class HermesVerifierAdapter(VerifierAdapter):
         checks_results: List[VerificationCheck] = []
         all_passed = True
         has_repairable_failure = False
+        blocked_by: Optional[str] = None
+
+        def is_environment_block(error_text: str = "", error: Optional[BaseException] = None) -> bool:
+            if isinstance(error, (PermissionError, FileNotFoundError)):
+                return True
+            text = error_text.lower()
+            return any(marker in text for marker in (
+                "eperm", "operation not permitted", "permission denied",
+                "sandbox", "chromium unavailable", "browser unavailable",
+            ))
 
         for step in self.verification_steps:
             check_name = step.get("name", "verification_check")
             raw_cmd = step.get("command") or step.get("cmd")
             if not raw_cmd:
+                environment_block = not passed and is_environment_block(stderr_str, None)
                 checks_results.append(
                     VerificationCheck(
                         name=check_name,
@@ -1396,14 +1407,22 @@ class HermesVerifierAdapter(VerifierAdapter):
                         passed=passed,
                         detail=msg,
                         error=stderr_str if not passed else None,
-                        repairable=not passed,
-                        metadata={"stdout": stdout_str, "stderr": stderr_str, "returncode": proc.returncode},
+                        repairable=not passed and not environment_block,
+                        metadata={
+                            "stdout": stdout_str,
+                            "stderr": stderr_str,
+                            "returncode": proc.returncode,
+                            **({"blocked_by": "environment"} if environment_block else {}),
+                        },
                     )
                 )
 
                 if not passed:
                     all_passed = False
-                    has_repairable_failure = True
+                    if environment_block:
+                        blocked_by = "environment"
+                    else:
+                        has_repairable_failure = True
 
             except asyncio.TimeoutError:
                 logger.warning("Verification check '%s' timed out after %s seconds", check_name, timeout_sec)
@@ -1421,17 +1440,22 @@ class HermesVerifierAdapter(VerifierAdapter):
 
             except Exception as e:
                 logger.warning("Verification check '%s' raised exception: %s", check_name, e)
+                environment_block = is_environment_block(str(e), e)
                 checks_results.append(
                     VerificationCheck(
                         name=check_name,
                         passed=False,
                         detail=str(e),
                         error=str(e),
-                        repairable=True,
+                        repairable=not environment_block,
+                        metadata={"blocked_by": "environment"} if environment_block else {},
                     )
                 )
                 all_passed = False
-                has_repairable_failure = True
+                if environment_block:
+                    blocked_by = "environment"
+                else:
+                    has_repairable_failure = True
 
         if all_passed:
             return VerificationResult(
@@ -1461,6 +1485,7 @@ class HermesVerifierAdapter(VerifierAdapter):
             summary=summary_msg,
             checks=checks_results,
             repair_recommendations=repair_tasks,
+            blocked_by=blocked_by,
         )
 
 

@@ -668,6 +668,39 @@ export interface CapacityTelemetry {
   jobsTracked: number | null;
 }
 
+/** One usage window of an agent, as computed by GET /capacity/limits. */
+export interface AgentLimitWindow {
+  label: string;
+  usedPct: number;
+  leftPct: number;
+  resetsAt: string | null;
+  resetsInSeconds: number;
+}
+
+export type AgentLimitStatus = 'ok' | 'warn' | 'alarm';
+
+/** One agent in GET /capacity/limits. Percentages are computed by the backend. */
+export interface AgentLimit {
+  id: string;
+  name: string;
+  plan: string;
+  ready: boolean;
+  stale: boolean;
+  status: AgentLimitStatus | string;
+  usedPct: number;
+  leftPct: number;
+  resetsAt: string | null;
+  resetsInSeconds: number;
+  windows: AgentLimitWindow[];
+  updatedAt: string | null;
+  authHelp: string;
+}
+
+export interface AgentLimitsReport {
+  timestamp: string | null;
+  agents: AgentLimit[];
+}
+
 /** GET /jobs/{id}/telemetry. Zero means no usage was tracked for the job, not proof that none was spent. */
 export interface JobTokenTelemetry {
   jobId: string;

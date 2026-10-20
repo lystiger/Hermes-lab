@@ -17,6 +17,7 @@ import {
   ExecutionSnapshot,
   PipelineStepState,
   CapacityTelemetry,
+  AgentLimitsReport,
   JobTokenTelemetry,
   TaskNode,
   AgentRun,
@@ -34,6 +35,7 @@ import {
   mapStoredEvent,
   mapEvent,
   mapCapacityTelemetry,
+  mapAgentLimits,
   mapJobTokenTelemetry,
   mapTaskNode,
   mapAgentRun,
@@ -668,6 +670,10 @@ export class HttpHermesApi implements HermesApi {
 
   async getCapacityTelemetry(): Promise<CapacityTelemetry> {
     return mapCapacityTelemetry(await this.getJson('/capacity/telemetry', '/capacity/telemetry'));
+  }
+
+  async getAgentLimits(): Promise<AgentLimitsReport> {
+    return mapAgentLimits(await this.getJson('/capacity/limits', '/capacity/limits'));
   }
 
   async getJobTelemetry(jobId: string): Promise<JobTokenTelemetry> {

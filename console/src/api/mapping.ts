@@ -2,6 +2,8 @@ import {
   AgentRun,
   ArtifactRef,
   CapacityTelemetry,
+  AgentLimit,
+  AgentLimitsReport,
   JobObservation,
   JobTokenTelemetry,
   ProviderTelemetry,
@@ -183,6 +185,41 @@ export function mapCapacityTelemetry(raw: any): CapacityTelemetry {
     providers,
     jobsTracked: nullableNumber(pick(raw, 'jobs_tracked', 'jobsTracked'))
   };
+}
+
+function num(value: unknown): number {
+  return typeof value === 'number' && Number.isFinite(value) ? value : 0;
+}
+
+/** GET /capacity/limits. The backend already computes every percentage; this only checks shapes. */
+export function mapAgentLimits(raw: any): AgentLimitsReport {
+  const list = pick(raw, 'agents');
+  const agents: AgentLimit[] = Array.isArray(list)
+    ? list.filter((a) => a && typeof a === 'object').map((a: any) => ({
+        id: String(a.id ?? ''),
+        name: String(a.name ?? a.id ?? ''),
+        plan: typeof a.plan === 'string' ? a.plan : '',
+        ready: a.ready === true,
+        stale: a.stale === true,
+        status: typeof a.status === 'string' ? a.status : 'ok',
+        usedPct: num(a.usedPct),
+        leftPct: num(a.leftPct),
+        resetsAt: nullableString(a.resetsAt),
+        resetsInSeconds: num(a.resetsInSeconds),
+        windows: Array.isArray(a.windows)
+          ? a.windows.filter((w: any) => w && typeof w === 'object').map((w: any) => ({
+              label: String(w.label ?? ''),
+              usedPct: num(w.usedPct),
+              leftPct: num(w.leftPct),
+              resetsAt: nullableString(w.resetsAt),
+              resetsInSeconds: num(w.resetsInSeconds)
+            }))
+          : [],
+        updatedAt: nullableString(a.updatedAt),
+        authHelp: typeof a.authHelp === 'string' ? a.authHelp : ''
+      }))
+    : [];
+  return { timestamp: nullableString(pick(raw, 'timestamp')), agents };
 }
 
 /** GET /jobs/{id}/telemetry: `{job_id, tokens: {input_tokens, output_tokens, cached_tokens, total_tokens}}`. */

@@ -559,6 +559,7 @@ async def get_job_recovery_status(job_id: str):
 
 
 from runtime.capacity import default_capacity_registry
+from runtime.usage_limits import DEFAULT_USAGE_DIRECTORY, load_agent_limits
 
 
 @app.get("/capacity/telemetry")
@@ -567,6 +568,12 @@ async def get_capacity_telemetry():
     Returns aggregated provider capacity, token usage, throttling events, and health metrics.
     """
     return default_capacity_registry.get_telemetry_report()
+
+
+@app.get("/capacity/limits")
+async def get_capacity_limits():
+    now = datetime.now(timezone.utc)
+    return {"timestamp": now.isoformat().replace("+00:00", "Z"), "agents": load_agent_limits(DEFAULT_USAGE_DIRECTORY, now)}
 
 
 @app.get("/jobs/{job_id}/telemetry")

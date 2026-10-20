@@ -27,6 +27,25 @@ def test_round_trip_preserves_summary_and_detail(tmp_path):
     assert recovered.get_job(job.id).to_dict() == job.to_dict()
 
 
+def test_all_persisted_records_beyond_thirty_are_loaded(tmp_path):
+    service = JobService(runs_root=tmp_path)
+    for index in range(40):
+        service.register_job(make_job(job_id=f"job-{index:02}"))
+    recovered = JobService(runs_root=tmp_path)
+    assert len(recovered.list_jobs(limit=100)) == 40
+    assert recovered.list_jobs(limit=100) == service.list_jobs(limit=100)
+
+
+def test_unchanged_job_reads_do_not_write_to_disk(tmp_path):
+    service = JobService(runs_root=tmp_path)
+    job = make_job()
+    service.register_job(job)
+    with patch("jobs.job_service.tempfile.NamedTemporaryFile") as temporary:
+        assert service.get_job(job.id).to_dict() == job.to_dict()
+        assert service.list_jobs() == [job.to_summary_dict()]
+    temporary.assert_not_called()
+
+
 @pytest.mark.parametrize("status", ["CREATED", "QUEUED", "PREPARING", "PLANNING", "RUNNING",
                                     "EXECUTING", "VERIFYING", "REPAIRING", "WAITING_FOR_CAPACITY"])
 def test_restart_reconciles_and_persists_interrupted_job(tmp_path, status):

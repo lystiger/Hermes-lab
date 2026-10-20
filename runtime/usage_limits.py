@@ -1,6 +1,7 @@
 """Read-only usage-limit records written by the LysOmarchy agents plugin."""
 
 import json
+import math
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Optional
@@ -17,9 +18,9 @@ def _parse_time(value: Any) -> Optional[datetime]:
         return None
     try:
         parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
-    except ValueError:
+        return parsed.replace(tzinfo=timezone.utc) if parsed.tzinfo is None else parsed.astimezone(timezone.utc)
+    except (ValueError, OverflowError):
         return None
-    return parsed.replace(tzinfo=timezone.utc) if parsed.tzinfo is None else parsed.astimezone(timezone.utc)
 
 
 def _iso(value: datetime) -> str:
@@ -35,8 +36,17 @@ def _seconds_until(reset: Optional[datetime], now: datetime) -> int:
 def _percent(value: Any) -> float:
     try:
         return min(1.0, max(0.0, float(value))) * 100
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):
         return 0.0
+
+
+def _text(value: Any, default: str = "") -> str:
+    return value if isinstance(value, str) else default
+
+
+def _future(reset: Optional[datetime], now: datetime) -> Optional[datetime]:
+    """A reset time that has already passed is unknown, not a time to show."""
+    return reset if reset is not None and reset > now else None
 
 
 def _agent_from_record(record: Dict[str, Any], filename: str, modified: datetime, now: datetime) -> Dict[str, Any]:
@@ -47,29 +57,37 @@ def _agent_from_record(record: Dict[str, Any], filename: str, modified: datetime
         if not isinstance(item, dict):
             continue
         used = _percent(item.get("percent"))
-        reset = _parse_time(item.get("resetsAt"))
+        reset = _future(_parse_time(item.get("resetsAt")), now)
         windows.append({
-            "label": item.get("label", ""),
+            "label": _text(item.get("label")),
+            "usedRaw": used,
             "usedPct": round(used),
             "leftPct": round(max(0.0, min(100.0, 100.0 - used))),
             "resetsAt": _iso(reset) if reset else None,
             "resetsInSeconds": _seconds_until(reset, now),
         })
 
-    headline = max(windows, key=lambda window: window["usedPct"], default=None)
-    used = float(headline["usedPct"]) if headline else 0.0
+    headline = max(windows, key=lambda window: window["usedRaw"], default=None)
+    used = headline["usedRaw"] if headline else 0.0
     reset = _parse_time(headline["resetsAt"]) if headline and headline["resetsAt"] else None
-    balance = record.get("balance") if isinstance(record.get("balance"), dict) else None
-    if balance and _positive_number(balance.get("funded")) > 0:
-        left = max(0.0, min(100.0, _positive_number(balance.get("remaining")) / _positive_number(balance["funded"]) * 100))
+    for window in windows:
+        del window["usedRaw"]
+    raw_balance = record.get("balance") if isinstance(record.get("balance"), dict) else None
+    balance = None
+    if raw_balance is not None:
+        balance = {key: _positive_number(raw_balance.get(key)) for key in ("funded", "remaining", "spent")}
+        balance["currency"] = _text(raw_balance.get("currency"))
+    if balance and balance["funded"] > 0:
+        left = max(0.0, min(100.0, balance["remaining"] / balance["funded"] * 100))
+        used = max(used, 100.0 - left)
     else:
         left = max(0.0, min(100.0, 100.0 - used))
 
     return {
-        "id": record.get("id") or filename,
-        "name": record.get("name") or record.get("id") or filename,
-        "plan": record.get("tierLabel", ""),
-        "ready": bool(record.get("ready", False)),
+        "id": _text(record.get("id")) or filename,
+        "name": _text(record.get("name")) or _text(record.get("id")) or filename,
+        "plan": _text(record.get("tierLabel")),
+        "ready": record.get("ready") is True,
         "stale": (now - updated).total_seconds() > STALE_AFTER_SECONDS,
         "status": "alarm" if used >= ALARM_AT_PCT else "warn" if used >= WARN_AT_PCT else "ok",
         "usedPct": round(used),
@@ -79,15 +97,16 @@ def _agent_from_record(record: Dict[str, Any], filename: str, modified: datetime
         "windows": windows,
         "balance": balance,
         "updatedAt": _iso(updated),
-        "authHelp": record.get("authHelpText", ""),
+        "authHelp": _text(record.get("authHelpText")),
     }
 
 
 def _positive_number(value: Any) -> float:
     try:
-        return max(0.0, float(value))
-    except (TypeError, ValueError):
+        number = float(value)
+    except (TypeError, ValueError, OverflowError):
         return 0.0
+    return number if math.isfinite(number) and number > 0 else 0.0
 
 
 def load_agent_limits(directory: Any = DEFAULT_USAGE_DIRECTORY, now: Optional[datetime] = None) -> list[Dict[str, Any]]:
@@ -101,13 +120,16 @@ def load_agent_limits(directory: Any = DEFAULT_USAGE_DIRECTORY, now: Optional[da
     for entry in path.iterdir():
         if entry.name.startswith(".") or not entry.is_file() or entry.suffix.lower() != ".json":
             continue
-        modified = datetime.fromtimestamp(entry.stat().st_mtime, timezone.utc)
+        try:
+            modified = datetime.fromtimestamp(entry.stat().st_mtime, timezone.utc)
+        except (OSError, OverflowError, ValueError):
+            continue
         try:
             with entry.open(encoding="utf-8") as handle:
                 record = json.load(handle)
             if not isinstance(record, dict):
                 raise ValueError("record is not an object")
-        except (OSError, ValueError, json.JSONDecodeError):
+        except (OSError, ValueError, RecursionError):
             record = {"id": entry.stem, "name": entry.stem, "ready": False}
         agents.append(_agent_from_record(record, entry.stem, modified, now))
     return sorted(agents, key=lambda agent: str(agent["id"]))

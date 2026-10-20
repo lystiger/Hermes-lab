@@ -26,7 +26,6 @@ const AgentLimitCard: React.FC<{ agent: AgentLimit }> = ({ agent }) => {
   const status = displayStatus(agent);
   // The bar keeps the backend's colour for a stale reading; only the badge says it is stale.
   const barColor = TONE_COLOR[statusTone(agent.status)];
-  const left = Math.max(0, Math.min(100, agent.leftPct ?? 0));
 
   return (
     <Card as="section" label={`Limits for ${agent.name}`} bodyClassName="p-4 flex flex-col gap-3">
@@ -49,10 +48,10 @@ const AgentLimitCard: React.FC<{ agent: AgentLimit }> = ({ agent }) => {
             aria-label={`${agent.name} remaining`}
             aria-valuemin={0}
             aria-valuemax={100}
-            aria-valuenow={left}
+            {...(agent.leftPct === null ? {} : { 'aria-valuenow': agent.leftPct })}
             className="h-1.5 w-full bg-lys-subtle"
           >
-            <div className="h-full" style={{ width: `${left}%`, background: barColor }} />
+            {agent.leftPct !== null && <div className="h-full" style={{ width: `${agent.leftPct}%`, background: barColor }} />}
           </div>
           {agent.resetsAt && <div className="text-[11px] text-lys-muted">resets in {formatResetIn(agent.resetsInSeconds)}</div>}
           {agent.windows.length > 0 && (

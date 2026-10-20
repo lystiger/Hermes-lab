@@ -33,11 +33,15 @@ def _seconds_until(reset: Optional[datetime], now: datetime) -> int:
     return max(0, int((reset - now).total_seconds()))
 
 
-def _percent(value: Any) -> float:
+def _percent(value: Any) -> Optional[float]:
+    """Used percent from a 0..1 fraction; a missing or non-numeric value is unknown, not 0."""
+    if isinstance(value, bool):
+        return None
     try:
-        return min(1.0, max(0.0, float(value))) * 100
+        number = float(value)
     except (TypeError, ValueError, OverflowError):
-        return 0.0
+        return None
+    return min(1.0, max(0.0, number)) * 100 if math.isfinite(number) else None
 
 
 def _text(value: Any, default: str = "") -> str:
@@ -67,13 +71,13 @@ def _agent_from_record(record: Dict[str, Any], filename: str, modified: datetime
         windows.append({
             "label": _text(item.get("label")),
             "usedRaw": used,
-            "usedPct": round(used),
-            "leftPct": round(max(0.0, min(100.0, 100.0 - used))),
+            "usedPct": None if used is None else round(used),
+            "leftPct": None if used is None else round(max(0.0, min(100.0, 100.0 - used))),
             "resetsAt": _iso(reset) if reset else None,
             "resetsInSeconds": _seconds_until(reset, now),
         })
 
-    headline = max(windows, key=lambda window: window["usedRaw"], default=None)
+    headline = max((w for w in windows if w["usedRaw"] is not None), key=lambda window: window["usedRaw"], default=None)
     used = headline["usedRaw"] if headline else None
     reset = _parse_time(headline["resetsAt"]) if headline and headline["resetsAt"] else None
     for window in windows:
@@ -83,7 +87,9 @@ def _agent_from_record(record: Dict[str, Any], filename: str, modified: datetime
     if raw_balance is not None:
         balance = {key: _positive_number(raw_balance.get(key)) for key in ("funded", "remaining", "spent")}
         balance["currency"] = _text(raw_balance.get("currency"))
-    if balance and balance["funded"] > 0:
+    # A balance without a numeric "remaining" says nothing about what is left; it must not read as 0% left.
+    remaining_known = raw_balance is not None and _finite_number(raw_balance.get("remaining"))
+    if balance and balance["funded"] > 0 and remaining_known:
         left = max(0.0, min(100.0, balance["remaining"] / balance["funded"] * 100))
         used = 100.0 - left
     elif used is not None:
@@ -108,6 +114,15 @@ def _agent_from_record(record: Dict[str, Any], filename: str, modified: datetime
         "updatedAt": _iso(updated),
         "authHelp": _text(record.get("authHelpText")),
     }
+
+
+def _finite_number(value: Any) -> bool:
+    if isinstance(value, bool):
+        return False
+    try:
+        return math.isfinite(float(value))
+    except (TypeError, ValueError, OverflowError):
+        return False
 
 
 def _positive_number(value: Any) -> float:

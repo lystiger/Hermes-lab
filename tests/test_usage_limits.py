@@ -86,3 +86,21 @@ def test_corrupt_records_and_dotfiles_do_not_break_response(tmp_path):
     assert weird["ready"] is False and weird["authHelp"] == ""
     json.dumps(list(agents.values()), allow_nan=False)  # must be serialisable
     assert "sk-123" not in json.dumps(weird) and "/home/u" not in json.dumps(weird)
+
+
+def test_window_without_numeric_percent_is_unknown_not_zero(tmp_path):
+    agents = _load(tmp_path, {
+        "a.json": _record(id="a", limits=[{"label": "x"}, {"label": "y", "percent": None}, {"label": "z", "percent": "nan"}]),
+        "b.json": _record(id="b", limits=[{"label": "x"}, {"label": "y", "percent": 0.5}]),
+    })
+    a, b = agents["a"], agents["b"]
+    assert (a["usedPct"], a["leftPct"], a["status"]) == (None, None, "unknown")
+    assert all(w["usedPct"] is None and w["leftPct"] is None for w in a["windows"])
+    assert (b["usedPct"], b["leftPct"]) == (50, 50)
+    assert b["windows"][0]["leftPct"] is None
+
+
+def test_balance_without_remaining_is_unknown_not_empty(tmp_path):
+    agents = _load(tmp_path, {"a.json": _record(balance={"funded": 20, "currency": "USD"})})
+    a = agents["a"]
+    assert (a["usedPct"], a["leftPct"], a["status"]) == (None, None, "unknown")

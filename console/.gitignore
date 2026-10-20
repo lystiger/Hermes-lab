@@ -1,0 +1,10 @@
+node_modules/
+dist/
+.env
+.env.local
+*.log
+.DS_Store
+
+# Local agent portrait images (not product source)
+/portrait
+/public/portrait/

@@ -1,0 +1,59 @@
+{
+  "name": "LysControl",
+  "type": "module",
+  "version": "1.0.0",
+  "description": "Lystiger control station of the agents",
+  "main": "src/main.tsx",
+  "scripts": {
+    "dev": "vite --host --port 3000",
+    "start": "vite --host --port 3000",
+    "build": "vite build",
+    "preview": "vite preview --host --port 3000",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint .",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/lystiger/LysControl.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/lystiger/LysControl/issues"
+  },
+  "homepage": "https://github.com/lystiger/LysControl#readme",
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@tailwindcss/vite": "^4.3.3",
+    "@testing-library/jest-dom": "^7.0.1",
+    "@testing-library/react": "^16.3.2",
+    "@testing-library/user-event": "^14.6.6",
+    "@types/node": "^26.2.0",
+    "@types/react": "^19.2.18",
+    "@types/react-dom": "^19.2.4",
+    "@vitejs/plugin-react": "^6.1.0",
+    "eslint": "^10.9.0",
+    "globals": "^17.11.0",
+    "jsdom": "^30.0.1",
+    "tailwindcss": "^4.3.3",
+    "typescript": "^5.8.2",
+    "typescript-eslint": "^8.67.0",
+    "vite": "^8.2.2",
+    "vitest": "^4.1.11"
+  },
+  "dependencies": {
+    "@fontsource/jetbrains-mono": "^5.3.0",
+    "@fontsource/outfit": "^5.3.0",
+    "@fontsource/plus-jakarta-sans": "^5.3.0",
+    "clsx": "^2.1.1",
+    "lucide-react": "^1.33.0",
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8",
+    "react-router-dom": "^7.18.2",
+    "tailwind-merge": "^3.6.0",
+    "zustand": "^5.0.15"
+  }
+}

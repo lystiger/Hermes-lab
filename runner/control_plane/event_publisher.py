@@ -13,6 +13,7 @@ if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
 from capabilities.normalization import normalize_agent_id
+from security.urls import checked_urlopen
 
 logger = logging.getLogger("hermes.event_publisher")
 
@@ -48,7 +49,7 @@ class RuntimeEventPublisher:
                 headers={"Content-Type": "application/json"},
                 method="POST",
             )
-            with urllib.request.urlopen(req, timeout=self.timeout) as resp:
+            with checked_urlopen(req, timeout=self.timeout) as resp:
                 if resp.status in {200, 201, 202}:
                     return True
                 logger.warning(
@@ -187,7 +188,7 @@ class RuntimeEventPublisher:
         url = f"{self.control_url}/agents/{urllib.parse.quote(agent_id)}/inbox?{query_str}"
         try:
             req = urllib.request.Request(url, headers={"User-Agent": "HermesRunner/1.0"})
-            with urllib.request.urlopen(req, timeout=self.timeout) as resp:
+            with checked_urlopen(req, timeout=self.timeout) as resp:
                 if resp.status == 200:
                     data = json.loads(resp.read().decode("utf-8"))
                     return data if isinstance(data, list) else []
@@ -210,7 +211,7 @@ class RuntimeEventPublisher:
                 headers={"Content-Type": "application/json", "User-Agent": "HermesRunner/1.0"},
                 method="POST",
             )
-            with urllib.request.urlopen(req, timeout=self.timeout) as resp:
+            with checked_urlopen(req, timeout=self.timeout) as resp:
                 return resp.status == 200
         except Exception as e:
             logger.debug(f"Failed to acknowledge message {message_id} for agent {agent_id}: {e}")

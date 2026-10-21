@@ -1,0 +1,6 @@
+/* C. Japanese precision: blue and white grid, exact spacing, restrained. */
+:root {
+  --bg: #ffffff; --surface: #f4f6fa; --text: #0d1b2a; --muted: #44506a;
+  --primary: #1d3f8f; --on-primary: #ffffff; --accent: #c8102e;
+  --radius: 2px; --gap: 16px; --font: "Helvetica Neue", Arial, system-ui, sans-serif;
+}

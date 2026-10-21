@@ -30,6 +30,10 @@ from datetime import datetime
 SCRIPT_DIR = Path(__file__).resolve().parent
 if str(SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPT_DIR))
+# The repository root must be importable before the runner's modules, which import from it (security, agents...).
+ROOT_DIR = SCRIPT_DIR.parent
+if str(ROOT_DIR) not in sys.path:
+    sys.path.insert(0, str(ROOT_DIR))
 
 from agents.base import AgentContext
 from agents.errors import SprintRunnerError
@@ -37,10 +41,6 @@ from agents.permissions import scoped_antigravity_permissions
 from agents.registry import default_registry
 from backends.registry import default_backend_registry
 from control_plane.event_publisher import default_publisher
-
-ROOT_DIR = SCRIPT_DIR.parent
-if str(ROOT_DIR) not in sys.path:
-    sys.path.insert(0, str(ROOT_DIR))
 
 try:
     from artifacts.artifact_registry import artifact_registry, ArtifactRef, ArtifactTrust

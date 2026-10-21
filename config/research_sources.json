@@ -1,0 +1,5 @@
+[
+  {"name": "fastapi-release", "project": "hermes", "url": "https://api.github.com/repos/fastapi/fastapi/releases/latest", "field": "tag_name"},
+  {"name": "nextjs-release", "project": "unigreen", "url": "https://api.github.com/repos/vercel/next.js/releases/latest", "field": "tag_name"},
+  {"name": "playwright-npm", "project": "unigreen", "url": "https://registry.npmjs.org/@playwright/test/latest", "field": "version"}
+]

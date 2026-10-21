@@ -1,0 +1,7 @@
+{
+  "name": "unigreen-diagrams",
+  "private": true,
+  "description": "Renders the Unigreen Mermaid diagrams for the design pages. Design output only.",
+  "scripts": { "render": "node render.mjs" },
+  "dependencies": { "mermaid": "^11.4.0" }
+}

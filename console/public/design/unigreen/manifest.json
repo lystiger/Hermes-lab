@@ -6,17 +6,17 @@
   "directions": [
     {
       "id": "a-family-fresh",
-      "label": "A · Family fresh",
+      "label": "A \u00b7 Family fresh",
       "detail": "detail-a-family-fresh.png"
     },
     {
       "id": "b-clean-eco",
-      "label": "B · Clean eco",
+      "label": "B \u00b7 Clean eco",
       "detail": "detail-b-clean-eco.png"
     },
     {
       "id": "c-japanese-precision",
-      "label": "C · Japanese precision",
+      "label": "C \u00b7 Japanese precision",
       "detail": "detail-c-japanese-precision.png"
     }
   ],
@@ -52,6 +52,33 @@
       "id": "submit-sequence",
       "label": "Submitting an inquiry",
       "file": "diagrams/submit-sequence.svg"
+    }
+  ],
+  "wireframes": [
+    {
+      "id": "home",
+      "label": "Home",
+      "file": "wireframes/home.html"
+    },
+    {
+      "id": "product",
+      "label": "Product detail",
+      "file": "wireframes/product.html"
+    },
+    {
+      "id": "quotation-list",
+      "label": "Quotation list",
+      "file": "wireframes/quotation-list.html"
+    },
+    {
+      "id": "inquiry-sent",
+      "label": "Thank you",
+      "file": "wireframes/inquiry-sent.html"
+    },
+    {
+      "id": "staff-inquiries",
+      "label": "Staff: inquiries",
+      "file": "wireframes/staff-inquiries.html"
     }
   ]
 }

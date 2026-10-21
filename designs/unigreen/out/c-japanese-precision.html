@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Uni-Green direction</title>
+<style>
+/* C. Japanese precision: blue and white grid, exact spacing, restrained. */
+:root {
+  --bg: #ffffff; --surface: #f4f6fa; --text: #0d1b2a; --muted: #44506a;
+  --primary: #1d3f8f; --on-primary: #ffffff; --accent: #c8102e;
+  --radius: 2px; --gap: 16px; --font: "Helvetica Neue", Arial, system-ui, sans-serif;
+}
+
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--text); font-family: var(--font); font-size: 16px; line-height: 1.5; }
+.wrap { max-width: 1120px; margin: 0 auto; padding: 0 24px; }
+header { display: flex; justify-content: space-between; align-items: center; padding: 18px 0; border-bottom: 1px solid color-mix(in srgb, var(--text) 12%, transparent); }
+.logo { font-weight: 800; letter-spacing: .02em; color: var(--primary); }
+nav a { color: var(--text); text-decoration: none; margin-left: 20px; }
+.hero { padding: 64px 0 48px; display: grid; grid-template-columns: 1.1fr 0.9fr; gap: var(--gap); align-items: center; }
+.hero h1 { font-size: 44px; line-height: 1.1; margin: 0 0 14px; }
+.hero p { color: var(--muted); margin: 0 0 22px; max-width: 46ch; }
+.btn { display: inline-block; background: var(--primary); color: var(--on-primary); padding: 12px 22px; border-radius: var(--radius); text-decoration: none; font-weight: 700; border: 0; }
+.swatch { height: 240px; border-radius: var(--radius); background: linear-gradient(135deg, var(--primary), var(--accent)); }
+.cards { display: grid; grid-template-columns: repeat(3, 1fr); gap: var(--gap); padding: 8px 0 40px; }
+.card { background: var(--surface); border-radius: var(--radius); padding: 18px; border: 1px solid color-mix(in srgb, var(--text) 10%, transparent); }
+.card .pack { height: 120px; border-radius: var(--radius); background: color-mix(in srgb, var(--accent) 25%, var(--bg)); margin-bottom: 12px; }
+.card h3 { margin: 0 0 4px; font-size: 18px; }
+.card .meta { color: var(--muted); font-size: 14px; margin: 0 0 12px; }
+.form { background: var(--surface); border-radius: var(--radius); padding: 22px; margin-bottom: 48px; display: grid; grid-template-columns: 1fr 1fr; gap: 12px var(--gap); }
+.form label { display: flex; flex-direction: column; font-size: 14px; color: var(--muted); }
+.form input, .form textarea { margin-top: 6px; padding: 10px 12px; border-radius: var(--radius); border: 1px solid color-mix(in srgb, var(--text) 25%, transparent); font: inherit; color: var(--text); background: var(--bg); }
+.form textarea { grid-column: span 2; min-height: 80px; }
+.form .btn { grid-column: span 2; justify-self: start; }
+:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <span class="logo">UNI-GREEN</span>
+    <nav><a href="#">Products</a><a href="#">Manufacturing</a><a href="#">OEM</a><a href="#">Contact</a></nav>
+  </header>
+
+  <section class="hero">
+    <div>
+      <h1>Tissue rolls for every day<br><span lang="vi">Giấy vệ sinh cho mọi ngày</span></h1>
+      <p>Request a quotation for your pack sizes and formats. Written pricing within two working days.</p>
+      <a class="btn" href="#">Request a quotation</a>
+    </div>
+    <div class="swatch" role="img" aria-label="Product placeholder"></div>
+  </section>
+
+  <section class="cards" aria-label="Products">
+    <article class="card"><div class="pack"></div><h3>10 rolls, 3 ply</h3><p class="meta">Coreless · 3 ply</p><a class="btn" href="#">Add to quotation</a></article>
+    <article class="card"><div class="pack"></div><h3>Mega roll, 12 regular</h3><p class="meta">6 mega rolls · 2 ply</p><a class="btn" href="#">Add to quotation</a></article>
+    <article class="card"><div class="pack"></div><h3><span lang="vi">Không lõi 6 cuộn</span></h3><p class="meta">Không lõi · tiết kiệm hơn</p><a class="btn" href="#">Add to quotation</a></article>
+  </section>
+
+  <form class="form" aria-label="Quotation request">
+    <label>Contact name<input name="contact_name" required></label>
+    <label>Email<input name="email" type="email" required></label>
+    <label>Company<input name="company"></label>
+    <label>Phone<input name="phone"></label>
+    <label style="grid-column: span 2">Notes<textarea name="notes"></textarea></label>
+    <button class="btn" type="submit">Send quotation request</button>
+  </form>
+</div>
+</body>
+</html>

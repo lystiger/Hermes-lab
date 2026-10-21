@@ -1,0 +1,44 @@
+{
+  "a-family-fresh": {
+    "text on background": {
+      "ratio": 14.36,
+      "wcag_aa_text": true
+    },
+    "button text on primary": {
+      "ratio": 6.83,
+      "wcag_aa_text": true
+    },
+    "muted text on background": {
+      "ratio": 5.66,
+      "wcag_aa_text": true
+    }
+  },
+  "b-clean-eco": {
+    "text on background": {
+      "ratio": 15.92,
+      "wcag_aa_text": true
+    },
+    "button text on primary": {
+      "ratio": 6.54,
+      "wcag_aa_text": true
+    },
+    "muted text on background": {
+      "ratio": 6.26,
+      "wcag_aa_text": true
+    }
+  },
+  "c-japanese-precision": {
+    "text on background": {
+      "ratio": 17.39,
+      "wcag_aa_text": true
+    },
+    "button text on primary": {
+      "ratio": 9.72,
+      "wcag_aa_text": true
+    },
+    "muted text on background": {
+      "ratio": 8.07,
+      "wcag_aa_text": true
+    }
+  }
+}

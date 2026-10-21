@@ -411,6 +411,37 @@ class TestRunnerParallelGroups(unittest.TestCase):
     # Rule 4: Commits and merges happen one phase at a time in spec order
     # -------------------------------------------------------------------------
 
+    def test_current_phase_is_per_thread_during_batch(self):
+        """Each agent thread in a batch sees its own phase as the current phase."""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self.init_target_repo(root / "repo")
+
+            phase_a = self.make_phase("cp-a", parallel_group="cp-group", owned_paths=["cpa/"])
+            phase_b = self.make_phase("cp-b", parallel_group="cp-group", owned_paths=["cpb/"])
+            spec_file = self.write_spec(root / "spec.json", [phase_a, phase_b])
+
+            barrier = threading.Barrier(2, timeout=1.0)
+            seen = {}
+
+            def fake_exec(context):
+                name = context.phase["name"]
+                try:
+                    barrier.wait(timeout=1.0)
+                except threading.BrokenBarrierError as err:
+                    raise SprintRunnerError("FAILED_TIMEOUT", f"Barrier timed out: {err}") from err
+                seen[name] = runner._current_phase["name"]
+                handoff = context.worktree / context.phase["expected_handoff"]
+                handoff.write_text("OK\n", encoding="utf-8")
+                target = context.worktree / context.phase["owned_paths"][0].rstrip("/") / f"{name}.py"
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.write_text(f"# {name}\n", encoding="utf-8")
+                return SimpleNamespace(stdout="", stderr="", returncode=0, runtime_metadata={})
+
+            runner = self.create_runner(spec_file, FakeAgentAdapter(fake_exec))
+            self.assertTrue(runner.execute())
+            self.assertEqual(seen, {"cp-a": "cp-a", "cp-b": "cp-b"})
+
     def test_rule4_commits_and_merges_occur_one_at_a_time_in_spec_order(self):
         """Rule 4: Commits and merges into integration worktree happen one phase at a time, in spec order."""
         with tempfile.TemporaryDirectory() as temp_dir:

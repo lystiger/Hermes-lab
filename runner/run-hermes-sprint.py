@@ -1334,6 +1334,17 @@ class HermesSprintRunner:
         """Lock guarding shared runner state (summary, messages, artifacts, backend cache)."""
         return self.__dict__.setdefault("_shared_lock", threading.RLock())
 
+    @property
+    def _current_phase(self):
+        """Phase running on this thread; falls back to the latest phase for timer/cleanup threads."""
+        local = self.__dict__.setdefault("_phase_local", threading.local())
+        return getattr(local, "phase", None) or self.__dict__.get("_last_phase")
+
+    @_current_phase.setter
+    def _current_phase(self, phase):
+        self.__dict__.setdefault("_phase_local", threading.local()).phase = phase
+        self.__dict__["_last_phase"] = phase
+
     def execute_phase(self, phase, phase_index=1):
         try:
             state = self._run_phase_agent(phase, phase_index)

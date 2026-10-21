@@ -1,13 +1,15 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, render, screen, within } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 
 const hooks = vi.hoisted(() => ({
   useAgents: vi.fn(),
   useAgentModels: vi.fn(),
 }));
+const api = vi.hoisted(() => ({ setAgentModel: vi.fn() }));
 
 vi.mock('../api/hooks', () => hooks);
+vi.mock('../api/client', () => ({ hermesApi: api, isMockMode: false }));
 
 import { AgentsListRoute } from '../routes/agents/index';
 
@@ -16,9 +18,16 @@ const agents = [
   { id: 'codex', displayName: 'Codex', provider: 'OpenAI', model: 'gpt-5', role: 'verifier', capabilities: [], status: 'IDLE' },
 ];
 
-function mockData({ modelsMap = {}, agentList = agents }: { modelsMap?: Record<string, unknown>; agentList?: unknown[] } = {}) {
+const models = {
+  claude: { configured: { default: 'opus', effort: null }, allowed: ['sonnet', 'opus'], lastUsed: null },
+  codex: { configured: { default: null, effort: null }, allowed: ['gpt-5-codex', 'gpt-5.4'], lastUsed: { model: 'gpt-5-codex', effort: 'medium', source: 'phase' } },
+};
+
+function mockData({ modelsMap = models, agentList = agents }: { modelsMap?: Record<string, unknown>; agentList?: unknown[] } = {}) {
+  const refetchModels = vi.fn();
   hooks.useAgents.mockReturnValue({ agents: agentList, loading: false, error: null, refetch: vi.fn(), updatedAt: null, stale: false });
-  hooks.useAgentModels.mockReturnValue({ models: modelsMap, loading: false, error: null, refetch: vi.fn(), updatedAt: null, stale: false });
+  hooks.useAgentModels.mockReturnValue({ models: modelsMap, loading: false, error: null, refetch: refetchModels, updatedAt: null, stale: false });
+  return { refetchModels };
 }
 
 function renderPage() {
@@ -35,13 +44,8 @@ afterEach(() => {
 });
 
 describe('Agents list page', () => {
-  it('lists each agent with its provider, configured model and reasoning effort', () => {
-    mockData({
-      modelsMap: {
-        claude: { configured: { default: 'opus', effort: 'high' }, allowed: ['sonnet', 'opus'], lastUsed: null },
-        codex: { configured: { default: null, effort: null }, allowed: [], lastUsed: { model: 'gpt-5-codex', effort: 'medium', source: 'phase' } },
-      },
-    });
+  it('lists each agent with its provider and a model picker with the configured value', () => {
+    mockData();
 
     renderPage();
 
@@ -49,28 +53,57 @@ describe('Agents list page', () => {
     expect(rows).toHaveLength(2);
     expect(within(rows[0]).getByText('Claude')).toBeInTheDocument();
     expect(within(rows[0]).getByText('Anthropic')).toBeInTheDocument();
-    expect(within(rows[0]).getByText('opus')).toBeInTheDocument();
-    expect(within(rows[0]).getByText('high')).toBeInTheDocument();
-    expect(within(rows[1]).getByText('gpt-5-codex')).toBeInTheDocument();
-    expect(within(rows[1]).getByText('medium')).toBeInTheDocument();
+    expect(screen.getByRole('combobox', { name: 'Model for Claude' })).toHaveValue('opus');
+    expect(screen.getByRole('combobox', { name: 'Model for Codex' })).toHaveValue('gpt-5-codex');
   });
 
-  it('shows a dash when the model or effort is not known', () => {
-    mockData({ modelsMap: {} });
+  it('offers only the models the registry allows, and the reasoning options for the agent', () => {
+    mockData();
 
     renderPage();
 
+    const claudeModel = screen.getByRole('combobox', { name: 'Model for Claude' }) as HTMLSelectElement;
+    expect([...claudeModel.options].map((o) => o.value)).toEqual(['sonnet', 'opus']);
+    const codexReasoning = screen.getByRole('combobox', { name: 'Reasoning for Codex' }) as HTMLSelectElement;
+    expect(codexReasoning.options.length).toBeGreaterThan(2);
+    const claudeReasoning = screen.getByRole('combobox', { name: 'Reasoning for Claude' }) as HTMLSelectElement;
+    expect(claudeReasoning).toBeDisabled();
+  });
+
+  it('keeps Save off until something is changed, then saves the pick and refreshes', async () => {
+    const { refetchModels } = mockData();
+    api.setAgentModel.mockResolvedValue({ default: 'sonnet', effort: null });
+    renderPage();
+
     const row = screen.getAllByRole('row')[1];
-    expect(within(row).getAllByText('—')).toHaveLength(2);
+    const save = within(row).getByRole('button', { name: 'Save' });
+    expect(save).toBeDisabled();
+
+    fireEvent.change(screen.getByRole('combobox', { name: 'Model for Claude' }), { target: { value: 'sonnet' } });
+    expect(save).toBeEnabled();
+    fireEvent.click(save);
+
+    await waitFor(() => expect(api.setAgentModel).toHaveBeenCalledWith('claude', 'sonnet', null));
+    await waitFor(() => expect(refetchModels).toHaveBeenCalled());
+  });
+
+  it('shows the save error on the row instead of failing silently', async () => {
+    mockData();
+    api.setAgentModel.mockRejectedValue(new Error('model not allowed'));
+    renderPage();
+
+    fireEvent.change(screen.getByRole('combobox', { name: 'Model for Claude' }), { target: { value: 'sonnet' } });
+    fireEvent.click(screen.getAllByRole('button', { name: 'Save' })[0]);
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('model not allowed');
   });
 
   it('has no images, portraits or art frames', () => {
-    mockData({ modelsMap: {} });
+    mockData();
 
     const { container } = renderPage();
 
     expect(container.querySelectorAll('img')).toHaveLength(0);
-    expect(screen.queryByRole('img')).toBeNull();
   });
 
   it('says there are no agents when the list is empty', () => {

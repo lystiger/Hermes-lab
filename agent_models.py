@@ -40,7 +40,7 @@ def _unlock_file(handle):
 
 
 # Claude models Hermes supports. Other models seen at runtime are appended after these.
-CLAUDE_MODELS = ("claude-sonnet-5-5", "claude-opus-5-5")
+CLAUDE_MODELS = ("claude-sonnet-5-5", "claude-opus-5-5", "claude-haiku-5-5")
 # Reasoning levels the Claude CLI accepts with --effort.
 CLAUDE_EFFORTS = ("low", "medium", "high", "xhigh", "max")
 

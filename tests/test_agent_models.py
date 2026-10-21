@@ -1,3 +1,4 @@
+import sys
 from types import SimpleNamespace
 from unittest.mock import Mock
 
@@ -72,6 +73,7 @@ def test_codex_config_and_precedence():
     assert registry.resolve('claude', {}) == {'model': None, 'effort': None, 'source': 'cli-default'}
 
 
+@pytest.mark.skipif(sys.platform == 'win32', reason='fake CLI is a POSIX shell script')
 def test_agy_fake_cli_and_cache(tmp_path, monkeypatch):
     cli = tmp_path / 'agy'
     cli.write_text('#!/bin/sh\nprintf "id\\tname\\nmodel-a\\tAlpha\\nmodel-b\\tBeta\\n"\n')

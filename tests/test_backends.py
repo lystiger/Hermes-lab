@@ -546,6 +546,7 @@ class FakeHerdrForSeatPool:
             raise AssertionError(f"Unexpected Herdr command: {command}")
 
 
+@unittest.skipIf(sys.platform == 'win32', 'Herdr panes run a POSIX bash wrapper')
 class TestHerdrSeatPool(BackendTestCase):
     def setUp(self):
         super().setUp()

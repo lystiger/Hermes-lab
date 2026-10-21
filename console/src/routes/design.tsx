@@ -122,14 +122,12 @@ export const DesignRoute: React.FC = () => {
                       </span>
                       <span className="text-[13px] text-lys-primary">{d.label}</span>
                     </button>
-                    <div className="flex items-center justify-between gap-2">
-                      <span className="text-[12px] text-lys-muted">{isChosen ? 'Chosen' : 'Not chosen'}</span>
-                      <button type="button" disabled={!apiOk || saving || isChosen}
-                        onClick={() => { setPending(d.id); setReason(''); setSaveError(null); }}
-                        className="rounded border border-lys-subtle px-2 py-1 text-[12px] text-lys-primary disabled:opacity-40">
-                        Choose this direction
-                      </button>
-                    </div>
+                    <span className="text-[12px] text-lys-muted">{isChosen ? 'Chosen' : 'Not chosen'}</span>
+                    <button type="button" disabled={!apiOk || saving || isChosen}
+                      onClick={() => { setPending(d.id); setReason(''); setSaveError(null); }}
+                      className="w-full rounded border border-lys-subtle px-3 py-2 text-center text-[13px] text-lys-primary disabled:opacity-40">
+                      Choose this direction
+                    </button>
                   </div>
                 );
               })}

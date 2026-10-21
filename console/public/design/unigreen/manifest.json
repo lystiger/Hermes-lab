@@ -21,5 +21,64 @@
     }
   ],
   "decision": null,
-  "decision_note": "Chosen by Lystiger and recorded in decisions.md. Nothing is chosen until then."
+  "decision_note": "Chosen by Lystiger and recorded in decisions.md. Nothing is chosen until then.",
+  "diagrams": [
+    {
+      "id": "buyer-flow",
+      "label": "Buyer flow: from product to quotation request",
+      "file": "diagrams/buyer-flow.svg"
+    },
+    {
+      "id": "database",
+      "label": "Database (generated from the staging schema)",
+      "file": "diagrams/database.svg"
+    },
+    {
+      "id": "inquiry-status",
+      "label": "Inquiry status lifecycle",
+      "file": "diagrams/inquiry-status.svg"
+    },
+    {
+      "id": "sitemap",
+      "label": "Sitemap (English and Vietnamese routes)",
+      "file": "diagrams/sitemap.svg"
+    },
+    {
+      "id": "staff-flow",
+      "label": "Staff flow: from sign-in to an inquiry",
+      "file": "diagrams/staff-flow.svg"
+    },
+    {
+      "id": "submit-sequence",
+      "label": "Submitting an inquiry",
+      "file": "diagrams/submit-sequence.svg"
+    }
+  ],
+  "wireframes": [
+    {
+      "id": "home",
+      "label": "Home",
+      "file": "wireframes/home.html"
+    },
+    {
+      "id": "product",
+      "label": "Product detail",
+      "file": "wireframes/product.html"
+    },
+    {
+      "id": "quotation-list",
+      "label": "Quotation list",
+      "file": "wireframes/quotation-list.html"
+    },
+    {
+      "id": "inquiry-sent",
+      "label": "Thank you",
+      "file": "wireframes/inquiry-sent.html"
+    },
+    {
+      "id": "staff-inquiries",
+      "label": "Staff: inquiries",
+      "file": "wireframes/staff-inquiries.html"
+    }
+  ]
 }

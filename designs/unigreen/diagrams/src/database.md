@@ -1,0 +1,183 @@
+%% status: generated from the Unigreen database schema (staging)
+
+```mermaid
+erDiagram
+  audit_events {
+    uuid id PK
+    uuid actor_staff_id
+    varchar action
+    varchar entity_type
+    uuid entity_id
+    varchar request_id
+    json change_summary
+    timestamp created_at
+  }
+  inquiries {
+    uuid id PK
+    varchar reference
+    varchar status
+    varchar contact_name
+    varchar email
+    varchar phone
+    varchar company_name
+    varchar tax_code
+    varchar address
+    varchar destination
+    text notes
+    text oem_requirements
+    varchar locale
+    varchar source
+    uuid assigned_staff_id
+    varchar idempotency_key
+    timestamp created_at
+    timestamp updated_at
+    int version
+  }
+  inquiry_internal_notes {
+    uuid id PK
+    uuid inquiry_id
+    uuid author_staff_id
+    text content
+    timestamp created_at
+    timestamp updated_at
+  }
+  inquiry_lines {
+    uuid id PK
+    uuid inquiry_id
+    uuid product_id
+    varchar product_sku
+    varchar product_name
+    json product_snapshot
+    numeric quantity
+    varchar unit
+    text requirements
+    int sort_order
+    timestamp created_at
+    timestamp updated_at
+    varchar pack_option
+  }
+  inquiry_sequences {
+    int year
+    int last_value
+  }
+  product_categories {
+    uuid id PK
+    varchar slug
+    varchar status
+    uuid parent_id
+    int sort_order
+    timestamp created_at
+    timestamp updated_at
+    int version
+  }
+  product_category_links {
+    uuid product_id
+    uuid category_id
+    int sort_order
+  }
+  product_category_translations {
+    uuid category_id
+    varchar locale
+    varchar name
+    text description
+    varchar meta_title
+    varchar meta_description
+  }
+  product_media {
+    uuid id PK
+    uuid product_id
+    varchar storage_key
+    varchar checksum_sha256
+    varchar original_filename
+    varchar detected_mime_type
+    bigint size_bytes
+    int width
+    int height
+    varchar alt_vi
+    varchar alt_en
+    int sort_order
+    boolean is_primary
+    json variants
+    varchar source_reference
+    varchar approval_status
+    timestamp created_at
+  }
+  product_specification_translations {
+    uuid specification_id
+    varchar locale
+    varchar label
+    varchar display_value_override
+  }
+  product_specifications {
+    uuid id PK
+    uuid product_id
+    varchar key
+    varchar value
+    varchar unit
+    int sort_order
+    boolean is_highlighted
+  }
+  product_translations {
+    uuid product_id
+    varchar locale
+    varchar name
+    text summary
+    text description
+    varchar meta_title
+    varchar meta_description
+  }
+  products {
+    uuid id PK
+    varchar sku
+    varchar slug
+    varchar barcode
+    varchar status
+    boolean oem_available
+    boolean featured
+    int sort_order
+    timestamp published_at
+    timestamp created_at
+    timestamp updated_at
+    int version
+    json pack_options
+    varchar canonical_product_id
+  }
+  staff_sessions {
+    uuid id PK
+    uuid staff_user_id
+    varchar token_hash
+    varchar csrf_token_hash
+    timestamp expires_at
+    timestamp revoked_at
+    timestamp created_at
+    timestamp last_seen_at
+    varchar ip_hash
+    varchar user_agent_summary
+  }
+  staff_users {
+    uuid id PK
+    varchar email
+    text password_hash
+    varchar role
+    varchar status
+    timestamp last_login_at
+    timestamp created_at
+    timestamp updated_at
+    int version
+  }
+  staff_users ||--o{ audit_events : "references"
+  staff_users ||--o{ inquiries : "references"
+  inquiries ||--o{ inquiry_internal_notes : "references"
+  staff_users ||--o{ inquiry_internal_notes : "references"
+  inquiries ||--o{ inquiry_lines : "references"
+  products ||--o{ inquiry_lines : "references"
+  product_categories ||--o{ product_categories : "references"
+  product_categories ||--o{ product_category_links : "references"
+  products ||--o{ product_category_links : "references"
+  product_categories ||--o{ product_category_translations : "references"
+  products ||--o{ product_media : "references"
+  product_specifications ||--o{ product_specification_translations : "references"
+  products ||--o{ product_specifications : "references"
+  products ||--o{ product_translations : "references"
+  staff_users ||--o{ staff_sessions : "references"
+```

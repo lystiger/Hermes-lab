@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Quotation list · wireframe</title>
+<style>
+/* B. Clean eco: green-led, lots of white space, trust first. */
+:root {
+  --bg: #f6faf6; --surface: #ffffff; --text: #14201a; --muted: #4f6158;
+  --primary: #1d6b36; --on-primary: #ffffff; --accent: #7fbf3f;
+  --radius: 6px; --gap: 24px; --font: system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+
+body { margin: 0; background: var(--bg); color: var(--text); font: 16px/1.5 var(--font); }
+main { max-width: 960px; margin: 0 auto; padding: 16px; display: flex; flex-direction: column; gap: var(--gap); }
+.block { background: var(--surface); border: 1px dashed var(--muted); border-radius: var(--radius); padding: 16px; }
+.block h2 { margin: 0 0 8px; font-size: 13px; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); font-weight: 600; }
+.block p { margin: 0; }
+button { min-height: 44px; padding: 0 16px; border-radius: var(--radius); border: 1px solid var(--primary); background: var(--primary); color: var(--on-primary); font: inherit; }
+button.secondary { background: transparent; color: var(--primary); }
+@media (max-width: 600px) { main { padding: 12px; } }
+</style></head>
+<body><main>
+<p class="block"><strong>Quotation list</strong> · wireframe in direction B · Clean eco. Layout only; the spec sets the look.</p>
+<section class="block"><h2>Line items: product, format, quantity</h2><p>Line items: product, format, quantity</p></section>
+<section class="block"><h2>Remove a line</h2><p>Remove a line</p></section>
+<section class="block"><h2>Contact form: name, email, company, phone, notes</h2><p>Contact form: name, email, company, phone, notes</p></section>
+<section class="block"><h2>Send quotation request</h2><p>Send quotation request</p></section>
+<section class="block"><button type="button">Send quotation request</button> <button type="button" class="secondary">Keep browsing</button></section>
+</main></body></html>

@@ -1,0 +1,18 @@
+%% status: intended design (not built)
+
+```mermaid
+flowchart TD
+  A([Staff opens /admin]) --> B[Sign in]
+  B --> C{Credentials ok?}
+  C -- no --> D[Error, attempts limited] --> B
+  C -- yes --> E[Inquiries list: search and filter]
+  E --> F[Open an inquiry]
+  F --> G[Customer submission, read only]
+  F --> H[Change status]
+  F --> I[Assign staff]
+  F --> J[Add internal note]
+  H --> K[Audit event recorded]
+  I --> K
+  J --> K
+  K --> E
+```

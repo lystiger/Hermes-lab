@@ -29,7 +29,18 @@ Constraints:
 - Update `runner/README.md` with one short section on `owned_paths` and
   `parallel_group`, next to the existing role documentation.
 
-Run `tests/test_runner_ownership.py` and the existing runner tests. Replace
+Shell rules for this run, because the controller denies anything else:
+
+- Do not run any git command, including `git status`, `git diff`, `git stash`
+  and `git log`. Use your file-reading tools to inspect changes.
+- Run each test command on its own, with no pipes, `;`, `&&`, `||`, `sed` or
+  redirection. Use exactly these commands:
+  - `python3 -m unittest tests.test_runner_ownership`
+  - `python3 -m unittest tests.test_runner`
+  - `python3 -m unittest tests.test_handoff_policy`
+- Edit files with your file-editing tools, not with `sed -i`.
+
+Run the tests above. Replace
 `HANDOFF_S07_CLAUDE.md` with: the changed functions, the test results you
 observed, and any test you changed and why.
 

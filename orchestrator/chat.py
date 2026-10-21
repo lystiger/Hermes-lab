@@ -25,6 +25,7 @@ STATUS_LINE = re.compile(r"^- \*\*Status:\*\*.*$", re.MULTILINE)
 DEFAULT_TITLE = "New orchestrator chat"
 CHAT_TIMEOUT_SECONDS = 300
 TITLE_MAX = 120
+TOOL_NAMES = ("lysstack_list", "lysstack_read", "hermes_jobs", "hermes_capacity", "draft_save")
 
 DRAFT_RULES = """You are the orchestrator in LysStack. You help Lystiger shape a task brief.
 
@@ -32,7 +33,8 @@ Rules you must follow:
 - Address the user as Lystiger. Never call them "the human" or "a human".
 - You draft briefs only. You never set a brief to Ready and you never start a run.
 - Ask grill-me questions when a task is big, in batches of at most five.
-- To save a draft, reply with a fenced block:
+- Tools: lysstack_list, lysstack_read (read LysStack), hermes_jobs and hermes_capacity (read Hermes status), and draft_save (save a brief as Draft). Use draft_save for briefs. Nothing else is available.
+- If draft_save is not available, reply with a fenced block instead:
   ```brief-draft path=<name>.md
   <full brief in LysStack active_task format>
   ```
@@ -78,9 +80,11 @@ def _usage_from(payload):
 class ClaudeChatProvider:
     """Sends one prompt to the Claude CLI with no tools and no working repository."""
 
-    def __init__(self, binary="claude", timeout=CHAT_TIMEOUT_SECONDS):
+    def __init__(self, binary="claude", timeout=CHAT_TIMEOUT_SECONDS, tools=None):
+        """tools: None for no tools, or {"python", "repo", "root", "drafts"} to serve the LysStack tools."""
         self.binary = binary
         self.timeout = timeout
+        self.tools = tools
 
     def reply(self, system_prompt, messages, model, effort):
         if model not in CLAUDE_MODELS:
@@ -99,15 +103,33 @@ class ClaudeChatProvider:
         ]
         if effort:
             argv += ["--effort", effort]
-        transcript = "\n\n".join(f"{m['role'].upper()}: {m['content']}" for m in messages)
         with tempfile.TemporaryDirectory(prefix="orchestrator-") as neutral:
-            try:
-                result = subprocess.run(
-                    argv, input=transcript, capture_output=True, text=True,
-                    cwd=neutral, timeout=self.timeout, check=False,
-                )
-            except subprocess.TimeoutExpired as exc:
-                raise ChatError("model did not answer in time") from exc
+            if self.tools:
+                argv += self._tool_args(neutral)
+            return self._run(argv, messages, neutral)
+
+    def _tool_args(self, neutral):
+        """Only the LysStack tools: a strict MCP config, and an allow list with exactly those tools."""
+        config = {"mcpServers": {"lysstack": {
+            "command": self.tools["python"],
+            "args": ["-m", "orchestrator.tools_server", "--root", str(self.tools["root"]),
+                     "--drafts", str(self.tools["drafts"])],
+            "env": {"PYTHONPATH": str(self.tools["repo"])},
+        }}}
+        config_path = Path(neutral) / "mcp.json"
+        config_path.write_text(json.dumps(config), encoding="utf-8")
+        allowed = [f"mcp__lysstack__{name}" for name in TOOL_NAMES]
+        return ["--strict-mcp-config", "--mcp-config", str(config_path), "--allowedTools", *allowed]
+
+    def _run(self, argv, messages, neutral):
+        transcript = "\n\n".join(f"{m['role'].upper()}: {m['content']}" for m in messages)
+        try:
+            result = subprocess.run(
+                argv, input=transcript, capture_output=True, text=True,
+                cwd=neutral, timeout=self.timeout, check=False, stdin=None,
+            )
+        except subprocess.TimeoutExpired as exc:
+            raise ChatError("model did not answer in time") from exc
         if result.returncode != 0:
             raise ChatError(f"model call failed: {result.stderr.strip()[:300]}")
         try:

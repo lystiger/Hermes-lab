@@ -1,6 +1,7 @@
 """HTTP routes for the orchestrator chat. Chat and draft only: there is no run route here."""
 
 import os
+import sys
 from pathlib import Path
 
 from fastapi import APIRouter, HTTPException, Response
@@ -23,10 +24,16 @@ def default_lysstack_root():
     return Path(os.environ.get("HERMES_LYSSTACK_ROOT", Path.home() / "Projects" / "LysStack"))
 
 
+def tools_config(root):
+    repo = Path(__file__).resolve().parent.parent
+    return {"python": sys.executable, "repo": repo, "root": root, "drafts": root / "drafts",
+            "state": default_state_dir()}
+
+
 def get_chat():
     return OrchestratorChat(
         store=ConversationStore(default_state_dir()),
-        provider=ClaudeChatProvider(),
+        provider=ClaudeChatProvider(tools=tools_config(default_lysstack_root())),
         lysstack_root=default_lysstack_root(),
     )
 

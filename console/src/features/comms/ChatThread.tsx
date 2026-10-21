@@ -1,6 +1,7 @@
 import React, { useEffect, useRef } from 'react';
 import { Copy } from 'lucide-react';
 import { OrchestratorMessage } from '../../api/orchestrator';
+import { Markdown } from './Markdown';
 
 const DRAFT_NOTE = 'Saved to LysStack/drafts as Draft. Only you can mark a brief Ready.';
 
@@ -28,7 +29,7 @@ export const ChatThread: React.FC<ChatThreadProps> = ({ messages, busy }) => {
               </div>
             ) : (
               <div className="w-full flex flex-col gap-2">
-                <div className="whitespace-pre-wrap text-[14px] leading-relaxed text-lys-primary">{m.content}</div>
+                <div className="text-[14px] text-lys-primary"><Markdown text={m.content} /></div>
                 <div className="flex items-center gap-2">
                   <button type="button" aria-label="Copy reply" onClick={() => void navigator.clipboard?.writeText(m.content)}
                     className="p-1 rounded text-lys-faint hover:text-lys-primary hover:bg-lys-surface-2">

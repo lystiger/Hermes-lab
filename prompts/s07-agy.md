@@ -28,6 +28,10 @@ file first. Cover valid specs, every invalid case above, the boundary case
 Tests must fail for the right reason today (missing feature), not because of
 syntax or import errors. Keep the change to that one test file.
 
+Use your file-reading and file-writing tools to read and write files. Do not
+run `find`, `grep` or other shell commands: they are not permitted in this
+run. The only permitted command is the pytest run for `tests/test_runner_ownership.py`.
+
 Replace `HANDOFF_S07_AGY.md` with: the test cases you wrote, the rule each one
 covers, and which tests you expect to fail before the implementation exists.
 

@@ -16,7 +16,7 @@ import time
 import uuid
 from pathlib import Path
 
-CLAUDE_MODELS = ("sonnet", "opus", "haiku")
+CLAUDE_MODELS = ("claude-sonnet-5-5", "claude-opus-5-5")
 EFFORT_LEVELS = ("low", "medium", "high", "xhigh", "max")
 DRAFT_NAME = re.compile(r"^[a-z0-9][a-z0-9-]{0,60}\.md$")
 DRAFT_BLOCK = re.compile(r"```brief-draft\s+path=(\S+)\n(.*?)\n```", re.DOTALL)

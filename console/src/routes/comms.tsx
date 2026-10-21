@@ -9,7 +9,7 @@ export const CommsRoute: React.FC = () => {
   const [options, setOptions] = useState<OrchestratorOptions | null>(null);
   const [conversations, setConversations] = useState<OrchestratorConversationSummary[]>([]);
   const [selected, setSelected] = useState<OrchestratorConversation | null>(null);
-  const [model, setModel] = useState('sonnet');
+  const [model, setModel] = useState('claude-sonnet-5-5');
   const [effort, setEffort] = useState('');
   const [draft, setDraft] = useState('');
   const [busy, setBusy] = useState(false);
@@ -78,7 +78,7 @@ export const CommsRoute: React.FC = () => {
             <label className="text-[11px] uppercase tracking-wider text-lys-faint" htmlFor="comms-model">Model</label>
             <select id="comms-model" className="bg-lys-surface-1 text-lys-primary text-[13px] p-1 rounded"
               value={model} onChange={(e) => setModel(e.target.value)}>
-              {(claude?.models ?? ['sonnet']).map((m) => <option key={m} value={m}>{m}</option>)}
+              {(claude?.models ?? ['claude-sonnet-5-5']).map((m) => <option key={m} value={m}>{m}</option>)}
             </select>
             <label className="text-[11px] uppercase tracking-wider text-lys-faint" htmlFor="comms-effort">Reasoning effort</label>
             <select id="comms-effort" className="bg-lys-surface-1 text-lys-primary text-[13px] p-1 rounded"

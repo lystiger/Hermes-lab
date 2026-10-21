@@ -36,20 +36,20 @@ class TestClient:
 def test_api_validation_roundtrip_and_agent_source():
     registry = agent_models.model_registry
     client = TestClient(app)
-    assert client.put('/agents/missing/model', json={'model': 'sonnet'}).status_code == 404
+    assert client.put('/agents/missing/model', json={'model': 'claude-sonnet-5-5'}).status_code == 404
     assert client.put('/agents/claude/model', json={'model': '--evil'}).status_code == 400
-    assert client.put('/agents/claude/model', json={'model': 'opus', 'effort': 'high'}).status_code == 400
+    assert client.put('/agents/claude/model', json={'model': 'claude-opus-5-5', 'effort': 'high'}).status_code == 400
     assert not registry.path.exists()
-    response = client.put('/agents/claude/model', json={'model': 'opus'})
+    response = client.put('/agents/claude/model', json={'model': 'claude-opus-5-5'})
     assert response.status_code == 200
-    assert response.json() == {'default': 'opus', 'effort': None}
+    assert response.json() == {'default': 'claude-opus-5-5', 'effort': None}
     fresh = ModelRegistry(registry.path, registry.codex_path)
-    assert fresh.configured('claude')['default'] == 'opus'
+    assert fresh.configured('claude')['default'] == 'claude-opus-5-5'
     models = client.get('/agents/models').json()
-    assert models['claude']['configured']['default'] == 'opus'
+    assert models['claude']['configured']['default'] == 'claude-opus-5-5'
     assert models['claude']['lastUsed'] is None
     summaries = {a['id']: a for a in client.get('/agents').json()}
-    assert summaries['claude']['model'] == 'opus'
+    assert summaries['claude']['model'] == 'claude-opus-5-5'
     assert summaries['codex']['model'] is None
     assert client.put('/agents/gemini/model', json={'model': '--evil'}).status_code == 400
 
@@ -94,13 +94,13 @@ def test_agy_fake_cli_and_cache(tmp_path, monkeypatch):
 
 def test_atomic_write_failure_preserves_previous(monkeypatch):
     registry = agent_models.model_registry
-    registry.set('claude', 'sonnet', None)
+    registry.set('claude', 'claude-sonnet-5-5', None)
     original = registry.path.read_bytes()
     def fail(*args):
         raise OSError('replace failed')
     monkeypatch.setattr(agent_models.os, 'replace', fail)
     with pytest.raises(OSError, match='replace failed'):
-        registry.set('claude', 'opus', None)
+        registry.set('claude', 'claude-opus-5-5', None)
     assert registry.path.read_bytes() == original
     assert sorted(p.name for p in registry.path.parent.glob('agent_models.json.*')) == []
 
@@ -117,8 +117,8 @@ def test_adapters_commands_and_event_metadata(tmp_path, monkeypatch):
     assert command[command.index('--model') + 1] == 'gpt-5-codex'
     assert 'model_reasoning_effort="high"' in command
     assert '--model' not in ClaudeAdapter().build_command('work', {})
-    registry.set('claude', 'haiku', None)
-    assert 'haiku' in ClaudeAdapter().build_command('work', {})
+    registry.set('claude', 'claude-opus-5-5', None)
+    assert 'claude-opus-5-5' in ClaudeAdapter().build_command('work', {})
     registry._cache = (agent_models.time.monotonic(), [{'id': 'fake-agy', 'label': 'Fake', 'efforts': ['low']}], 60)
     registry.set('antigravity', 'fake-agy', 'low')
     assert 'fake-agy-low' in AntigravityAdapter().build_command('work', {})
@@ -152,11 +152,11 @@ def test_concurrent_writes_keep_other_agents():
     registry = agent_models.model_registry
     other = ModelRegistry(registry.path, registry.codex_path)
     with ThreadPoolExecutor(max_workers=2) as pool:
-        futures = [pool.submit(registry.set, 'claude', 'opus', None),
+        futures = [pool.submit(registry.set, 'claude', 'claude-opus-5-5', None),
                    pool.submit(other.set, 'codex', 'gpt-5-codex', 'high')]
         for future in futures:
             future.result()
-    assert registry.configured('claude')['default'] == 'opus'
+    assert registry.configured('claude')['default'] == 'claude-opus-5-5'
     assert registry.configured('codex')['default'] == 'gpt-5-codex'
 
 

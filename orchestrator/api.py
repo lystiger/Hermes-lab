@@ -32,7 +32,7 @@ def get_chat():
 
 
 class NewConversation(BaseModel):
-    model: str = "sonnet"
+    model: str = "claude-sonnet-5-5"
     effort: str | None = None
     title: str | None = Field(default=None, max_length=120)
 

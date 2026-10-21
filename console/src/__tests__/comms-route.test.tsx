@@ -17,7 +17,7 @@ import { CommsRoute } from '../routes/comms';
 const conversation = {
   id: 'abc123def456',
   title: 'New orchestrator chat',
-  model: 'sonnet',
+  model: 'claude-sonnet-5-5',
   effort: null,
   system_commit: '0123456789abcdef',
   created: '2026-10-21T10:00:00+0700',
@@ -26,7 +26,7 @@ const conversation = {
 
 beforeEach(() => {
   api.options.mockResolvedValue({
-    providers: [{ id: 'claude', models: ['sonnet', 'opus', 'haiku'], efforts: ['low', 'high'] }],
+    providers: [{ id: 'claude', models: ['claude-sonnet-5-5', 'claude-opus-5-5', 'claude-opus-5-5'], efforts: ['low', 'high'] }],
   });
   api.listConversations.mockResolvedValue([]);
   api.createConversation.mockResolvedValue(conversation);
@@ -52,7 +52,7 @@ describe('Comms route', () => {
 
     await waitFor(() => expect(screen.getByRole('combobox', { name: 'Model' })).toBeInTheDocument());
     const model = screen.getByRole('combobox', { name: 'Model' }) as HTMLSelectElement;
-    expect([...model.options].map((o) => o.value)).toEqual(['sonnet', 'opus', 'haiku']);
+    expect([...model.options].map((o) => o.value)).toEqual(['claude-sonnet-5-5', 'claude-opus-5-5', 'claude-opus-5-5']);
     expect(screen.getByText(/chat only, no tools/i)).toBeInTheDocument();
   });
 
@@ -60,10 +60,10 @@ describe('Comms route', () => {
     renderRoute();
     await waitFor(() => expect(api.options).toHaveBeenCalled());
 
-    fireEvent.change(screen.getByRole('combobox', { name: 'Model' }), { target: { value: 'opus' } });
+    fireEvent.change(screen.getByRole('combobox', { name: 'Model' }), { target: { value: 'claude-opus-5-5' } });
     fireEvent.click(screen.getByRole('button', { name: 'New chat' }));
 
-    await waitFor(() => expect(api.createConversation).toHaveBeenCalledWith('opus', null));
+    await waitFor(() => expect(api.createConversation).toHaveBeenCalledWith('claude-opus-5-5', null));
   });
 
   it('shows the reply and tells the human where drafts were saved', async () => {
@@ -90,12 +90,12 @@ describe('Comms route', () => {
   });
 
   it('shows the API error instead of failing silently', async () => {
-    api.createConversation.mockRejectedValue(new Error('model must be one of sonnet, opus, haiku'));
+    api.createConversation.mockRejectedValue(new Error('model must be one of claude-sonnet-5-5, claude-opus-5-5, claude-opus-5-5'));
     renderRoute();
     await waitFor(() => expect(api.options).toHaveBeenCalled());
 
     fireEvent.click(screen.getByRole('button', { name: 'New chat' }));
 
-    expect(await screen.findByRole('alert')).toHaveTextContent('model must be one of sonnet, opus, haiku');
+    expect(await screen.findByRole('alert')).toHaveTextContent('model must be one of claude-sonnet-5-5, claude-opus-5-5, claude-opus-5-5');
   });
 });

@@ -39,6 +39,16 @@ def _unlock_file(handle):
     msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
 
 
+# Claude models Hermes supports. Other models seen at runtime are appended after these.
+CLAUDE_MODELS = ("claude-sonnet-5-5", "claude-opus-5-5")
+
+
+def claude_label(model_id):
+    """'claude-sonnet-5-5' -> 'Claude Sonnet 5.5'."""
+    family, *version = model_id.split("-")[1:]
+    return f"Claude {family.title()} {'.'.join(version)}"
+
+
 def canonical(agent):
     return "antigravity" if agent in {"gemini", "agy"} else agent
 
@@ -125,10 +135,8 @@ class ModelRegistry:
         values = examples.get(agent, {}).get("allowed", [])
         if agent == "claude":
             seen = self._read(self.path.with_name("agent_models.seen.json")).get("claude", [])
-            return [{"id": m, "label": m.title() + " (latest)", "efforts": []}
-                    for m in ("sonnet", "opus", "haiku")] + [
-                        {"id": m, "label": m, "efforts": []} for m in seen
-                        if m not in {"sonnet", "opus", "haiku"}]
+            return [{"id": m, "label": claude_label(m), "efforts": []} for m in CLAUDE_MODELS] + [
+                {"id": m, "label": m, "efforts": []} for m in seen if m not in CLAUDE_MODELS]
         if agent == "codex":
             # Read on every request: mtime changes (including atomic replacement) cannot go stale.
             path = Path(os.environ.get("HERMES_CODEX_MODELS_CACHE", Path.home() / ".codex/models_cache.json"))

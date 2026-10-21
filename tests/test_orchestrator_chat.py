@@ -95,7 +95,7 @@ def test_existing_draft_is_never_overwritten(tmp_path):
 def test_turn_saves_the_user_message_then_the_reply_and_its_drafts(chat, lysstack):
     provider = FakeProvider(reply="Drafted.\n```brief-draft path=ug-003.md\n" + BRIEF + "```")
     orchestrator = chat(provider)
-    conversation = orchestrator.start("sonnet", "high", "Test")
+    conversation = orchestrator.start("claude-sonnet-5-5", "high", "Test")
 
     message = orchestrator.send(conversation["id"], "Plan the inquiry review.")
 
@@ -108,19 +108,19 @@ def test_turn_saves_the_user_message_then_the_reply_and_its_drafts(chat, lysstac
 def test_the_system_prompt_carries_the_rules_and_the_snapshot(chat):
     provider = FakeProvider()
     orchestrator = chat(provider)
-    conversation = orchestrator.start("opus", None)
+    conversation = orchestrator.start("claude-opus-5-5", None)
 
     orchestrator.send(conversation["id"], "hello")
 
     system = provider.calls[0]["system"]
     assert "You draft briefs only" in system
     assert "RULE-MARKER" in system
-    assert provider.calls[0]["model"] == "opus"
+    assert provider.calls[0]["model"] == "claude-opus-5-5"
 
 
 def test_a_failed_model_call_keeps_the_human_message(chat):
     orchestrator = chat(FakeProvider(error=ChatError("model call failed")))
-    conversation = orchestrator.start("sonnet", None)
+    conversation = orchestrator.start("claude-sonnet-5-5", None)
 
     with pytest.raises(ChatError):
         orchestrator.send(conversation["id"], "still here?")
@@ -134,7 +134,7 @@ def test_unknown_models_and_efforts_are_refused(chat):
     with pytest.raises(ChatError, match="model"):
         orchestrator.start("gpt-5", None)
     with pytest.raises(ChatError, match="effort"):
-        orchestrator.start("sonnet", "ultra")
+        orchestrator.start("claude-sonnet-5-5", "ultra")
 
 
 def test_conversation_ids_cannot_point_outside_the_store(chat, tmp_path):
@@ -153,13 +153,13 @@ def test_claude_provider_runs_with_no_tools_and_no_repository(monkeypatch):
 
     monkeypatch.setattr(chat_module.subprocess, "run", fake_run)
 
-    text = ClaudeChatProvider().reply("SYS", [{"role": "user", "content": "hi"}], "haiku", "low")
+    text = ClaudeChatProvider().reply("SYS", [{"role": "user", "content": "hi"}], "claude-opus-5-5", "low")
 
     argv = seen["argv"]
     assert text == "answer"
     assert argv[argv.index("--tools") + 1] == ""
     assert "--no-session-persistence" in argv
-    assert argv[argv.index("--model") + 1] == "haiku"
+    assert argv[argv.index("--model") + 1] == "claude-opus-5-5"
     assert argv[argv.index("--effort") + 1] == "low"
     assert "Edit" not in argv and "Bash" not in argv
     assert "Hermes-lab" not in seen["cwd"]

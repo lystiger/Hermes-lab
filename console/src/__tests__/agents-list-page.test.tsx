@@ -14,12 +14,12 @@ vi.mock('../api/client', () => ({ hermesApi: api, isMockMode: false }));
 import { AgentsListRoute } from '../routes/agents/index';
 
 const agents = [
-  { id: 'claude', displayName: 'Claude', provider: 'Anthropic', model: 'sonnet', role: 'architect', capabilities: [], status: 'IDLE' },
+  { id: 'claude', displayName: 'Claude', provider: 'Anthropic', model: 'claude-sonnet-5-5', role: 'architect', capabilities: [], status: 'IDLE' },
   { id: 'codex', displayName: 'Codex', provider: 'OpenAI', model: 'gpt-5', role: 'verifier', capabilities: [], status: 'IDLE' },
 ];
 
 const models = {
-  claude: { configured: { default: 'opus', effort: null }, allowed: ['sonnet', 'opus'], lastUsed: null },
+  claude: { configured: { default: 'claude-opus-5-5', effort: null }, allowed: ['claude-sonnet-5-5', 'claude-opus-5-5'], lastUsed: null },
   codex: { configured: { default: null, effort: null }, allowed: ['gpt-5-codex', 'gpt-5.4'], lastUsed: { model: 'gpt-5-codex', effort: 'medium', source: 'phase' } },
 };
 
@@ -53,7 +53,7 @@ describe('Agents list page', () => {
     expect(rows).toHaveLength(2);
     expect(within(rows[0]).getByText('Claude')).toBeInTheDocument();
     expect(within(rows[0]).getByText('Anthropic')).toBeInTheDocument();
-    expect(screen.getByRole('combobox', { name: 'Model for Claude' })).toHaveValue('opus');
+    expect(screen.getByRole('combobox', { name: 'Model for Claude' })).toHaveValue('claude-opus-5-5');
     expect(screen.getByRole('combobox', { name: 'Model for Codex' })).toHaveValue('gpt-5-codex');
   });
 
@@ -63,7 +63,7 @@ describe('Agents list page', () => {
     renderPage();
 
     const claudeModel = screen.getByRole('combobox', { name: 'Model for Claude' }) as HTMLSelectElement;
-    expect([...claudeModel.options].map((o) => o.value)).toEqual(['sonnet', 'opus']);
+    expect([...claudeModel.options].map((o) => o.value)).toEqual(['claude-sonnet-5-5', 'claude-opus-5-5']);
     const codexReasoning = screen.getByRole('combobox', { name: 'Reasoning for Codex' }) as HTMLSelectElement;
     expect(codexReasoning.options.length).toBeGreaterThan(2);
     const claudeReasoning = screen.getByRole('combobox', { name: 'Reasoning for Claude' }) as HTMLSelectElement;
@@ -72,18 +72,18 @@ describe('Agents list page', () => {
 
   it('keeps Save off until something is changed, then saves the pick and refreshes', async () => {
     const { refetchModels } = mockData();
-    api.setAgentModel.mockResolvedValue({ default: 'sonnet', effort: null });
+    api.setAgentModel.mockResolvedValue({ default: 'claude-sonnet-5-5', effort: null });
     renderPage();
 
     const row = screen.getAllByRole('row')[1];
     const save = within(row).getByRole('button', { name: 'Save' });
     expect(save).toBeDisabled();
 
-    fireEvent.change(screen.getByRole('combobox', { name: 'Model for Claude' }), { target: { value: 'sonnet' } });
+    fireEvent.change(screen.getByRole('combobox', { name: 'Model for Claude' }), { target: { value: 'claude-sonnet-5-5' } });
     expect(save).toBeEnabled();
     fireEvent.click(save);
 
-    await waitFor(() => expect(api.setAgentModel).toHaveBeenCalledWith('claude', 'sonnet', null));
+    await waitFor(() => expect(api.setAgentModel).toHaveBeenCalledWith('claude', 'claude-sonnet-5-5', null));
     await waitFor(() => expect(refetchModels).toHaveBeenCalled());
   });
 
@@ -92,7 +92,7 @@ describe('Agents list page', () => {
     api.setAgentModel.mockRejectedValue(new Error('model not allowed'));
     renderPage();
 
-    fireEvent.change(screen.getByRole('combobox', { name: 'Model for Claude' }), { target: { value: 'sonnet' } });
+    fireEvent.change(screen.getByRole('combobox', { name: 'Model for Claude' }), { target: { value: 'claude-sonnet-5-5' } });
     fireEvent.click(screen.getAllByRole('button', { name: 'Save' })[0]);
 
     expect(await screen.findByRole('alert')).toHaveTextContent('model not allowed');

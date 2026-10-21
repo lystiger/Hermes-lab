@@ -10,7 +10,7 @@ This repository contains Hermes runtime and runner code, sprint specifications, 
 
 - **Multi-Agent Orchestration**: Pluggable agent adapters ([`Antigravity`](file:///home/lystiger/hermes-lab/runner/agents/antigravity.py), [`Claude`](file:///home/lystiger/hermes-lab/runner/agents/claude.py), [`Codex`](file:///home/lystiger/hermes-lab/runner/agents/codex.py)) running isolated phases across dedicated Git worktrees.
 - **Execution Backends**: `subprocess` runtime alongside one-shot and sessionful `herdr` agent lifecycle backends.
-- **External Repository & Platform Portability**: Clean separation between Hermes control root (`control_root`) and target repositories (`target_repo`) across Linux, WSL, and native Windows without cross-kernel path coupling.
+- **External Repository & Platform Portability**: Clean separation between Hermes control root (`control_root`) and target repositories (`target_repo`) on Linux without cross-kernel path coupling.
 - **Generic Verification & Playwright Support**: Declarative, ordered verification pipeline supporting arbitrary test suites (Playwright E2E browser tests, pytest, uv, npm, etc.) with per-step timeouts, working directories, and sanitized reporting.
 
 ## Compatibility Names

@@ -3,7 +3,7 @@
 import os
 from pathlib import Path
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Response
 from pydantic import BaseModel, Field
 
 from orchestrator.chat import (
@@ -69,6 +69,37 @@ def get_conversation(conversation_id: str):
         return get_chat().store.get(conversation_id)
     except ChatError as exc:
         raise HTTPException(status_code=404, detail=str(exc))
+
+
+class UpdateConversation(BaseModel):
+    title: str | None = Field(default=None, max_length=200)
+    model: str | None = None
+    effort: str | None = None
+
+
+@router.patch("/conversations/{conversation_id}")
+def update_conversation(conversation_id: str, body: UpdateConversation):
+    try:
+        return get_chat().update(
+            conversation_id,
+            title=body.title,
+            model=body.model,
+            effort=body.effort,
+            effort_given="effort" in body.model_fields_set,
+        )
+    except ChatError as exc:
+        if str(exc) == "unknown conversation":
+            raise HTTPException(status_code=404, detail=str(exc))
+        _fail(exc)
+
+
+@router.delete("/conversations/{conversation_id}", status_code=204)
+def delete_conversation(conversation_id: str):
+    try:
+        get_chat().delete(conversation_id)
+    except ChatError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+    return Response(status_code=204)
 
 
 @router.post("/conversations/{conversation_id}/messages", status_code=201)

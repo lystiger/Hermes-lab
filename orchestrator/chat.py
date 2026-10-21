@@ -22,6 +22,7 @@ DRAFT_NAME = re.compile(r"^[a-z0-9][a-z0-9-]{0,60}\.md$")
 DRAFT_BLOCK = re.compile(r"```brief-draft\s+path=(\S+)\n(.*?)\n```", re.DOTALL)
 STATUS_LINE = re.compile(r"^- \*\*Status:\*\*.*$", re.MULTILINE)
 CHAT_TIMEOUT_SECONDS = 300
+TITLE_MAX = 120
 
 DRAFT_RULES = """You are the orchestrator in LysStack. You help a human shape a task brief.
 
@@ -134,6 +135,12 @@ class ConversationStore:
             raise ChatError("unknown conversation")
         return json.loads(path.read_text(encoding="utf-8"))
 
+    def delete(self, conversation_id):
+        path = self._path(conversation_id)
+        if not path.exists():
+            raise ChatError("unknown conversation")
+        path.unlink()
+
     def list(self):
         if not self.root.exists():
             return []
@@ -169,6 +176,28 @@ class OrchestratorChat:
         if effort is not None and effort not in EFFORT_LEVELS:
             raise ChatError(f"effort must be one of {', '.join(EFFORT_LEVELS)}")
         return self.store.create(model, effort, title, self.system_commit())
+
+    def update(self, conversation_id, title=None, model=None, effort=None, effort_given=False):
+        """Rename a chat, or change its model or effort. Only the fields given are changed."""
+        conversation = self.store.get(conversation_id)
+        if title is not None:
+            title = title.strip()
+            if not title or len(title) > TITLE_MAX:
+                raise ChatError(f"title must be 1 to {TITLE_MAX} characters")
+            conversation["title"] = title
+        if model is not None:
+            if model not in CLAUDE_MODELS:
+                raise ChatError(f"model must be one of {', '.join(CLAUDE_MODELS)}")
+            conversation["model"] = model
+        if effort_given:
+            if effort is not None and effort not in EFFORT_LEVELS:
+                raise ChatError(f"effort must be one of {', '.join(EFFORT_LEVELS)}")
+            conversation["effort"] = effort
+        self.store.save(conversation)
+        return {k: v for k, v in conversation.items() if k != "messages"}
+
+    def delete(self, conversation_id):
+        self.store.delete(conversation_id)
 
     def send(self, conversation_id, content):
         content = (content or "").strip()

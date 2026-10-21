@@ -99,12 +99,12 @@ describe('Comms chat', () => {
     await waitFor(() => expect(api.options).toHaveBeenCalled());
 
     fireEvent.change(composer(), { target: { value: 'plan it' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Send message' }));
 
     expect(await screen.findByRole('status')).toHaveTextContent('Orchestrator is replying');
     answer({ role: 'assistant', content: 'done', drafts: ['ug-002.md'], at: '' });
 
-    expect(await screen.findByText(/Drafts: ug-002\.md/)).toBeInTheDocument();
+    expect(await screen.findByText(/Draft saved: ug-002\.md/)).toBeInTheDocument();
     expect(screen.getByText(/Only you can mark a brief Ready/)).toBeInTheDocument();
     expect(screen.queryByRole('status')).toBeNull();
   });
@@ -117,18 +117,19 @@ describe('Comms chat', () => {
     await waitFor(() => expect(api.options).toHaveBeenCalled());
 
     fireEvent.change(composer(), { target: { value: 'still there?' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Send message' }));
 
     expect(await screen.findByRole('alert')).toHaveTextContent('model call failed');
     expect(screen.getByText('still there?')).toBeInTheDocument();
   });
 
-  it('shows the API error when a chat cannot be created', async () => {
+  it('shows the API error when a chat cannot be created on the first message', async () => {
     api.createConversation.mockRejectedValue(new Error('model must be one of claude-sonnet-5-5, claude-opus-5-5'));
     renderRoute();
     await waitFor(() => expect(api.options).toHaveBeenCalled());
 
-    fireEvent.click(screen.getByRole('button', { name: 'New chat' }));
+    fireEvent.change(composer(), { target: { value: 'hello' } });
+    fireEvent.keyDown(composer(), { key: 'Enter' });
 
     expect(await screen.findByRole('alert')).toHaveTextContent('model must be one of claude-sonnet-5-5, claude-opus-5-5');
   });

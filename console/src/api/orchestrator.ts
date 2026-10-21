@@ -43,6 +43,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     }
     throw new Error(detail);
   }
+  if (response.status === 204) return undefined as T;
   return (await response.json()) as T;
 }
 
@@ -55,6 +56,14 @@ export const orchestratorApi = {
       method: 'POST',
       body: JSON.stringify({ model, effort }),
     }),
+  updateConversation: (id: string, body: { title?: string; model?: string; effort?: string | null }) =>
+    request<OrchestratorConversationSummary>(`/orchestrator/conversations/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(body),
+    }),
+  deleteConversation: async (id: string): Promise<void> => {
+    await request<void>(`/orchestrator/conversations/${id}`, { method: 'DELETE' });
+  },
   sendMessage: (id: string, content: string) =>
     request<OrchestratorMessage>(`/orchestrator/conversations/${id}/messages`, {
       method: 'POST',

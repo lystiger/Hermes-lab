@@ -177,3 +177,70 @@ def test_api_has_no_run_or_cancel_routes():
     for path in orchestrator_paths:
         assert not any(word in path for word in ("run", "start", "cancel", "merge", "deploy")), path
     assert TestClient(main.app).post("/orchestrator/runs", json={}).status_code == 404
+
+
+def test_rename_trims_and_keeps_the_chat(chat):
+    orchestrator = chat(FakeProvider())
+    conversation = orchestrator.start("claude-sonnet-5-5", None, "Old")
+
+    updated = orchestrator.update(conversation["id"], title="  Inquiry review plan  ")
+
+    assert updated["title"] == "Inquiry review plan"
+    assert orchestrator.store.get(conversation["id"])["title"] == "Inquiry review plan"
+
+
+@pytest.mark.parametrize("title", ["", "   ", "x" * 121])
+def test_a_blank_or_long_title_is_refused(chat, title):
+    orchestrator = chat(FakeProvider())
+    conversation = orchestrator.start("claude-sonnet-5-5", None)
+
+    with pytest.raises(ChatError, match="title"):
+        orchestrator.update(conversation["id"], title=title)
+
+
+def test_model_and_effort_change_only_when_given(chat):
+    orchestrator = chat(FakeProvider())
+    conversation = orchestrator.start("claude-sonnet-5-5", "high", "Chat")
+
+    orchestrator.update(conversation["id"], model="claude-opus-5-5")
+    saved = orchestrator.store.get(conversation["id"])
+    assert (saved["model"], saved["effort"]) == ("claude-opus-5-5", "high")
+
+    orchestrator.update(conversation["id"], effort=None, effort_given=True)
+    assert orchestrator.store.get(conversation["id"])["effort"] is None
+
+    with pytest.raises(ChatError):
+        orchestrator.update(conversation["id"], model="gpt-5")
+
+
+def test_delete_removes_the_chat(chat):
+    orchestrator = chat(FakeProvider())
+    conversation = orchestrator.start("claude-sonnet-5-5", None)
+
+    orchestrator.delete(conversation["id"])
+
+    assert conversation["id"] not in [c["id"] for c in orchestrator.store.list()]
+    with pytest.raises(ChatError, match="unknown conversation"):
+        orchestrator.store.get(conversation["id"])
+    with pytest.raises(ChatError, match="unknown conversation"):
+        orchestrator.delete(conversation["id"])
+
+
+def test_api_renames_and_deletes_a_chat(chat, monkeypatch):
+    from fastapi.testclient import TestClient
+
+    import main
+    from orchestrator import api
+
+    orchestrator = chat(FakeProvider())
+    monkeypatch.setattr(api, "get_chat", lambda: orchestrator)
+    client = TestClient(main.app)
+    conversation = client.post("/orchestrator/conversations", json={"model": "claude-sonnet-5-5"}).json()
+    url = f"/orchestrator/conversations/{conversation['id']}"
+
+    assert client.patch(url, json={"title": "Renamed"}).json()["title"] == "Renamed"
+    assert client.patch(url, json={"title": "   "}).status_code == 400
+    assert client.delete(url).status_code == 204
+    assert client.get(url).status_code == 404
+    assert client.delete(url).status_code == 404
+    assert client.patch("/orchestrator/conversations/aaaaaaaaaaaa", json={"title": "x"}).status_code == 404

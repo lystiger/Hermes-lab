@@ -115,12 +115,6 @@ export const DesignRoute: React.FC = () => {
           <>
             <div className="flex flex-wrap items-center justify-between gap-2 text-[13px] text-lys-primary">
               {!chosen && <span>No direction chosen yet.</span>}
-              {chosen && !changing && (
-                <button type="button" onClick={() => setChanging(true)} disabled={!apiOk}
-                  className="rounded border border-lys-subtle px-3 py-1 text-[12px] text-lys-muted disabled:opacity-40">
-                  Change decision
-                </button>
-              )}
             </div>
 
             {waiting && (
@@ -136,8 +130,12 @@ export const DesignRoute: React.FC = () => {
             {!waiting && (<>
             {chosen && !changing && (
               <div>
-                <button type="button" onClick={() => setShowBoards(false)}
-                  className="rounded border border-lys-subtle px-3 py-1.5 text-[12px] text-lys-primary">← Back to decision</button>
+                <div className="flex flex-wrap gap-2">
+                  <button type="button" onClick={() => setShowBoards(false)}
+                    className="rounded border border-lys-subtle px-3 py-1.5 text-[12px] text-lys-primary">← Back to decision</button>
+                  <button type="button" onClick={() => setChanging(true)} disabled={!apiOk}
+                    className="rounded border border-lys-subtle px-3 py-1.5 text-[12px] text-lys-muted disabled:opacity-40">Change decision</button>
+                </div>
               </div>
             )}
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">

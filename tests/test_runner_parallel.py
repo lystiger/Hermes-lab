@@ -178,7 +178,7 @@ class TestRunnerParallelGroups(unittest.TestCase):
 
     def test_rule1_consecutive_phases_in_same_group_run_concurrently(self):
         """Rule 1: Consecutive phases with the same parallel_group form one batch and run concurrently."""
-        with tempfile.TemporaryDirectory() as temp_dir:
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as temp_dir:
             root = Path(temp_dir)
             self.init_target_repo(root / "repo")
 
@@ -221,7 +221,7 @@ class TestRunnerParallelGroups(unittest.TestCase):
 
     def test_rule1_phases_in_batch_run_in_own_worktrees(self):
         """Rule 1: Each phase in a batch executes in its own distinct worktree directory."""
-        with tempfile.TemporaryDirectory() as temp_dir:
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as temp_dir:
             root = Path(temp_dir)
             self.init_target_repo(root / "repo")
 
@@ -261,7 +261,7 @@ class TestRunnerParallelGroups(unittest.TestCase):
 
     def test_rule1_non_consecutive_phases_with_same_group_form_separate_batches(self):
         """Rule 1: Non-consecutive phases sharing a parallel_group name do NOT form a single batch."""
-        with tempfile.TemporaryDirectory() as temp_dir:
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as temp_dir:
             root = Path(temp_dir)
             self.init_target_repo(root / "repo")
 
@@ -315,7 +315,7 @@ class TestRunnerParallelGroups(unittest.TestCase):
 
     def test_rule2_phases_without_parallel_group_run_one_at_a_time(self):
         """Rule 2: Phases without parallel_group run one at a time, as today."""
-        with tempfile.TemporaryDirectory() as temp_dir:
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as temp_dir:
             root = Path(temp_dir)
             self.init_target_repo(root / "repo")
 
@@ -375,7 +375,7 @@ class TestRunnerParallelGroups(unittest.TestCase):
 
     def test_rule3_concurrency_proven_by_barrier(self):
         """Rule 3: Concurrency is proven by barrier that only releases when both agent runs have started."""
-        with tempfile.TemporaryDirectory() as temp_dir:
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as temp_dir:
             root = Path(temp_dir)
             self.init_target_repo(root / "repo")
 
@@ -413,7 +413,7 @@ class TestRunnerParallelGroups(unittest.TestCase):
 
     def test_current_phase_is_per_thread_during_batch(self):
         """Each agent thread in a batch sees its own phase as the current phase."""
-        with tempfile.TemporaryDirectory() as temp_dir:
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as temp_dir:
             root = Path(temp_dir)
             self.init_target_repo(root / "repo")
 
@@ -444,7 +444,7 @@ class TestRunnerParallelGroups(unittest.TestCase):
 
     def test_rule4_commits_and_merges_occur_one_at_a_time_in_spec_order(self):
         """Rule 4: Commits and merges into integration worktree happen one phase at a time, in spec order."""
-        with tempfile.TemporaryDirectory() as temp_dir:
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as temp_dir:
             root = Path(temp_dir)
             self.init_target_repo(root / "repo")
 
@@ -507,7 +507,7 @@ class TestRunnerParallelGroups(unittest.TestCase):
 
     def test_rule4_no_merges_during_concurrent_agent_execution(self):
         """Rule 4: While agents are executing concurrently, no commits or merges exist in integration."""
-        with tempfile.TemporaryDirectory() as temp_dir:
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as temp_dir:
             root = Path(temp_dir)
             self.init_target_repo(root / "repo")
 
@@ -566,7 +566,7 @@ class TestRunnerParallelGroups(unittest.TestCase):
 
     def test_rule5_batch_failure_prevents_merge_of_all_phases_in_batch(self):
         """Rule 5: If any phase in a batch fails, no phase in that batch is merged."""
-        with tempfile.TemporaryDirectory() as temp_dir:
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as temp_dir:
             root = Path(temp_dir)
             self.init_target_repo(root / "repo")
 
@@ -616,7 +616,7 @@ class TestRunnerParallelGroups(unittest.TestCase):
 
     def test_rule5_earlier_finished_phase_not_merged_when_later_phase_fails(self):
         """Rule 5: Phases in a batch that already finished are not merged if another phase fails."""
-        with tempfile.TemporaryDirectory() as temp_dir:
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as temp_dir:
             root = Path(temp_dir)
             self.init_target_repo(root / "repo")
 
@@ -664,7 +664,7 @@ class TestRunnerParallelGroups(unittest.TestCase):
 
     def test_rule6_batch_builder_outside_ownership_fails_and_merges_nothing(self):
         """Rule 6: A batch builder changing files outside owned_paths fails with FAILED_OUTSIDE_OWNERSHIP, merging nothing."""
-        with tempfile.TemporaryDirectory() as temp_dir:
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as temp_dir:
             root = Path(temp_dir)
             self.init_target_repo(root / "repo")
 
@@ -723,7 +723,7 @@ class TestRunnerParallelGroups(unittest.TestCase):
 
     def test_rule7_single_phase_batch_behaves_like_sequential_phase(self):
         """Rule 7: A batch with one phase behaves exactly like a sequential phase."""
-        with tempfile.TemporaryDirectory() as temp_dir:
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as temp_dir:
             root = Path(temp_dir)
             self.init_target_repo(root / "repo")
 
@@ -793,7 +793,7 @@ class TestRunnerParallelGroups(unittest.TestCase):
 
     def test_rule8_run_summary_lists_batch_phases_in_spec_order(self):
         """Rule 8: The run summary lists the phases of a batch in spec order, even if completion was inverted."""
-        with tempfile.TemporaryDirectory() as temp_dir:
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as temp_dir:
             root = Path(temp_dir)
             self.init_target_repo(root / "repo")
 
@@ -850,7 +850,7 @@ class TestRunnerParallelGroups(unittest.TestCase):
 
     def test_batch_is_atomic_when_second_merge_fails(self):
         """A failing second merge rolls the integration branch back to its pre-batch tip."""
-        with tempfile.TemporaryDirectory() as temp_dir:
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as temp_dir:
             root = Path(temp_dir)
             self.init_target_repo(root / "repo")
             phases = [
@@ -881,7 +881,7 @@ class TestRunnerParallelGroups(unittest.TestCase):
 
     def test_shared_state_writes_are_locked_under_concurrency(self):
         """Racing threads create exactly one event queue and lose no owner or fallback-phase write."""
-        with tempfile.TemporaryDirectory() as temp_dir:
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as temp_dir:
             root = Path(temp_dir)
             self.init_target_repo(root / "repo")
             spec_file = self.write_spec(root / "spec.json", [self.make_phase("solo")])
@@ -913,7 +913,7 @@ class TestRunnerParallelGroups(unittest.TestCase):
             self.assertIsNotNone(runner._current_phase)
 
     def _run_with_verifier(self, metadata):
-        with tempfile.TemporaryDirectory() as temp_dir:
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as temp_dir:
             root = Path(temp_dir)
             self.init_target_repo(root / "repo")
             phases = [

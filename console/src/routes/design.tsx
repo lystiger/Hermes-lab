@@ -47,6 +47,9 @@ export const DesignRoute: React.FC = () => {
   // Once a direction is chosen, the other choices stay locked until Lystiger asks to change it.
   const [changing, setChanging] = useState(false);
   const locked = !!chosen && !changing;
+  // After a choice the page waits for the next design task; the boards stay one click away.
+  const [showBoards, setShowBoards] = useState(false);
+  const waiting = !!chosen && !changing && !showBoards;
 
   useEffect(() => {
     fetch(`${BASE}/manifest.json`)
@@ -120,6 +123,17 @@ export const DesignRoute: React.FC = () => {
               )}
             </div>
 
+            {waiting && (
+              <div className="flex flex-col gap-3 rounded border border-lys-subtle p-4">
+                <div className="text-[13px] text-lys-primary">Design decided. Waiting for the next design task.</div>
+                <div className="flex flex-wrap gap-2">
+                  <button type="button" onClick={() => setShowBoards(true)}
+                    className="rounded border border-lys-subtle px-3 py-1.5 text-[12px] text-lys-primary">Show the boards</button>
+                </div>
+              </div>
+            )}
+
+            {!waiting && (<>
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
               {manifest.directions.map((d) => {
                 const active = d.id === selected;
@@ -180,6 +194,7 @@ export const DesignRoute: React.FC = () => {
                 <img src={`${BASE}/${manifest.sheet}`} alt="The three directions side by side" className="block h-auto w-full" />
               </div>
             </details>
+            </>)}
           </>
         )}
       </div>

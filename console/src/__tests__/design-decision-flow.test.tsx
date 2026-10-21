@@ -44,6 +44,7 @@ describe('choosing a design direction', () => {
   it('locks the other directions once one is chosen, until the choice is changed', async () => {
     mockFetch({ decision: { direction: 'a-family-fresh', label: 'A · Family fresh', reason: 'Already decided here.', date: '2026-10-21' } });
     render(<MemoryRouter><DesignRoute /></MemoryRouter>);
+    fireEvent.click(await screen.findByRole('button', { name: 'Show the boards' }));
     const buttons = await screen.findAllByRole('button', { name: 'Choose this direction' });
 
     expect(buttons.every((b) => b.hasAttribute('disabled'))).toBe(true);
@@ -51,6 +52,18 @@ describe('choosing a design direction', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Change decision' }));
 
     expect(screen.getAllByRole('button', { name: 'Choose this direction' })[1]).toBeEnabled();
+  });
+
+  it('waits for the next design task after a choice, and the boards stay one click away', async () => {
+    mockFetch({ decision: { direction: 'b-clean-eco', label: 'B · Clean eco', reason: 'Decided already.', date: '2026-10-21' } });
+    render(<MemoryRouter><DesignRoute /></MemoryRouter>);
+
+    expect(await screen.findByText(/Waiting for the next design task/)).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Choose this direction' })).toBeNull();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Show the boards' }));
+
+    await waitFor(() => expect(screen.getAllByRole('button', { name: 'Choose this direction' })).toHaveLength(2));
   });
 
   it('keeps Confirm off until the reason is long enough', async () => {

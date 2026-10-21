@@ -18,7 +18,7 @@ const invented = ['#142', 'VehicleStateStore', 'moveinmate', '$4.12', '58%', 'SI
 const routes = [
   ['/', OverviewRoute, ['No active execution', 'No jobs', 'No events']],
   ['/queue', QueueRoute, ['No jobs', 'No recoverable jobs']],
-  ['/agents', AgentsListRoute, ['No agents', 'No agent selected']],
+  ['/agents', AgentsListRoute, ['No agents']],
   ['/usage', UsageRoute, ['No agent limits']],
   ['/events', EventsRoute, ['No events']],
   ['/execution', ExecutionRoute, ['No deployed seats', 'No execution events']],

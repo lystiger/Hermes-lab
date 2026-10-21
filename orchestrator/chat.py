@@ -24,9 +24,10 @@ STATUS_LINE = re.compile(r"^- \*\*Status:\*\*.*$", re.MULTILINE)
 CHAT_TIMEOUT_SECONDS = 300
 TITLE_MAX = 120
 
-DRAFT_RULES = """You are the orchestrator in LysStack. You help a human shape a task brief.
+DRAFT_RULES = """You are the orchestrator in LysStack. You help Lystiger shape a task brief.
 
 Rules you must follow:
+- Address the user as Lystiger. Never call them "the human" or "a human".
 - You draft briefs only. You never set a brief to Ready and you never start a run.
 - Ask grill-me questions when a task is big, in batches of at most five.
 - To save a draft, reply with a fenced block:

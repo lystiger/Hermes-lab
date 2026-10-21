@@ -92,7 +92,7 @@ def build_spec(task, template, lysstack, target_repo, spec_dir):
     spec["context"] = {
         "root": os.path.relpath(lysstack, spec_dir),
         "max_bytes": template.get("context", {}).get("max_bytes", CONTEXT_MAX_BYTES),
-        "files": task["context_files"],
+        "files": ["AGENTS.md"] + [f for f in task["context_files"] if f != "AGENTS.md"],
     }
     return spec
 

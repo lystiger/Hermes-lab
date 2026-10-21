@@ -65,6 +65,7 @@ def lysstack(tmp_path):
     (root / "operating_system").mkdir(parents=True)
     (root / "projects" / "unigreen").mkdir(parents=True)
     (root / "projects" / "unigreen" / "architecture.md").write_text("arch\n")
+    (root / "AGENTS.md").write_text("# AGENTS\n")
     return root
 
 
@@ -107,7 +108,8 @@ def test_generates_a_spec_pinned_to_the_brief_baseline(clone, lysstack, tmp_path
     assert spec["worktree_root"] == "../../hermes-worktrees/ug-001"
     assert spec["phases"] == TEMPLATE["phases"]
     assert spec["verification"] == TEMPLATE["verification"]
-    assert spec["context"]["files"] == ["projects/unigreen/architecture.md", "operating_system/active_task.md"]
+    assert spec["context"]["files"] == ["AGENTS.md", "projects/unigreen/architecture.md", "operating_system/active_task.md"]
+    assert (out.parent / spec["context"]["root"] / "AGENTS.md").is_file()
     assert (out.parent / spec["context"]["root"] / "operating_system" / "active_task.md").is_file()
     assert (out.parent / spec["target_repo"]).resolve() == repo.resolve()
 

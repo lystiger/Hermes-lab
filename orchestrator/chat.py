@@ -57,6 +57,8 @@ class ClaudeChatProvider:
             raise ChatError(f"effort must be one of {', '.join(EFFORT_LEVELS)}")
         argv = [
             self.binary, "-p",
+            # Orchestrator calls always skip permission prompts, as the operator chose.
+            "--dangerously-skip-permissions",
             "--tools", "",
             "--no-session-persistence",
             "--model", model,

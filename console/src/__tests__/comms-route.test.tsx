@@ -26,7 +26,7 @@ const conversation = {
 
 beforeEach(() => {
   api.options.mockResolvedValue({
-    providers: [{ id: 'claude', models: ['claude-sonnet-5-5', 'claude-opus-5-5', 'claude-opus-5-5'], efforts: ['low', 'high'] }],
+    providers: [{ id: 'claude', models: ['claude-sonnet-5-5', 'claude-opus-5-5', 'claude-haiku-5-5'], efforts: ['low', 'high'] }],
   });
   api.listConversations.mockResolvedValue([]);
   api.createConversation.mockResolvedValue(conversation);
@@ -35,7 +35,7 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup();
-  vi.clearAllMocks();
+  vi.resetAllMocks();
 });
 
 function renderRoute() {
@@ -46,30 +46,49 @@ function renderRoute() {
   );
 }
 
-describe('Comms route', () => {
-  it('offers only the models and efforts the API reports, and says it has no tools', async () => {
+function composer() {
+  return screen.getByLabelText('Message') as HTMLTextAreaElement;
+}
+
+describe('Comms chat', () => {
+  it('offers the models the API reports and a note that the chat cannot act', async () => {
     renderRoute();
 
     await waitFor(() => expect(screen.getByRole('combobox', { name: 'Model' })).toBeInTheDocument());
     const model = screen.getByRole('combobox', { name: 'Model' }) as HTMLSelectElement;
-    expect([...model.options].map((o) => o.value)).toEqual(['claude-sonnet-5-5', 'claude-opus-5-5', 'claude-opus-5-5']);
-    expect(screen.getByText(/chat only, no tools/i)).toBeInTheDocument();
+    expect([...model.options].map((o) => o.value)).toEqual(['claude-sonnet-5-5', 'claude-opus-5-5', 'claude-haiku-5-5']);
+    expect(screen.getByText(/Type a message to start a chat/)).toBeInTheDocument();
   });
 
-  it('starts a chat with the chosen model and an empty effort as the default', async () => {
+  it('sends on Enter and starts a chat with the chosen model when none is open', async () => {
+    api.sendMessage.mockResolvedValue({ role: 'assistant', content: 'hi', drafts: [], at: '' });
+    api.getConversation.mockResolvedValue({ ...conversation, messages: [{ role: 'user', content: 'hello', at: '' }, { role: 'assistant', content: 'hi', drafts: [], at: '' }] });
+    renderRoute();
+    await waitFor(() => expect(api.options).toHaveBeenCalled());
+    fireEvent.change(screen.getByRole('combobox', { name: 'Model' }), { target: { value: 'claude-opus-5-5' } });
+
+    fireEvent.change(composer(), { target: { value: 'hello' } });
+    fireEvent.keyDown(composer(), { key: 'Enter' });
+
+    await waitFor(() => expect(api.createConversation).toHaveBeenCalledWith('claude-opus-5-5', null));
+    await waitFor(() => expect(api.sendMessage).toHaveBeenCalledWith('abc123def456', 'hello'));
+  });
+
+  it('keeps Shift+Enter as a new line and does not send', async () => {
     renderRoute();
     await waitFor(() => expect(api.options).toHaveBeenCalled());
 
-    fireEvent.change(screen.getByRole('combobox', { name: 'Model' }), { target: { value: 'claude-opus-5-5' } });
-    fireEvent.click(screen.getByRole('button', { name: 'New chat' }));
+    fireEvent.change(composer(), { target: { value: 'first line' } });
+    fireEvent.keyDown(composer(), { key: 'Enter', shiftKey: true });
 
-    await waitFor(() => expect(api.createConversation).toHaveBeenCalledWith('claude-opus-5-5', null));
+    expect(api.createConversation).not.toHaveBeenCalled();
+    expect(api.sendMessage).not.toHaveBeenCalled();
   });
 
-  it('shows the reply and tells the human where drafts were saved', async () => {
-    api.createConversation.mockResolvedValue(conversation);
-    api.sendMessage.mockResolvedValue({ role: 'assistant', content: 'done', drafts: ['ug-002.md'], at: '' });
-    api.getConversation.mockResolvedValueOnce({
+  it('shows the thinking note while the model answers, then the reply and the draft note', async () => {
+    let answer: (value: unknown) => void = () => {};
+    api.sendMessage.mockReturnValue(new Promise((resolve) => { answer = resolve; }));
+    api.getConversation.mockResolvedValue({
       ...conversation,
       messages: [
         { role: 'user', content: 'plan it', at: '' },
@@ -78,24 +97,39 @@ describe('Comms route', () => {
     });
     renderRoute();
     await waitFor(() => expect(api.options).toHaveBeenCalled());
-    fireEvent.click(screen.getByRole('button', { name: 'New chat' }));
-    await waitFor(() => expect(api.createConversation).toHaveBeenCalled());
 
-    fireEvent.change(screen.getByLabelText('Message'), { target: { value: 'plan it' } });
+    fireEvent.change(composer(), { target: { value: 'plan it' } });
     fireEvent.click(screen.getByRole('button', { name: 'Send' }));
 
-    await waitFor(() => expect(api.sendMessage).toHaveBeenCalledWith('abc123def456', 'plan it'));
-    expect(await screen.findByText(/Saved to LysStack\/drafts: ug-002\.md/)).toBeInTheDocument();
+    expect(await screen.findByRole('status')).toHaveTextContent('Orchestrator is replying');
+    answer({ role: 'assistant', content: 'done', drafts: ['ug-002.md'], at: '' });
+
+    expect(await screen.findByText(/Drafts: ug-002\.md/)).toBeInTheDocument();
     expect(screen.getByText(/Only you can mark a brief Ready/)).toBeInTheDocument();
+    expect(screen.queryByRole('status')).toBeNull();
   });
 
-  it('shows the API error instead of failing silently', async () => {
-    api.createConversation.mockRejectedValue(new Error('model must be one of claude-sonnet-5-5, claude-opus-5-5, claude-opus-5-5'));
+  it('shows a failed send inline and keeps the human message in the transcript', async () => {
+    api.createConversation.mockResolvedValue(conversation);
+    api.sendMessage.mockRejectedValue(new Error('model call failed'));
+    api.getConversation.mockResolvedValue({ ...conversation, messages: [{ role: 'user', content: 'still there?', at: '' }] });
+    renderRoute();
+    await waitFor(() => expect(api.options).toHaveBeenCalled());
+
+    fireEvent.change(composer(), { target: { value: 'still there?' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('model call failed');
+    expect(screen.getByText('still there?')).toBeInTheDocument();
+  });
+
+  it('shows the API error when a chat cannot be created', async () => {
+    api.createConversation.mockRejectedValue(new Error('model must be one of claude-sonnet-5-5, claude-opus-5-5'));
     renderRoute();
     await waitFor(() => expect(api.options).toHaveBeenCalled());
 
     fireEvent.click(screen.getByRole('button', { name: 'New chat' }));
 
-    expect(await screen.findByRole('alert')).toHaveTextContent('model must be one of claude-sonnet-5-5, claude-opus-5-5, claude-opus-5-5');
+    expect(await screen.findByRole('alert')).toHaveTextContent('model must be one of claude-sonnet-5-5, claude-opus-5-5');
   });
 });

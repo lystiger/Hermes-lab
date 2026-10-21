@@ -159,6 +159,7 @@ def test_claude_provider_runs_with_no_tools_and_no_repository(monkeypatch):
     assert text == "answer"
     assert argv[argv.index("--tools") + 1] == ""
     assert "--no-session-persistence" in argv
+    assert "--dangerously-skip-permissions" in argv
     assert argv[argv.index("--model") + 1] == "claude-opus-5-5"
     assert argv[argv.index("--effort") + 1] == "low"
     assert "Edit" not in argv and "Bash" not in argv

@@ -7,6 +7,7 @@ import { ArtifactRef, Message } from '../../api/types';
 import { CyberButton } from '../../components/CyberButton';
 import { formatTimeOfDay } from '../time/format';
 import { ErrorState } from '../../components/DataStates';
+import { PERSONA_ART_ENABLED } from '../../theme/agentArt';
 
 interface OperationalThreadViewProps {
   jobId?: string;
@@ -177,7 +178,7 @@ export const OperationalThreadView: React.FC<OperationalThreadViewProps> = ({
                 <div className="flex items-center justify-between flex-wrap gap-1 font-sans text-[11px]">
                   <div className="flex items-center flex-wrap gap-1.5">
                     {/* Avatar / Sigil */}
-                    {senderPres.avatarUrl ? (
+                    {PERSONA_ART_ENABLED && senderPres.avatarUrl ? (
                       <img
                         src={senderPres.avatarUrl}
                         alt={msg.from.displayName}

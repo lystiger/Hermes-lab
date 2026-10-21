@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { NavLink } from 'react-router-dom';
 import { Activity, Cpu, Gauge, LayoutDashboard, ListChecks, MessageSquare, PanelLeftClose, PanelLeftOpen, ScrollText, Settings, Users, type LucideIcon } from 'lucide-react';
 import { AnimatedCube } from './AnimatedCube';
+import { DESIGN_ART_ENABLED } from '../theme/agentArt';
 import { Icon } from './Icon';
 import { useConsoleStore } from '../stores/useConsoleStore';
 import { useExecutionStore } from '../stores/useExecutionStore';
@@ -108,7 +109,7 @@ export const Sidebar: React.FC = () => {
       <div className={`flex items-center ${collapsed ? 'justify-center' : 'justify-between'} gap-2.5 px-3 pb-3`}>
         {!collapsed && (
           <div className="flex items-center gap-2.5 min-w-0 pl-1">
-            <AnimatedCube size={24} />
+            {DESIGN_ART_ENABLED && <AnimatedCube size={24} />}
             <div className="text-[12px] font-bold tracking-[0.16em] text-lys-primary truncate" title="LysControl">
               LYSCONTROL
             </div>

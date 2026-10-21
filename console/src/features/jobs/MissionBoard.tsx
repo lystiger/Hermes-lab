@@ -116,7 +116,7 @@ export const MissionBoard: React.FC<{
 
       {jobs.length === 0 && !loading && !error && (
         <div className="flex justify-center py-6">
-          <img src={HERMES_ART} alt="" aria-hidden="true" className="h-20 w-auto opacity-70" />
+          {HERMES_ART && <img src={HERMES_ART} alt="" aria-hidden="true" className="h-20 w-auto opacity-70" />}
         </div>
       )}
     </section>

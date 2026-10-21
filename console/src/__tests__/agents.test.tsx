@@ -9,6 +9,7 @@ import { AgentPortrait } from '../features/agents/AgentPortrait';
 import { AgentLaneCard } from '../features/agents/AgentLaneCard';
 import { AgentDetailRoute } from '../routes/agents/$agentId';
 import { AgentSummary } from '../api/types';
+import { PERSONA_ART_ENABLED } from '../theme/agentArt';
 
 describe('Agent UI & Portrait Fallbacks', () => {
   it('renders generic agent without portrait cleanly using fallback sigil and initials', () => {
@@ -42,7 +43,8 @@ describe('Agent UI & Portrait Fallbacks', () => {
     expect(screen.getAllByText('K').length).toBeGreaterThanOrEqual(1);
   });
 
-  it('renders portrayed agent correctly with portrait container', () => {
+  // Anime persona art is off on this branch; this runs on style/anime-persona.
+  it.skipIf(!PERSONA_ART_ENABLED)('renders portrayed agent correctly with portrait container', () => {
     render(
       <AgentPortrait
         displayName="Gemini"
@@ -75,7 +77,8 @@ describe('Agent UI & Portrait Fallbacks', () => {
     expect(screen.getByText('CUSTOM')).toBeInTheDocument();
   });
 
-  it('renders view character sheet trigger on Agent Detail when characterCardUrl is present', async () => {
+  // Anime persona art is off on this branch; this runs on style/anime-persona.
+  it.skipIf(!PERSONA_ART_ENABLED)('renders view character sheet trigger on Agent Detail when characterCardUrl is present', async () => {
     render(
       <MemoryRouter initialEntries={['/agents/claude']}>
         <Routes>

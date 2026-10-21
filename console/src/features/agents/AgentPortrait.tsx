@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { AgentPresentation, AgentStatus } from '../../api/types';
 import { useConsoleStore } from '../../stores/useConsoleStore';
+import { PERSONA_ART_ENABLED } from '../../theme/agentArt';
 
 interface AgentPortraitProps {
   displayName: string;
@@ -31,7 +32,7 @@ export const AgentPortrait: React.FC<AgentPortraitProps> = ({
   }[size];
 
   const accentColor = presentation?.accentColor || 'var(--lys-text-muted)';
-  const avatarUrl = presentation?.avatarUrl;
+  const avatarUrl = PERSONA_ART_ENABLED ? presentation?.avatarUrl : undefined;
   const initial = displayName ? displayName.charAt(0).toUpperCase() : '?';
   const code = presentation?.code || displayName.slice(0, 4).toUpperCase();
   const isRunning = status === 'RUNNING';

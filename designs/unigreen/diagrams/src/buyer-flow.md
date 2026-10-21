@@ -1,4 +1,6 @@
 %% status: intended design (not built)
+
+```mermaid
 flowchart TD
   A([Visitor lands on Home]) --> B[Browse catalogue]
   B --> C{Found a product?}
@@ -16,3 +18,4 @@ flowchart TD
   K -- yes --> L([Thank you: written pricing in two working days])
   K -- no --> M[Message: could not be sent, try again]
   M --> J
+```

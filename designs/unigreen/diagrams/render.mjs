@@ -1,4 +1,4 @@
-// Render every Mermaid source to SVG in a real browser. A diagram that does not parse fails the run.
+// Render every Mermaid source (a .md file with one mermaid block) to SVG in a real browser. A diagram that does not parse fails the run.
 // Writes out/diagrams/*.svg, copies them to LysControl's public folder, and adds them to the manifest.
 import { chromium } from "/home/lystiger/Projects/Unigreen/frontend/node_modules/@playwright/test/index.mjs";
 import { readFile, readdir, writeFile, mkdir, copyFile } from "node:fs/promises";
@@ -23,7 +23,7 @@ const LABELS = {
 
 await mkdir(outDir, { recursive: true });
 await mkdir(publicDir, { recursive: true });
-const files = (await readdir(srcDir)).filter((f) => f.endsWith(".mmd")).sort();
+const files = (await readdir(srcDir)).filter((f) => f.endsWith(".md")).sort();
 const browser = await chromium.launch();
 const page = await browser.newPage();
 await page.setContent("<!doctype html><html><body></body></html>");
@@ -32,8 +32,10 @@ await page.addScriptTag({ content: await readFile(mermaidPath, "utf8") });
 const results = [];
 let failed = 0;
 for (const file of files) {
-  const id = path.basename(file, ".mmd");
-  const source = await readFile(path.join(srcDir, file), "utf8");
+  const id = path.basename(file, ".md");
+  const doc = await readFile(path.join(srcDir, file), "utf8");
+  const block = doc.match(/```mermaid\n([\s\S]*?)\n```/);
+  const source = block ? block[1] : "";
   const result = await page.evaluate(async ({ id, source }) => {
     try {
       window.mermaid.initialize({ startOnLoad: false, securityLevel: "strict" });

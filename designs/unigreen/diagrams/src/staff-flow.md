@@ -1,4 +1,6 @@
 %% status: intended design (not built)
+
+```mermaid
 flowchart TD
   A([Staff opens /admin]) --> B[Sign in]
   B --> C{Credentials ok?}
@@ -13,3 +15,4 @@ flowchart TD
   I --> K
   J --> K
   K --> E
+```

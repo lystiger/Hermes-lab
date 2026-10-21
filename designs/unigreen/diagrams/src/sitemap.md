@@ -1,4 +1,6 @@
 %% status: intended design (not built)
+
+```mermaid
 flowchart LR
   home["/en or /vi: Home"] --> products["/en/products · /vi/san-pham"]
   home --> manufacturing["Manufacturing"]
@@ -14,3 +16,4 @@ flowchart LR
   ainq --> ainqd["/admin/inquiries/id"]
   admin --> aprod["/admin/products"]
   admin --> acat["/admin/categories"]
+```

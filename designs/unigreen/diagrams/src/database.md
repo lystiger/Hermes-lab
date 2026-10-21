@@ -1,4 +1,6 @@
 %% status: generated from the Unigreen database schema (staging)
+
+```mermaid
 erDiagram
   audit_events {
     uuid id PK
@@ -178,3 +180,4 @@ erDiagram
   products ||--o{ product_specifications : "references"
   products ||--o{ product_translations : "references"
   staff_users ||--o{ staff_sessions : "references"
+```

@@ -1,4 +1,6 @@
 %% status: intended design (not built)
+
+```mermaid
 stateDiagram-v2
   [*] --> new
   new --> qualified
@@ -11,3 +13,4 @@ stateDiagram-v2
   duplicate --> [*]
   won --> [*]
   lost --> [*]
+```

@@ -1,4 +1,4 @@
-"""Write database.mmd from the Unigreen database schema, so the diagram follows the real tables.
+"""Write database.md from the Unigreen database schema, so the diagram follows the real tables.
 
 Reads information_schema from the staging database through the Unigreen compose project.
 Design output only. Run: python gen_er.py --unigreen /path/to/Unigreen
@@ -52,8 +52,10 @@ def main(argv=None):
     args = parser.parse_args(argv)
     columns = [tuple(r) for r in psql(args.unigreen, COLUMNS)]
     foreign = [tuple(r) for r in psql(args.unigreen, FOREIGN_KEYS)]
-    (HERE / "src" / "database.mmd").write_text(render(columns, foreign), encoding="utf-8")
-    print(f"wrote src/database.mmd: {len(set(c[0] for c in columns))} tables, {len(set(foreign))} relationships")
+    body = render(columns, foreign)
+    doc = "%% status: generated from the Unigreen database schema (staging)\n\n```mermaid\n" + body.split("\n", 1)[1].rstrip() + "\n```\n"
+    (HERE / "src" / "database.md").write_text(doc, encoding="utf-8")
+    print(f"wrote src/database.md: {len(set(c[0] for c in columns))} tables, {len(set(foreign))} relationships")
 
 
 if __name__ == "__main__":

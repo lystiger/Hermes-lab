@@ -1,4 +1,6 @@
 %% status: intended design (not built)
+
+```mermaid
 sequenceDiagram
   actor Buyer
   participant Web as Web app
@@ -17,3 +19,4 @@ sequenceDiagram
     API-->>Web: 422 with field errors
     Web-->>Buyer: Message, keep the basket
   end
+```

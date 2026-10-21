@@ -272,6 +272,12 @@ This keeps workers replaceable. A future agent may perform any role without chan
 
 Role-less historical phases retain legacy behavior: at least one change is required, then committed and merged. Every phase still writes its configured worktree handoff. Hermes captures that content under the run directory, restores or removes the worktree copy, and only then counts, stages, or rejects target changes. Handoff contents never enter summaries or sanitized reports.
 
+### Ownership: `owned_paths` and `parallel_group`
+
+A non-verifier phase may declare `owned_paths`, a non-empty array of relative path prefixes (no absolute paths, drive letters or `..`). After the phase finishes, any changed file outside those prefixes fails the phase with `FAILED_OUTSIDE_OWNERSHIP` before commit or merge. Prefixes match at `/` boundaries, so `backend/` does not cover `backend2/`. Phases without `owned_paths` behave as before; verifiers still forbid all target changes.
+
+`parallel_group` is an optional non-empty string that requires `owned_paths`. Phases sharing a group must not have overlapping prefixes. Invalid values or overlaps fail at spec load with `FAILED_INVALID_OWNERSHIP`. Groups are validated only; phases still run sequentially.
+
 ## Execution Backends
 
 Backend selection precedence is phase override, CLI override, sprint specification, then `subprocess`. Unknown backends fail with `FAILED_UNKNOWN_BACKEND`; explicitly selected Herdr never silently falls back.

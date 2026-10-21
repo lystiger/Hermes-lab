@@ -738,8 +738,76 @@ class HermesSprintRunner:
             )
         return role
 
+    @staticmethod
+    def _invalid_ownership(phase, message):
+        raise SprintRunnerError(
+            "FAILED_INVALID_OWNERSHIP",
+            f"Phase '{phase.get('name')}' {message}",
+        )
+
+    @staticmethod
+    def _ownership_prefix(path):
+        return path.strip().replace("\\", "/").rstrip("/")
+
+    def _validate_phase_ownership(self):
+        groups = {}
+        for phase in self.spec.get("phases", []):
+            has_paths = phase.get("owned_paths") is not None
+            if has_paths:
+                paths = phase["owned_paths"]
+                if not isinstance(paths, list) or not paths:
+                    self._invalid_ownership(phase, "owned_paths must be a non-empty array")
+                for path in paths:
+                    if not isinstance(path, str) or not path.strip():
+                        self._invalid_ownership(
+                            phase, "owned_paths must contain non-empty strings"
+                        )
+                    prefix = self._ownership_prefix(path)
+                    if (
+                        path.strip().startswith(("/", "\\"))
+                        or PureWindowsPath(path.strip()).drive
+                        or ".." in prefix.split("/")
+                    ):
+                        self._invalid_ownership(
+                            phase, f"owned_paths entry must be a relative path inside the worktree: {path}"
+                        )
+            if "parallel_group" not in phase:
+                continue
+            group = phase["parallel_group"]
+            if not isinstance(group, str) or not group.strip():
+                self._invalid_ownership(phase, "parallel_group must be a non-empty string")
+            if not has_paths:
+                self._invalid_ownership(phase, "parallel_group requires owned_paths")
+            groups.setdefault(group, []).append(phase)
+        # parallel_group is validated only; phases still run sequentially.
+        for group, members in groups.items():
+            for i, first in enumerate(members):
+                for second in members[i + 1:]:
+                    for a in map(self._ownership_prefix, first["owned_paths"]):
+                        for b in map(self._ownership_prefix, second["owned_paths"]):
+                            if a == b or a.startswith(b + "/") or b.startswith(a + "/"):
+                                self._invalid_ownership(
+                                    second,
+                                    f"owned_paths '{b}' overlaps '{a}' of phase "
+                                    f"'{first.get('name')}' in parallel_group '{group}'",
+                                )
+
+    def _enforce_phase_ownership(self, phase, changed_files):
+        prefixes = [self._ownership_prefix(p) for p in phase["owned_paths"]]
+        outside = []
+        for line in changed_files:
+            path = line[3:].split(" -> ")[-1].strip().strip('"')
+            if not any(path == p or path.startswith(p + "/") for p in prefixes):
+                outside.append(path)
+        if outside:
+            raise SprintRunnerError(
+                "FAILED_OUTSIDE_OWNERSHIP",
+                f"Phase '{phase.get('name')}' changed files outside owned_paths: {', '.join(outside)}",
+            )
+
     def validate_execution_plan(self):
         """Validate phase inputs needed before any agent can run."""
+        self._validate_phase_ownership()
         for phase in self.spec.get("phases", []):
             self.resolve_phase_role(phase)
             self.agent_registry.get(phase.get("agent"))
@@ -1332,6 +1400,8 @@ class HermesSprintRunner:
                     "FAILED_NO_CHANGES",
                     f"Worktree {wt_dir.name} produced NO file changes.",
                 )
+            if role != "verifier" and phase.get("owned_paths") is not None:
+                self._enforce_phase_ownership(phase, changed_files)
 
             self.validate_python_syntax(wt_dir)
 

@@ -21,11 +21,6 @@
       "prompt_file": "prompts/s07-agy.md",
       "expected_handoff": "HANDOFF_S07_AGY.md",
       "commit_message": "test(s07): specify builder file ownership and parallel groups",
-      "permissions": {
-        "commands": [
-          "/home/lystiger/Projects/Hermes-lab/.venv/bin/python -m pytest tests/test_runner_ownership.py -q"
-        ]
-      },
       "cmd_options": {
         "output_format": "stream-json",
         "dangerously_skip_permissions": false

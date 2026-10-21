@@ -28,9 +28,13 @@ file first. Cover valid specs, every invalid case above, the boundary case
 Tests must fail for the right reason today (missing feature), not because of
 syntax or import errors. Keep the change to that one test file.
 
-Use your file-reading and file-writing tools to read and write files. Do not
-run `find`, `grep` or other shell commands: they are not permitted in this
-run. The only permitted command is the pytest run for `tests/test_runner_ownership.py`.
+Use only your file-reading and file-writing tools. Do not run any shell command,
+including `find`, `grep`, `python` or `pytest`: shell commands are denied in this
+run. Do not run the tests; the next phase and the verifier run them. Predict the
+expected failures by reading `runner/run-hermes-sprint.py`.
+
+The last step is mandatory: write `HANDOFF_S07_AGY.md` with your write-file tool.
+The phase fails without it, even if the test file is complete.
 
 Replace `HANDOFF_S07_AGY.md` with: the test cases you wrote, the rule each one
 covers, and which tests you expect to fail before the implementation exists.

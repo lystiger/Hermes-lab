@@ -1,0 +1,14 @@
+{
+  "security": {
+    "purpose": "Find injection, unauthorized access, data exposure and supply-chain risk in a change, and report them with evidence.",
+    "scope": ["injection (SQL, shell, template, path, prompt)", "authentication and authorization", "secrets in code or history", "data exposure in responses and logs", "dependency advisories"],
+    "tools": ["security.scan (secrets, python-static, dependencies)", "lysstack_read, decision_search, repo_state (read-only)"],
+    "may_edit_product_source": false,
+    "network": false,
+    "may_run_exploits": false,
+    "handoff": "HANDOFF_SECURITY.md",
+    "output": "per check: PASS, FAIL or UNPROVEN; each finding with rule, file, line, severity, evidence (masked) and a suggested fix",
+    "stops_when": "every check has a status and every finding is reported",
+    "authority": "reports only; HARDENER fixes, Lystiger decides"
+  }
+}

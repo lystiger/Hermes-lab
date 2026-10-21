@@ -105,7 +105,7 @@ export const DesignRoute: React.FC = () => {
 
   return (
     <>
-      <PageHeader title="Design" subtitle={manifest ? `${manifest.project} · generated ${manifest.generated}` : 'Unigreen'} />
+      <PageHeader title="Design" subtitle={chosen ? `Decision: ${chosen.label}` : 'No decision yet'} />
       <div className="flex flex-col gap-4 p-4 md:p-6">
         {error && <div role="alert" className="text-[13px] text-lys-status-danger">Design boards are not available: {error}</div>}
         {!apiOk && manifest && (

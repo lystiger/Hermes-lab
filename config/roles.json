@@ -28,7 +28,7 @@
       "design references for Unigreen, with licence notes"
     ],
     "tools": [
-      "research.watch (fixed sources, budgeted, change detection)",
+      "research.tools_server: watch_releases, research_save, source_check",
       "web search and fetch, only for this role"
     ],
     "may_edit_product_source": false,

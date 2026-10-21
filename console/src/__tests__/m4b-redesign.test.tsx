@@ -11,7 +11,7 @@ import { render, screen, within } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { OverviewRoute } from '../routes/index';
 import { QueueRoute } from '../routes/queue';
-import { AGENT_ART, HERMES_ART } from '../theme/agentArt';
+import { AGENT_ART } from '../theme/agentArt';
 import { Card } from '../components/Card';
 import { PageHeader } from '../components/PageHeader';
 import { CopyId } from '../components/CopyId';
@@ -109,7 +109,7 @@ describe('M4b agent art: focal crops of the existing files', () => {
   });
 
   it.skipIf(!HAS_LOCAL_ART)('the Hermes emblem used for empty states exists', () => {
-    expect(fs.existsSync(path.join(ROOT, 'public', HERMES_ART))).toBe(true);
+    expect(fs.existsSync(path.join(ROOT, 'public', '/portrait/hermes.png'))).toBe(true);
   });
 });
 

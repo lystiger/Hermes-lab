@@ -1,7 +1,6 @@
 import React from 'react';
 import { useNavigate } from 'react-router-dom';
 import { ActiveExecutionCard } from '../features/jobs/ActiveExecutionCard';
-import { AgentPresence } from '../features/agents/AgentPresence';
 import { ProviderTelemetryList } from '../features/telemetry/ProviderTelemetryList';
 import { useConsoleStore } from '../stores/useConsoleStore';
 import { useAgents, useCapacityTelemetry, useJobs, useTelemetry } from '../api/hooks';
@@ -85,13 +84,14 @@ export const OverviewRoute: React.FC = () => {
                 <span>Agents · {agents.length}</span>
                 <Freshness at={agentsUpdatedAt} />
               </div>
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                {agents.slice(0, 3).map((ag, i) => (
-                  <Card key={ag.id} accent={`var(--lys-agent-${ag.id.toLowerCase()}, var(--lys-text-muted))`}>
-                    <AgentPresence agent={ag} index={i} onClick={() => navigate(`/agents/${ag.id}`)} />
-                  </Card>
+              <ul className="flex flex-col">
+                {agents.map((ag) => (
+                  <li key={ag.id} className="flex items-center justify-between gap-3 border-t border-lys-subtle py-2 font-sans text-[13px] text-lys-primary">
+                    <span className="truncate">{ag.displayName}</span>
+                    <span className="text-[11px] uppercase tracking-wider text-lys-muted">{ag.status}</span>
+                  </li>
                 ))}
-              </div>
+              </ul>
             </section>
           )}
 

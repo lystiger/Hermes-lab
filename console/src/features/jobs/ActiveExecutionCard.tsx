@@ -41,7 +41,7 @@ export const ActiveExecutionCard: React.FC<ActiveExecutionCardProps> = ({ onOpen
               <div className="text-[11px] font-medium tracking-wider uppercase text-lys-faint">Active execution</div>
               <div className="mt-1 font-display text-[22px] font-semibold text-lys-muted">No active execution</div>
             </div>
-            <img src={HERMES_ART} alt="" aria-hidden="true" className="h-12 w-auto opacity-60 shrink-0" />
+            {HERMES_ART && <img src={HERMES_ART} alt="" aria-hidden="true" className="h-12 w-auto opacity-60 shrink-0" />}
           </div>
         </div>
       </Card>

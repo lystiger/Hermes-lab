@@ -41,10 +41,20 @@ export const AGENT_ART: Record<string, AgentArt> = {
   }
 };
 
+/**
+ * Character art (the anime-style persona portraits). Off: the files stay in public/portrait and
+ * the UI uses its plain initials marks instead. Turning it back on restores the art everywhere.
+ * The anime style lives on its own branch, style/anime-persona.
+ */
+export const PERSONA_ART_ENABLED = false;
+
+/** Decorative design elements (the animated sidebar cube). Off hides them; no asset is removed. */
+export const DESIGN_ART_ENABLED = false;
+
 /** Hermes orchestrator emblem, used for empty states. Not an agent card. */
-export const HERMES_ART = '/portrait/hermes.png';
+export const HERMES_ART: string | undefined = PERSONA_ART_ENABLED ? '/portrait/hermes.png' : undefined;
 
 export function agentArt(id: string | null | undefined): AgentArt | undefined {
-  if (!id) return undefined;
+  if (!PERSONA_ART_ENABLED || !id) return undefined;
   return AGENT_ART[id.toLowerCase()];
 }

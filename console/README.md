@@ -144,5 +144,5 @@ LysControl/
 │   ├── stores/                    # Zustand UI store (useConsoleStore), execution store + pure reducer (useExecutionStore, executionReducer)
 │   └── styles/                    # Cybernetic theme CSS
 ├── public/agents/                 # Web-optimized WebP avatar crops & character cards
-└── design-reference/              # Reference cards & prototype snapshots
+└── archive/design-reference/      # Archived: reference cards & prototype snapshots (not built)
 ```

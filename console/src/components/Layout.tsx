@@ -1,5 +1,5 @@
 import React from 'react';
-import { Outlet } from 'react-router-dom';
+import { Outlet, useLocation } from 'react-router-dom';
 import { Sidebar } from './Sidebar';
 import { Header } from './Header';
 import { JobModal } from './JobModal';
@@ -9,6 +9,7 @@ import { isMockMode } from '../api/client';
 import { ConnectionBanner } from './ConnectionBanner';
 
 export const Layout: React.FC = () => {
+  const location = useLocation();
   // Mount the Hermes event stream subscription.
   useEventStream();
   // Initial D-009 execution snapshot (live events are applied by the stream).
@@ -31,7 +32,10 @@ export const Layout: React.FC = () => {
         <Header />
         
         <div className="lys-scroll flex-1 min-h-0 overflow-y-auto">
-          <Outlet />
+          {/* Each page fades in on navigation (lys-enter: transition and entry only, off with reduced motion). */}
+          <div key={location.pathname} className="lys-enter min-h-full">
+            <Outlet />
+          </div>
         </div>
       </main>
 

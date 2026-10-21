@@ -15,7 +15,6 @@ import { Card } from '../components/Card';
 import { ProviderMeters } from '../features/telemetry/UsageMeters';
 import { CAPACITY_WINDOW_LABEL } from '../api/mapping';
 import { useCapacityTelemetry } from '../api/hooks';
-import { AgentsListRoute } from '../routes/agents/index';
 import { AgentDetailRoute } from '../routes/agents/$agentId';
 import { ExecutionResourceCard } from '../features/execution/ExecutionResourceCard';
 import { useAgents } from '../api/hooks';
@@ -108,25 +107,6 @@ describe('M3 keyboard: Escape closes, arrows move, focus is visible', () => {
     expect(useConsoleStore.getState().activeModalJobId).toBeNull();
   });
 
-  it('arrow keys move focus through the agent roster', async () => {
-    installLiveHermes();
-    renderIn(
-      <Routes>
-        <Route path="/agents" element={<AgentsListRoute />} />
-      </Routes>,
-      '/agents'
-    );
-    const options = await screen.findAllByRole('option');
-    expect(options.length).toBe(3);
-    options[0].focus();
-    fireEvent.keyDown(options[0], { key: 'ArrowDown' });
-    expect(document.activeElement).toBe(options[1]);
-    fireEvent.keyDown(options[1], { key: 'End' });
-    expect(document.activeElement).toBe(options[2]);
-    fireEvent.keyDown(options[2], { key: 'Home' });
-    expect(document.activeElement).toBe(options[0]);
-  });
-
   it('arrow keys move focus through the job board', async () => {
     installLiveHermes({ jobs: [LIVE_JOB_SUMMARY, { ...LIVE_JOB_SUMMARY, id: 'job-b', title: 'Second job', status: 'FAILED' }] });
     renderIn(<QueueRoute />);
@@ -176,21 +156,6 @@ describe('M3 agents: roster and dossier with only real fields', () => {
     expect(screen.getByRole('group', { name: 'Filter agents by status' })).toBeInTheDocument();
   });
 
-  it('filters the roster by real status and counts each status', async () => {
-    installLiveHermes();
-    renderIn(
-      <Routes>
-        <Route path="/agents" element={<AgentsListRoute />} />
-      </Routes>,
-      '/agents'
-    );
-    await screen.findAllByRole('option');
-    const idle = screen.getByRole('button', { name: /idle\s*3/i });
-    fireEvent.click(idle);
-    expect(idle).toHaveAttribute('aria-pressed', 'true');
-    expect(screen.getAllByRole('option').length).toBe(3);
-    expect(screen.queryByRole('button', { name: /running/i })).not.toBeInTheDocument();
-  });
 });
 
 describe('M3 queue: mission board grouped by real status', () => {

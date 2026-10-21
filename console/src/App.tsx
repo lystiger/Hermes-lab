@@ -9,6 +9,7 @@ import UsageRoute from './routes/usage';
 import EventsRoute from './routes/events';
 import ExecutionRoute from './routes/execution';
 import SettingsRoute from './routes/settings';
+import CommsRoute from './routes/comms';
 
 export const App: React.FC = () => {
   return (
@@ -21,6 +22,7 @@ export const App: React.FC = () => {
         <Route path="usage" element={<UsageRoute />} />
         <Route path="events" element={<EventsRoute />} />
         <Route path="execution" element={<ExecutionRoute />} />
+        <Route path="comms" element={<CommsRoute />} />
         <Route path="settings" element={<SettingsRoute />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Route>

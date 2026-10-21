@@ -14,6 +14,6 @@ export const MOCK_AGENT_MODELS: AgentModelsMap = {
   codex: {
     configured: { default: 'gpt-6.1-sol', effort: 'low' },
     allowed: ['gpt-5-codex', 'gpt-5.4', 'gpt-5.3-codex', 'gpt-6.1-sol'],
-    lastUsed: { model: 'sonnet', effort: null, source: 'phase' }
+    lastUsed: { model: 'claude-sonnet-5-5', effort: null, source: 'phase' }
   }
 };

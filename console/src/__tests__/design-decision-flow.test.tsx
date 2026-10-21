@@ -64,6 +64,10 @@ describe('choosing a design direction', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Show the boards' }));
 
     await waitFor(() => expect(screen.getAllByRole('button', { name: 'Choose this direction' })).toHaveLength(2));
+
+    fireEvent.click(screen.getByRole('button', { name: '← Back to decision' }));
+
+    expect(await screen.findByText(/Waiting for the next design task/)).toBeInTheDocument();
   });
 
   it('keeps Confirm off until the reason is long enough', async () => {

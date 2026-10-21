@@ -134,6 +134,12 @@ export const DesignRoute: React.FC = () => {
             )}
 
             {!waiting && (<>
+            {chosen && !changing && (
+              <div>
+                <button type="button" onClick={() => setShowBoards(false)}
+                  className="rounded border border-lys-subtle px-3 py-1.5 text-[12px] text-lys-primary">← Back to decision</button>
+              </div>
+            )}
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
               {manifest.directions.map((d) => {
                 const active = d.id === selected;

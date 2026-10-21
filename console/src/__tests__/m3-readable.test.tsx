@@ -15,7 +15,6 @@ import { Card } from '../components/Card';
 import { ProviderMeters } from '../features/telemetry/UsageMeters';
 import { CAPACITY_WINDOW_LABEL } from '../api/mapping';
 import { useCapacityTelemetry } from '../api/hooks';
-import { AgentsListRoute } from '../routes/agents/index';
 import { AgentDetailRoute } from '../routes/agents/$agentId';
 import { ExecutionResourceCard } from '../features/execution/ExecutionResourceCard';
 import { useAgents } from '../api/hooks';

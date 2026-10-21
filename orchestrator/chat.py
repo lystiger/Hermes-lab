@@ -19,11 +19,10 @@ from pathlib import Path
 
 CLAUDE_MODELS = ("claude-sonnet-5-5", "claude-opus-5-5", "claude-haiku-5-5")
 EFFORT_LEVELS = ("low", "medium", "high", "xhigh", "max")
-TITLE_MODEL = "claude-haiku-5-5"
-DEFAULT_TITLE = "New orchestrator chat"
 DRAFT_NAME = re.compile(r"^[a-z0-9][a-z0-9-]{0,60}\.md$")
 DRAFT_BLOCK = re.compile(r"```brief-draft\s+path=(\S+)\n(.*?)\n```", re.DOTALL)
 STATUS_LINE = re.compile(r"^- \*\*Status:\*\*.*$", re.MULTILINE)
+DEFAULT_TITLE = "New orchestrator chat"
 CHAT_TIMEOUT_SECONDS = 300
 TITLE_MAX = 120
 
@@ -42,8 +41,6 @@ Rules you must follow:
 
 LysStack rules, verbatim from AGENTS.md:
 """
-
-TITLE_RULES = "Write a short title of three to six words for this conversation. Reply with the title only, no quotes."
 
 COMPACT_RULES = (
     "Summarize this conversation so it can continue later with less context. Keep the goal, "
@@ -139,20 +136,6 @@ def write_drafts(reply, drafts_dir):
         target.write_text(body + ("" if body.endswith("\n") else "\n"), encoding="utf-8")
         written.append(name)
     return written
-
-
-def clean_title(text, fallback):
-    """A model's title, made safe for a list: one line, no quotes, short."""
-    first = (text or "").strip().splitlines()[0] if (text or "").strip() else ""
-    title = re.sub(r"^[\s*#>_`]+", "", first.strip())
-    title = re.sub(r"^(chat\s+)?title\s*:\s*", "", title, flags=re.IGNORECASE)
-    title = re.sub(r"^[\s*#>_`\"']+|[\s*#_`\"']+$", "", title)[:60].strip()
-    return title or fallback
-
-
-def fallback_title(message):
-    words = message.split()
-    return " ".join(words[:6])[:60] or DEFAULT_TITLE
 
 
 class ConversationStore:
@@ -270,7 +253,6 @@ class OrchestratorChat:
         if not content:
             raise ChatError("message is empty")
         conversation = self.store.get(conversation_id)
-        first_message = not conversation["messages"]
         conversation["messages"].append({"role": "user", "content": content, "at": time.strftime("%Y-%m-%dT%H:%M:%S%z")})
         self.store.save(conversation)
         result = self.provider.reply(self.system_prompt(), self.prompt_messages(conversation),
@@ -279,18 +261,8 @@ class OrchestratorChat:
         conversation["usage"] = result.usage or None
         conversation["messages"].append({"role": "assistant", "content": result.text, "drafts": drafts,
                                          "at": time.strftime("%Y-%m-%dT%H:%M:%S%z")})
-        if first_message and conversation["title"] == DEFAULT_TITLE:
-            conversation["title"] = self._auto_title(content)
         self.store.save(conversation)
         return conversation["messages"][-1]
-
-    def _auto_title(self, first_message):
-        """Name a new chat from its first message. Falls back to the first words if the call fails."""
-        try:
-            titled = self.provider.reply(TITLE_RULES, [{"role": "user", "content": first_message}], TITLE_MODEL, None)
-            return clean_title(titled.text, fallback_title(first_message))
-        except ChatError:
-            return fallback_title(first_message)
 
     def compact(self, conversation_id):
         """Summarize everything so far, so later turns send the summary instead of the full history."""

@@ -14,9 +14,8 @@ from orchestrator.chat import (
 
 
 class FakeProvider:
-    def __init__(self, reply="ok", error=None, title="A short title", usage=None):
+    def __init__(self, reply="ok", error=None, usage=None):
         self.reply_text = reply
-        self.title_text = title
         self.error = error
         self.usage = usage or {"context_tokens": 1200, "cache_read_tokens": 1000, "cache_creation_tokens": 200,
                                "output_tokens": 5, "context_window": 1000000}
@@ -26,9 +25,7 @@ class FakeProvider:
         self.calls.append({"system": system_prompt, "messages": list(messages), "model": model, "effort": effort})
         if self.error:
             raise self.error
-        # The title call uses its own system prompt; everything else is a chat or compact reply.
-        text = self.title_text if system_prompt == chat_module.TITLE_RULES else self.reply_text
-        return chat_module.ChatReply(text=text, usage=self.usage)
+        return chat_module.ChatReply(text=self.reply_text, usage=self.usage)
 
 
 @pytest.fixture
@@ -260,30 +257,6 @@ def test_api_renames_and_deletes_a_chat(chat, monkeypatch):
     assert client.patch("/orchestrator/conversations/aaaaaaaaaaaa", json={"title": "x"}).status_code == 404
 
 
-def test_a_new_chat_is_named_from_its_first_reply(chat):
-    orchestrator = chat(FakeProvider(title='"Inquiry review plan"\nextra line'))
-    conversation = orchestrator.start("claude-sonnet-5-5", None)
-
-    orchestrator.send(conversation["id"], "Plan the inquiry review workspace")
-
-    assert orchestrator.store.get(conversation["id"])["title"] == "Inquiry review plan"
-
-
-def test_a_failed_title_call_falls_back_to_the_first_words(chat):
-    class TitleFails(FakeProvider):
-        def reply(self, system_prompt, messages, model, effort):
-            if system_prompt == chat_module.TITLE_RULES:
-                raise ChatError("title call failed")
-            return super().reply(system_prompt, messages, model, effort)
-
-    orchestrator = chat(TitleFails())
-    conversation = orchestrator.start("claude-sonnet-5-5", None)
-
-    orchestrator.send(conversation["id"], "one two three four five six seven eight")
-
-    assert orchestrator.store.get(conversation["id"])["title"] == "one two three four five six"
-
-
 def test_a_renamed_chat_keeps_its_name(chat):
     orchestrator = chat(FakeProvider())
     conversation = orchestrator.start("claude-sonnet-5-5", None, "My name")
@@ -344,13 +317,3 @@ def test_api_compacts_a_chat_and_reports_unknown_ids(chat, monkeypatch):
 
     assert client.post(f"/orchestrator/conversations/{conversation['id']}/compact").status_code == 200
     assert client.post("/orchestrator/conversations/aaaaaaaaaaaa/compact").status_code == 404
-
-
-@pytest.mark.parametrize("raw, expected", [
-    ('Title: Inquiry Review Workspace', "Inquiry Review Workspace"),
-    ('**Chat title:** "Staff inquiry plan"', "Staff inquiry plan"),
-    ("  Plain title  \nsecond line", "Plain title"),
-    ("", "fallback"),
-])
-def test_model_titles_are_cleaned_for_the_list(raw, expected):
-    assert chat_module.clean_title(raw, "fallback") == expected

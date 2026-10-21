@@ -8,6 +8,7 @@ import { useConsoleStore } from '../stores/useConsoleStore';
 import { useExecutionStore } from '../stores/useExecutionStore';
 import { useAgents, useJobs } from '../api/hooks';
 import { ConnectionStatus } from '../api/types';
+import { isRealApiMode } from '../api/client';
 import { TERMINAL_JOB_STATUSES } from '../api/adapters/httpAdapter';
 import { isEditableTarget, readSidebarCollapsed, SIDEBAR_NARROW_QUERY, writeSidebarCollapsed } from './sidebarState';
 import { useMediaQuery } from './useMediaQuery';
@@ -45,7 +46,7 @@ const CONNECTION_LABEL: Record<ConnectionStatus, { text: string; color: string }
  * starts collapsed; the user may open it there for the current view.
  */
 export const Sidebar: React.FC = () => {
-  const { connectionStatus } = useConsoleStore();
+  const { connectionStatus, backendHealth } = useConsoleStore();
   const resources = useExecutionStore((s) => s.view.resources);
   const herdr = useExecutionStore((s) => s.view.backends.find((b) => b.name === 'herdr'));
   const snapshotStatus = useExecutionStore((s) => s.snapshotStatus);
@@ -97,6 +98,11 @@ export const Sidebar: React.FC = () => {
       : { text: 'Unavailable', color: 'var(--lys-status-danger)' }
     : { text: snapshotStatus === 'error' ? 'Unknown' : '—', color: 'var(--lys-text-muted)' };
   const hermesStatus = CONNECTION_LABEL[connectionStatus];
+  const hermesTooltip = !isRealApiMode
+    ? 'Mock mode: data is not from the Hermes API'
+    : backendHealth
+      ? `Connection to the Hermes runtime API · ${backendHealth.service} v${backendHealth.version} (${backendHealth.uptimeSeconds}s uptime)`
+      : 'Connection to the Hermes runtime API · not reported by the Hermes API';
 
   return (
     <aside
@@ -169,7 +175,7 @@ export const Sidebar: React.FC = () => {
           </div>
         ) : (
           <>
-            <div className="flex items-center justify-between text-[11px] text-lys-muted" title="Connection to the Hermes runtime API">
+            <div className="flex items-center justify-between text-[11px] text-lys-muted" title={hermesTooltip}>
               <span>Hermes</span>
               <span style={{ color: hermesStatus.color }} className="flex items-center gap-1.5">
                 <span style={{ backgroundColor: hermesStatus.color }} className="w-1.5 h-1.5" />

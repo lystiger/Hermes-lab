@@ -44,6 +44,9 @@ export const DesignRoute: React.FC = () => {
   const [reason, setReason] = useState('');
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
+  // Once a direction is chosen, the other choices stay locked until Lystiger asks to change it.
+  const [changing, setChanging] = useState(false);
+  const locked = !!chosen && !changing;
 
   useEffect(() => {
     fetch(`${BASE}/manifest.json`)
@@ -89,6 +92,7 @@ export const DesignRoute: React.FC = () => {
       setChosen({ direction: pending, label: pendingLabel, reason: reason.trim(), date: null });
       setPending(null);
       setReason('');
+      setChanging(false);
     } catch (e) {
       setSaveError((e as Error).message);
     } finally {
@@ -106,8 +110,14 @@ export const DesignRoute: React.FC = () => {
         )}
         {manifest && (
           <>
-            <div className="text-[13px] text-lys-primary">
-              {chosen ? `Chosen: ${chosen.label}. Reason: ${chosen.reason}` : 'No direction chosen yet.'}
+            <div className="flex flex-wrap items-center justify-between gap-2 text-[13px] text-lys-primary">
+              <span>{chosen ? `Chosen: ${chosen.label}. Reason: ${chosen.reason}` : 'No direction chosen yet.'}</span>
+              {chosen && !changing && (
+                <button type="button" onClick={() => setChanging(true)} disabled={!apiOk}
+                  className="rounded border border-lys-subtle px-3 py-1 text-[12px] text-lys-muted disabled:opacity-40">
+                  Change decision
+                </button>
+              )}
             </div>
 
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
@@ -123,7 +133,7 @@ export const DesignRoute: React.FC = () => {
                       <span className="text-[13px] text-lys-primary">{d.label}</span>
                     </button>
                     <span className="text-[12px] text-lys-muted">{isChosen ? 'Chosen' : 'Not chosen'}</span>
-                    <button type="button" disabled={!apiOk || saving || isChosen}
+                    <button type="button" disabled={!apiOk || saving || isChosen || locked}
                       onClick={() => { setPending(d.id); setReason(''); setSaveError(null); }}
                       className="w-full rounded border border-lys-subtle px-3 py-2 text-center text-[13px] text-lys-primary disabled:opacity-40">
                       Choose this direction

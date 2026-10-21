@@ -12,7 +12,7 @@ const manifest = {
   decision: null, decision_note: 'Nothing is chosen until then.',
 };
 
-function mockFetch({ decision = null, post = { ok: true, status: 201, json: async () => ({}) } } = {}) {
+function mockFetch({ decision = null as Record<string, string> | null, post = { ok: true, status: 201, json: async () => ({}) } } = {}) {
   const fn = vi.fn(async (url: string, init?: RequestInit) => {
     if (url.endsWith('/manifest.json')) return { ok: true, status: 200, json: async () => manifest };
     if (init?.method === 'POST') return post;
@@ -39,6 +39,18 @@ describe('choosing a design direction', () => {
     await waitFor(() => expect(screen.getByText(/Chosen: B · Clean eco/)).toBeInTheDocument());
     const post = fetchMock.mock.calls.find(([, init]) => init?.method === 'POST');
     expect(JSON.parse(String(post![1]!.body))).toEqual({ direction: 'b-clean-eco', reason: 'Clear for buyers and calm.' });
+  });
+
+  it('locks the other directions once one is chosen, until the choice is changed', async () => {
+    mockFetch({ decision: { direction: 'a-family-fresh', label: 'A · Family fresh', reason: 'Already decided here.', date: '2026-10-21' } });
+    render(<MemoryRouter><DesignRoute /></MemoryRouter>);
+    const buttons = await screen.findAllByRole('button', { name: 'Choose this direction' });
+
+    expect(buttons.every((b) => b.hasAttribute('disabled'))).toBe(true);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Change decision' }));
+
+    expect(screen.getAllByRole('button', { name: 'Choose this direction' })[1]).toBeEnabled();
   });
 
   it('keeps Confirm off until the reason is long enough', async () => {

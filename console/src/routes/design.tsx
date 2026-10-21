@@ -114,7 +114,7 @@ export const DesignRoute: React.FC = () => {
         {manifest && (
           <>
             <div className="flex flex-wrap items-center justify-between gap-2 text-[13px] text-lys-primary">
-              <span>{chosen ? 'A direction is decided.' : 'No direction chosen yet.'}</span>
+              {!chosen && <span>No direction chosen yet.</span>}
               {chosen && !changing && (
                 <button type="button" onClick={() => setChanging(true)} disabled={!apiOk}
                   className="rounded border border-lys-subtle px-3 py-1 text-[12px] text-lys-muted disabled:opacity-40">

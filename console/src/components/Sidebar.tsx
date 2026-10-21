@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { NavLink } from 'react-router-dom';
-import { Activity, Cpu, Gauge, LayoutDashboard, ListChecks, MessageSquare, PanelLeftClose, PanelLeftOpen, ScrollText, Settings, Users, type LucideIcon } from 'lucide-react';
+import { Activity, Cpu, Gauge, LayoutDashboard, ListChecks, MessageSquare, Palette, PanelLeftClose, PanelLeftOpen, ScrollText, Settings, Users, type LucideIcon } from 'lucide-react';
 import { AnimatedCube } from './AnimatedCube';
 import { DESIGN_ART_ENABLED } from '../theme/agentArt';
 import { Icon } from './Icon';
@@ -31,6 +31,7 @@ const NAV_ITEMS: NavItem[] = [
   { to: '/events', label: 'Events', icon: ScrollText },
   { to: '/execution', label: 'Execution', icon: Cpu },
   { to: '/comms', label: 'Comms', icon: MessageSquare },
+  { to: '/design', label: 'Design', icon: Palette },
   { to: '/settings', label: 'Settings', icon: Settings }
 ];
 

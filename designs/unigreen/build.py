@@ -147,7 +147,29 @@ def main():
              f"<div style='width:1700px'>{cells}</div>")
     (OUT / "sheet.html").write_text(sheet, encoding="utf-8")
     (OUT / "contrast.json").write_text(json.dumps(report, indent=2), encoding="utf-8")
+    publish(pages)
     print(json.dumps(report, indent=2))
+
+
+PUBLIC = HERE.parent.parent / "console" / "public" / "design" / "unigreen"
+LABELS = {"a-family-fresh": "A · Family fresh", "b-clean-eco": "B · Clean eco", "c-japanese-precision": "C · Japanese precision"}
+
+
+def publish(pages):
+    """Copy the renders into LysControl's public folder and write the manifest the Design page reads."""
+    import shutil
+    import time
+    PUBLIC.mkdir(parents=True, exist_ok=True)
+    directions = []
+    for name in pages:
+        shutil.copy(OUT / f"detail-{name}.png", PUBLIC / f"detail-{name}.png")
+        directions.append({"id": name, "label": LABELS.get(name, name), "detail": f"detail-{name}.png"})
+    shutil.copy(OUT / "sheet.png", PUBLIC / "sheet.png")
+    shutil.copy(OUT / "contrast.json", PUBLIC / "contrast.json")
+    manifest = {"project": "unigreen", "generated": time.strftime("%Y-%m-%d"), "sheet": "sheet.png",
+                "contrast": "contrast.json", "directions": directions, "decision": None,
+                "decision_note": "Chosen by Lystiger and recorded in decisions.md. Nothing is chosen until then."}
+    (PUBLIC / "manifest.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")
 
 
 if __name__ == "__main__":

@@ -1,0 +1,25 @@
+{
+  "project": "unigreen",
+  "generated": "2026-10-21",
+  "sheet": "sheet.png",
+  "contrast": "contrast.json",
+  "directions": [
+    {
+      "id": "a-family-fresh",
+      "label": "A \u00b7 Family fresh",
+      "detail": "detail-a-family-fresh.png"
+    },
+    {
+      "id": "b-clean-eco",
+      "label": "B \u00b7 Clean eco",
+      "detail": "detail-b-clean-eco.png"
+    },
+    {
+      "id": "c-japanese-precision",
+      "label": "C \u00b7 Japanese precision",
+      "detail": "detail-c-japanese-precision.png"
+    }
+  ],
+  "decision": null,
+  "decision_note": "Chosen by Lystiger and recorded in decisions.md. Nothing is chosen until then."
+}

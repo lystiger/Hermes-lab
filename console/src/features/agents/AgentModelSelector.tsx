@@ -7,7 +7,7 @@ import { LoadingState, ErrorState, EmptyState, Freshness, StaleNotice } from '..
 export function getValidEffortOptions(agentId: string): (string | null)[] {
   const id = agentId.toLowerCase();
   if (id === 'claude') {
-    return [null];
+    return [null, 'low', 'medium', 'high', 'xhigh', 'max'];
   }
   if (id === 'gemini' || id === 'agy') {
     return [null, 'low', 'medium', 'high'];

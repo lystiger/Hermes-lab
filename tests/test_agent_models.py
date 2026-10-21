@@ -38,7 +38,7 @@ def test_api_validation_roundtrip_and_agent_source():
     client = TestClient(app)
     assert client.put('/agents/missing/model', json={'model': 'claude-sonnet-5-5'}).status_code == 404
     assert client.put('/agents/claude/model', json={'model': '--evil'}).status_code == 400
-    assert client.put('/agents/claude/model', json={'model': 'claude-opus-5-5', 'effort': 'high'}).status_code == 400
+    assert client.put('/agents/claude/model', json={'model': 'claude-opus-5-5', 'effort': 'ultra'}).status_code == 400
     assert not registry.path.exists()
     response = client.put('/agents/claude/model', json={'model': 'claude-opus-5-5'})
     assert response.status_code == 200

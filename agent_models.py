@@ -41,6 +41,8 @@ def _unlock_file(handle):
 
 # Claude models Hermes supports. Other models seen at runtime are appended after these.
 CLAUDE_MODELS = ("claude-sonnet-5-5", "claude-opus-5-5")
+# Reasoning levels the Claude CLI accepts with --effort.
+CLAUDE_EFFORTS = ("low", "medium", "high", "xhigh", "max")
 
 
 def claude_label(model_id):
@@ -135,7 +137,7 @@ class ModelRegistry:
         values = examples.get(agent, {}).get("allowed", [])
         if agent == "claude":
             seen = self._read(self.path.with_name("agent_models.seen.json")).get("claude", [])
-            return [{"id": m, "label": claude_label(m), "efforts": []} for m in CLAUDE_MODELS] + [
+            return [{"id": m, "label": claude_label(m), "efforts": list(CLAUDE_EFFORTS)} for m in CLAUDE_MODELS] + [
                 {"id": m, "label": m, "efforts": []} for m in seen if m not in CLAUDE_MODELS]
         if agent == "codex":
             # Read on every request: mtime changes (including atomic replacement) cannot go stale.

@@ -101,8 +101,8 @@ describe('AgentModelSelector Component', () => {
     expect(geminiOptions).not.toContain('minimal');
     expect(geminiOptions).not.toContain('xhigh');
 
-    // Claude options: null only
-    expect(getValidEffortOptions('claude')).toEqual([null]);
+    // Claude options: null, then the Claude CLI levels
+    expect(getValidEffortOptions('claude')).toEqual([null, 'low', 'medium', 'high', 'xhigh', 'max']);
   });
 
   it('keeps Save button disabled until changed and valid', async () => {

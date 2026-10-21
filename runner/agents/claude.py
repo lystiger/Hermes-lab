@@ -83,6 +83,8 @@ class ClaudeAdapter(AgentAdapter):
 
         if options.get("model"):
             command[3:3] = ["--model", options["model"]]
+        if options.get("effort"):
+            command.extend(["--effort", options["effort"]])
         return command
 
     @staticmethod

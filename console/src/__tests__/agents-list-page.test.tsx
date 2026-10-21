@@ -67,7 +67,8 @@ describe('Agents list page', () => {
     const codexReasoning = screen.getByRole('combobox', { name: 'Reasoning for Codex' }) as HTMLSelectElement;
     expect(codexReasoning.options.length).toBeGreaterThan(2);
     const claudeReasoning = screen.getByRole('combobox', { name: 'Reasoning for Claude' }) as HTMLSelectElement;
-    expect(claudeReasoning).toBeDisabled();
+    expect(claudeReasoning).toBeEnabled();
+    expect([...claudeReasoning.options].map((o) => o.value)).toEqual(['', 'low', 'medium', 'high', 'xhigh', 'max']);
   });
 
   it('keeps Save off until something is changed, then saves the pick and refreshes', async () => {

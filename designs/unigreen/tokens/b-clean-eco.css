@@ -1,0 +1,6 @@
+/* B. Clean eco: green-led, lots of white space, trust first. */
+:root {
+  --bg: #f6faf6; --surface: #ffffff; --text: #14201a; --muted: #4f6158;
+  --primary: #1d6b36; --on-primary: #ffffff; --accent: #7fbf3f;
+  --radius: 6px; --gap: 24px; --font: system-ui, -apple-system, "Segoe UI", sans-serif;
+}

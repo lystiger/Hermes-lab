@@ -1,0 +1,6 @@
+/* A. Family fresh: warm, rounded, playful but trustworthy. */
+:root {
+  --bg: #fff7ef; --surface: #ffffff; --text: #2b2233; --muted: #6b5f70;
+  --primary: #b3123f; --on-primary: #ffffff; --accent: #2e8b57;
+  --radius: 22px; --gap: 20px; --font: "Trebuchet MS", "Segoe UI", system-ui, sans-serif;
+}

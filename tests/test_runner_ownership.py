@@ -1179,5 +1179,121 @@ class TestOwnershipLegacyAndVerifierRules(unittest.TestCase):
             self.assertEqual(ctx.exception.code, "FAILED_FORBIDDEN_CHANGES")
 
 
+class TestOwnershipHardening(unittest.TestCase):
+    """S07b hardening: porcelain parsing, renames, load-time validation."""
+
+    setUp = TestBuilderOwnershipEnforcement.setUp
+    make_phase_runner = TestBuilderOwnershipEnforcement.make_phase_runner
+
+    def test_real_unstaged_modification_inside_owned_paths_succeeds(self):
+        with tempfile.TemporaryDirectory() as temporary_dir:
+            root = Path(temporary_dir)
+            runner, phase = self.make_phase_runner(root, owned_paths=["backend/"])
+            repo = root / "repo"
+            (repo / "backend").mkdir(parents=True)
+            (repo / "backend" / "api.py").write_text("a = 1\n", encoding="utf-8")
+            git = ["git", "-c", "user.name=t", "-c", "user.email=t@t"]
+            for command in (
+                ["git", "init", "-q"],
+                ["git", "add", "."],
+                [*git, "commit", "-q", "-m", "init"],
+            ):
+                subprocess.run(command, cwd=repo, check=True, capture_output=True)
+            (repo / "backend" / "api.py").write_text("a = 2\n", encoding="utf-8")
+
+            runner.run_cmd = lambda *a, **k: HermesSprintRunner.run_cmd(runner, *a, **k)
+            changed = HermesSprintRunner.inspect_changed_files(runner, repo)
+
+            self.assertEqual(changed, [" M backend/api.py"])
+            runner._enforce_phase_ownership(phase, changed)
+
+    def test_rename_from_outside_owned_paths_into_owned_paths_fails(self):
+        with tempfile.TemporaryDirectory() as temporary_dir:
+            runner, phase = self.make_phase_runner(
+                Path(temporary_dir),
+                changed_files=["R  frontend/app.js -> backend/app.js"],
+                owned_paths=["backend/"],
+            )
+            with self.assertRaises(SprintRunnerError) as ctx:
+                runner.execute_phase(phase)
+            self.assertEqual(ctx.exception.code, "FAILED_OUTSIDE_OWNERSHIP")
+
+    def _overlapping_spec(self, root):
+        phases = [
+            {
+                "name": name,
+                "role": "builder",
+                "agent": "codex",
+                "worktree_dir": name,
+                "branch": f"s07/{name}",
+                "prompt_file": "prompts/s02-agy.md",
+                "expected_handoff": "HANDOFF.md",
+                "commit_message": f"test: {name}",
+                "owned_paths": paths,
+                "parallel_group": "g",
+            }
+            for name, paths in (("a", ["backend/"]), ("b", ["backend/api/"]))
+        ]
+        return self._write_spec(root, phases)
+
+    def _write_spec(self, root, phases):
+        spec_file = root / "spec.json"
+        spec_file.write_text(
+            json.dumps(
+                {
+                    "sprint_id": "hardening",
+                    "control_root": str(runner_path.parent.parent),
+                    "target_repo": str(runner_path.parent.parent),
+                    "worktree_root": str(root / "worktrees"),
+                    "runs_root": str(root / "runs"),
+                    "phases": phases,
+                }
+            ),
+            encoding="utf-8",
+        )
+        return spec_file
+
+    def test_overlap_rejected_at_load_time(self):
+        with tempfile.TemporaryDirectory() as temporary_dir:
+            spec_file = self._overlapping_spec(Path(temporary_dir))
+            with self.assertRaises(SprintRunnerError) as ctx:
+                HermesSprintRunner(spec_file, dry_run=True, skip_agent_exec=True)
+            self.assertEqual(ctx.exception.code, "FAILED_INVALID_OWNERSHIP")
+
+    def test_non_list_owned_paths_raise_validation_error_at_load(self):
+        for bad_value in (123, True):
+            with self.subTest(bad_value=bad_value):
+                with tempfile.TemporaryDirectory() as temporary_dir:
+                    root = Path(temporary_dir)
+                    phase = {
+                        "name": "p",
+                        "role": "builder",
+                        "agent": "codex",
+                        "worktree_dir": "p",
+                        "branch": "s07/p",
+                        "prompt_file": "prompts/s02-agy.md",
+                        "expected_handoff": "HANDOFF.md",
+                        "commit_message": "test: p",
+                        "owned_paths": bad_value,
+                    }
+                    spec_file = self._write_spec(root, [phase])
+                    with self.assertRaises(SprintRunnerError) as ctx:
+                        HermesSprintRunner(spec_file, dry_run=True, skip_agent_exec=True)
+                    self.assertEqual(ctx.exception.code, "FAILED_INVALID_OWNERSHIP")
+
+    def test_invalid_spec_does_no_worktree_setup(self):
+        with tempfile.TemporaryDirectory() as temporary_dir:
+            root = Path(temporary_dir)
+            spec_file = self._overlapping_spec(root)
+            with patch.object(HermesSprintRunner, "run_cmd") as run_cmd, patch.object(
+                HermesSprintRunner, "prepare_environment"
+            ) as prepare:
+                with self.assertRaises(SprintRunnerError):
+                    HermesSprintRunner(spec_file, skip_agent_exec=True)
+            run_cmd.assert_not_called()
+            prepare.assert_not_called()
+            self.assertFalse((root / "worktrees").exists())
+
+
 if __name__ == "__main__":
     unittest.main()

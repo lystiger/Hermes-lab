@@ -129,6 +129,7 @@ class HermesSprintRunner:
         self.verification_steps = self._load_verification_spec()
         self._validate_phase_roles()
         self._validate_phase_permissions()
+        self._validate_phase_ownership()
         if export_report is True:
             self.report_path = (
                 self.control_root / "reports" / self.sprint_id / "run-summary.json"
@@ -796,9 +797,10 @@ class HermesSprintRunner:
         prefixes = [self._ownership_prefix(p) for p in phase["owned_paths"]]
         outside = []
         for line in changed_files:
-            path = line[3:].split(" -> ")[-1].strip().strip('"')
-            if not any(path == p or path.startswith(p + "/") for p in prefixes):
-                outside.append(path)
+            for part in line[3:].split(" -> "):
+                path = part.strip().strip('"')
+                if not any(path == p or path.startswith(p + "/") for p in prefixes):
+                    outside.append(path)
         if outside:
             raise SprintRunnerError(
                 "FAILED_OUTSIDE_OWNERSHIP",
@@ -1206,7 +1208,7 @@ class HermesSprintRunner:
             ["git", "status", "--porcelain", "--untracked-files=all"],
             cwd=worktree_path,
         )
-        lines = [line for line in res.stdout.strip().split("\n") if line.strip()]
+        lines = [line for line in res.stdout.splitlines() if line.strip()]
         self.logger.info("Changed target files count in %s: %s", worktree_path.name, len(lines))
         return lines
 

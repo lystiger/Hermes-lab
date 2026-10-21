@@ -160,6 +160,13 @@ describe('M4 motion: tokens on transitions and entry only, nothing perpetual at 
     expect(css).toMatch(/\.transition-colors[\s\S]*?transition-timing-function:\s*var\(--lys-ease-standard\)/);
   });
 
+  it('fades every page in on navigation and each new chat message on entry', () => {
+    const layout = fs.readFileSync(path.join(ROOT, 'src/components/Layout.tsx'), 'utf8');
+    expect(layout).toContain('key={location.pathname} className="lys-enter');
+    const thread = fs.readFileSync(path.join(ROOT, 'src/features/comms/ChatThread.tsx'), 'utf8');
+    expect(thread).toContain('lys-enter flex flex-col gap-2');
+  });
+
   it('caps list stagger at 180ms total (20ms steps, 9 steps)', () => {
     expect(css).toContain('animation-delay: calc(min(var(--lys-stagger, 0), 9) * 20ms);');
   });

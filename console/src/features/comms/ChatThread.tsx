@@ -21,7 +21,7 @@ export const ChatThread: React.FC<ChatThreadProps> = ({ messages, busy }) => {
     <div role="log" aria-live="polite" aria-label="Messages" className="flex-1 min-h-0 overflow-y-auto">
       <div className="mx-auto max-w-3xl px-4 py-6 flex flex-col gap-6">
         {messages.map((m, i) => (
-          <div key={i} className={`flex flex-col gap-2 ${m.role === 'user' ? 'items-end' : 'items-start'}`}>
+          <div key={i} className={`lys-enter flex flex-col gap-2 ${m.role === 'user' ? 'items-end' : 'items-start'}`}>
             {m.role === 'user' ? (
               <div className="max-w-[80%] whitespace-pre-wrap rounded-2xl bg-lys-surface-2 px-4 py-2.5 text-[14px] text-lys-primary">
                 {m.content}
@@ -45,7 +45,7 @@ export const ChatThread: React.FC<ChatThreadProps> = ({ messages, busy }) => {
           </div>
         ))}
         {busy && (
-          <div role="status" className="flex items-center gap-2 text-[12px] text-lys-muted">
+          <div role="status" className="lys-enter flex items-center gap-2 text-[12px] text-lys-muted">
             <span className="inline-flex gap-1" aria-hidden="true">
               <span className="h-1.5 w-1.5 rounded-full bg-lys-muted" />
               <span className="h-1.5 w-1.5 rounded-full bg-lys-muted" />

@@ -20,6 +20,7 @@ from . import events
 from .base import ExecutionBackend, ExecutionResult
 from .events import ExecutionTrace
 from .openrig_ledger import OwnershipLedger
+from security.urls import checked_urlopen
 
 
 SUPPORTED_VERSION_PREFIX = "0.6."
@@ -284,7 +285,7 @@ def daemon_down_by_id(rig_id, timeout):
         url, data=body, method="POST", headers={"Content-Type": "application/json"},
     )
     try:
-        with urllib.request.urlopen(request, timeout=timeout) as response:
+        with checked_urlopen(request, timeout=timeout) as response:
             text = response.read().decode("utf-8", errors="replace")
     except urllib.error.HTTPError as exc:
         if exc.code == 404:

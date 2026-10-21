@@ -1,0 +1,83 @@
+{
+  "sprint_id": "hermes-s08-parallel-groups",
+  "name": "Parallel execution of phases that share a parallel_group",
+  "canonical_repo": "~/Projects/Hermes-lab",
+  "base_ref": "439c1b7",
+  "target_branch": "s08/integration",
+  "worktree_root": "~/hermes-worktrees/hermes-lab-s08",
+  "runs_root": "~/hermes-runs",
+  "execution_backend": "subprocess",
+  "limits": {
+    "max_changed_files": 12,
+    "timeout_seconds": 900
+  },
+  "phases": [
+    {
+      "name": "parallel_contract_tests",
+      "role": "builder",
+      "agent": "antigravity",
+      "worktree_dir": "antigravity",
+      "branch": "s08/antigravity",
+      "prompt_file": "prompts/s08-agy.md",
+      "expected_handoff": "HANDOFF_S08_AGY.md",
+      "commit_message": "test(s08): specify parallel execution of parallel groups",
+      "cmd_options": {
+        "output_format": "stream-json",
+        "dangerously_skip_permissions": false
+      }
+    },
+    {
+      "name": "parallel_implementation",
+      "role": "builder",
+      "agent": "claude",
+      "worktree_dir": "claude",
+      "branch": "s08/claude",
+      "prompt_file": "prompts/s08-claude.md",
+      "expected_handoff": "HANDOFF_S08_CLAUDE.md",
+      "commit_message": "feat(s08): run parallel_group phases concurrently",
+      "cmd_options": {
+        "model": "sonnet",
+        "max_turns": 80,
+        "permission_mode": "dontAsk",
+        "output_format": "json"
+      }
+    },
+    {
+      "name": "parallel_hardening",
+      "role": "hardener",
+      "agent": "claude",
+      "worktree_dir": "hardener",
+      "branch": "s08/hardener",
+      "prompt_file": "prompts/s08-hardener.md",
+      "expected_handoff": "HANDOFF_S08_HARDENER.md",
+      "commit_message": "fix(s08): harden parallel group execution",
+      "cmd_options": {
+        "model": "sonnet",
+        "max_turns": 70,
+        "permission_mode": "dontAsk",
+        "output_format": "json"
+      }
+    },
+    {
+      "name": "parallel_verification",
+      "role": "verifier",
+      "agent": "codex",
+      "worktree_dir": "codex",
+      "branch": "s08/codex",
+      "prompt_file": "prompts/s08-codex.md",
+      "expected_handoff": "HANDOFF_S08_CODEX.md",
+      "commit_message": "test(s08): verify parallel group execution",
+      "cmd_options": {
+        "sandbox": "workspace-write",
+        "ephemeral": true
+      }
+    }
+  ],
+  "verification": [
+    {
+      "name": "runner-tests",
+      "command": ["/home/lystiger/Projects/Hermes-lab/.venv/bin/python", "-m", "pytest", "tests/test_runner.py", "tests/test_handoff_policy.py", "tests/test_runner_execution_visibility.py", "tests/test_runner_ownership.py", "tests/test_runner_parallel.py", "-q"],
+      "timeout_seconds": 600
+    }
+  ]
+}

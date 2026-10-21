@@ -1,0 +1,67 @@
+{
+  "sprint_id": "hermes-s07-builder-ownership",
+  "name": "Builder file ownership and parallel-group validation",
+  "canonical_repo": "~/Projects/Hermes-lab",
+  "base_ref": "7ee1d61",
+  "target_branch": "s07/integration",
+  "worktree_root": "~/hermes-worktrees/hermes-lab-s07",
+  "runs_root": "~/hermes-runs",
+  "execution_backend": "subprocess",
+  "limits": {
+    "max_changed_files": 12,
+    "timeout_seconds": 900
+  },
+  "phases": [
+    {
+      "name": "ownership_contract_tests",
+      "role": "builder",
+      "agent": "antigravity",
+      "worktree_dir": "antigravity",
+      "branch": "s07/antigravity",
+      "prompt_file": "prompts/s07-agy.md",
+      "expected_handoff": "HANDOFF_S07_AGY.md",
+      "commit_message": "test(s07): specify builder file ownership and parallel groups",
+      "cmd_options": {
+        "output_format": "stream-json",
+        "dangerously_skip_permissions": false
+      }
+    },
+    {
+      "name": "ownership_implementation",
+      "role": "builder",
+      "agent": "claude",
+      "worktree_dir": "claude",
+      "branch": "s07/claude",
+      "prompt_file": "prompts/s07-claude.md",
+      "expected_handoff": "HANDOFF_S07_CLAUDE.md",
+      "commit_message": "feat(s07): enforce builder file ownership in the runner",
+      "cmd_options": {
+        "model": "sonnet",
+        "max_turns": 70,
+        "permission_mode": "dontAsk",
+        "output_format": "json"
+      }
+    },
+    {
+      "name": "ownership_verification",
+      "role": "verifier",
+      "agent": "codex",
+      "worktree_dir": "codex",
+      "branch": "s07/codex",
+      "prompt_file": "prompts/s07-codex.md",
+      "expected_handoff": "HANDOFF_S07_CODEX.md",
+      "commit_message": "test(s07): verify builder file ownership",
+      "cmd_options": {
+        "sandbox": "workspace-write",
+        "ephemeral": true
+      }
+    }
+  ],
+  "verification": [
+    {
+      "name": "runner-tests",
+      "command": ["/home/lystiger/Projects/Hermes-lab/.venv/bin/python", "-m", "pytest", "tests/test_runner.py", "tests/test_handoff_policy.py", "tests/test_runner_execution_visibility.py", "tests/test_runner_ownership.py", "-q"],
+      "timeout_seconds": 600
+    }
+  ]
+}

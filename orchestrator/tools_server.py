@@ -88,6 +88,8 @@ TOOLS = [
                 "acceptance": {"type": "array", "items": {"type": "string"}},
                 "verification": {"type": "array", "items": {"type": "string"}},
                 "non_goals": {"type": "array", "items": {"type": "string"}},
+                "decisions": {"type": "array", "items": {"type": "string"},
+                              "description": "settled answers, each with its source, e.g. 'Use FastAPI (Lystiger)'"},
             },
             "required": ["task_id", "goal", "repository", "baseline", "context_files", "acceptance", "verification"],
             "additionalProperties": False,
@@ -371,6 +373,8 @@ def build_brief(fields):
     lines += [f"- `{command}`" for command in fields["verification"]]
     if fields.get("non_goals"):
         lines += ["", "## Non-Goals", ""] + [f"- {item}" for item in fields["non_goals"]]
+    if fields.get("decisions"):
+        lines += ["", "## Decisions", ""] + [f"- {item}" for item in fields["decisions"]]
     return "\n".join(lines) + "\n"
 
 

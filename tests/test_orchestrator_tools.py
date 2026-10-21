@@ -292,3 +292,11 @@ def test_job_detail_returns_the_useful_fields(root, monkeypatch):
     assert "secret" not in detail
     with pytest.raises(ToolError):
         tools.job_detail("../../etc")
+
+
+def test_decisions_are_recorded_in_the_brief_with_their_source(root):
+    text = build_brief({**GOOD_FIELDS, "decisions": ["Use FastAPI (Lystiger)", "Keep the old table (fact: schema)"]})
+
+    section = text.split("## Decisions", 1)[1]
+    assert "- Use FastAPI (Lystiger)" in section and "- Keep the old table (fact: schema)" in section
+    assert all(c["ok"] for c in check_brief(text, root))

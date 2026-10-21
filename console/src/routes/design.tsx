@@ -45,37 +45,44 @@ export const DesignRoute: React.FC = () => {
   return (
     <>
       <PageHeader title="Design" subtitle={manifest ? `${manifest.project} · generated ${manifest.generated}` : 'Unigreen'} />
-      <div className="flex flex-col gap-4 p-6">
+      <div className="flex flex-col gap-4 p-4 md:p-6">
         {error && <div role="alert" className="text-[13px] text-lys-status-danger">Design boards are not available: {error}</div>}
         {manifest && (
           <>
-            <Card as="section" label="Decision" bodyClassName="p-4 flex flex-col gap-2">
-              <div className="text-[13px] text-lys-primary">
-                {manifest.decision ? `Chosen: ${manifest.decision}` : 'No direction chosen yet'}
-              </div>
-              <div className="text-[12px] text-lys-muted">{manifest.decision_note}</div>
-            </Card>
+            <div className="text-[12px] text-lys-muted">
+              {manifest.decision ? `Chosen: ${manifest.decision}` : 'No direction chosen yet.'} {manifest.decision_note}
+            </div>
 
-            <div role="tablist" aria-label="Directions" className="flex flex-wrap gap-2">
-              {manifest.directions.map((d) => (
-                <button key={d.id} role="tab" aria-selected={d.id === selected} type="button"
-                  onClick={() => setSelected(d.id)}
-                  className={`rounded border px-3 py-1.5 text-[13px] ${d.id === selected ? 'border-lys-strong text-lys-primary' : 'border-lys-subtle text-lys-muted'}`}>
-                  {d.label}
-                </button>
-              ))}
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+              {manifest.directions.map((d) => {
+                const active = d.id === selected;
+                return (
+                  <button key={d.id} type="button" aria-pressed={active} onClick={() => setSelected(d.id)}
+                    className={`flex flex-col gap-2 rounded border p-2 text-left ${active ? 'border-lys-strong' : 'border-lys-subtle hover:border-lys-default'}`}>
+                    <span className="h-40 overflow-hidden rounded bg-lys-surface-1">
+                      <img src={`${BASE}/${d.detail}`} alt="" className="w-full object-cover object-top" loading="lazy" />
+                    </span>
+                    <span className="text-[13px] text-lys-primary">{d.label}</span>
+                  </button>
+                );
+              })}
             </div>
 
             {current && (
-              <Card as="section" label={current.label} bodyClassName="p-0 overflow-auto">
-                <img src={`${BASE}/${current.detail}`} alt={`${current.label}: colour, type, states and copy`}
-                  className="block h-auto w-full max-w-[1280px]" />
+              <Card as="section" label={current.label} bodyClassName="p-0">
+                <div className="max-h-[78vh] overflow-auto">
+                  <img src={`${BASE}/${current.detail}`} alt={`${current.label}: colour, type, states and copy`}
+                    className="block h-auto w-full" />
+                </div>
               </Card>
             )}
 
-            <Card as="section" label="Comparison" bodyClassName="p-0 overflow-auto">
-              <img src={`${BASE}/${manifest.sheet}`} alt="The three directions side by side" className="block h-auto w-full max-w-[1720px]" />
-            </Card>
+            <details className="rounded border border-lys-subtle p-3">
+              <summary className="cursor-pointer text-[13px] text-lys-primary">Comparison of the three directions</summary>
+              <div className="mt-3 max-h-[70vh] overflow-auto">
+                <img src={`${BASE}/${manifest.sheet}`} alt="The three directions side by side" className="block h-auto w-full" />
+              </div>
+            </details>
           </>
         )}
       </div>

@@ -27,19 +27,19 @@ describe('Design route', () => {
 
     renderRoute();
 
-    expect(await screen.findByText('No direction chosen yet')).toBeInTheDocument();
-    expect(screen.getByRole('tab', { name: 'A · Family fresh' })).toHaveAttribute('aria-selected', 'true');
-    expect(screen.getByRole('img', { name: /A · Family fresh/ })).toHaveAttribute('src', '/design/unigreen/detail-a-family-fresh.png');
+    expect(await screen.findByText(/No direction chosen yet/)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'A · Family fresh' })).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByRole('img', { name: /A · Family fresh: colour/ })).toHaveAttribute('src', '/design/unigreen/detail-a-family-fresh.png');
   });
 
   it('switches to another direction when its tab is chosen', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, json: async () => manifest }));
     renderRoute();
-    await screen.findByRole('tab', { name: 'B · Clean eco' });
+    await screen.findByRole('button', { name: 'B · Clean eco' });
 
-    fireEvent.click(screen.getByRole('tab', { name: 'B · Clean eco' }));
+    fireEvent.click(screen.getByRole('button', { name: 'B · Clean eco' }));
 
-    await waitFor(() => expect(screen.getByRole('img', { name: /B · Clean eco/ })).toHaveAttribute('src', '/design/unigreen/detail-b-clean-eco.png'));
+    await waitFor(() => expect(screen.getByRole('img', { name: /B · Clean eco: colour/ })).toHaveAttribute('src', '/design/unigreen/detail-b-clean-eco.png'));
   });
 
   it('says the boards are missing when the manifest cannot be read', async () => {

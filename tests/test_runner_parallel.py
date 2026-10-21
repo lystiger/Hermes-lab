@@ -838,5 +838,116 @@ class TestRunnerParallelGroups(unittest.TestCase):
             )
 
 
+    def _builder_exec(self, fail_merge_marker=None):
+        def fake_exec(context):
+            name = context.phase["name"]
+            (context.worktree / context.phase["expected_handoff"]).write_text("OK\n", encoding="utf-8")
+            target = context.worktree / context.phase["owned_paths"][0].rstrip("/") / f"{name}.py"
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text(f"# {name}\n", encoding="utf-8")
+            return SimpleNamespace(stdout="", stderr="", returncode=0, runtime_metadata={})
+        return fake_exec
+
+    def test_batch_is_atomic_when_second_merge_fails(self):
+        """A failing second merge rolls the integration branch back to its pre-batch tip."""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self.init_target_repo(root / "repo")
+            phases = [
+                self.make_phase("atomic-first", parallel_group="atomic", owned_paths=["pkg_a/"]),
+                self.make_phase("atomic-second", parallel_group="atomic", owned_paths=["pkg_b/"]),
+            ]
+            spec_file = self.write_spec(root / "spec.json", phases)
+            runner = self.create_runner(spec_file, FakeAgentAdapter(self._builder_exec()))
+
+            orig_run_cmd = runner.run_cmd
+
+            def failing_run_cmd(cmd, *args, **kwargs):
+                if isinstance(cmd, list) and cmd[:2] == ["git", "merge"] and "atomic-second" in str(cmd):
+                    raise SprintRunnerError("FAILED_MERGE", "simulated merge failure")
+                return orig_run_cmd(cmd, *args, **kwargs)
+
+            runner.run_cmd = failing_run_cmd
+            success = runner.execute()
+
+            self.assertFalse(success)
+            self.assertEqual(runner.run_summary["status"], "FAILED_MERGE")
+            res = subprocess.run(
+                ["git", "log", "--oneline", "s08/integration"],
+                cwd=root / "repo", check=True, capture_output=True, text=True,
+            )
+            self.assertEqual(len(res.stdout.strip().splitlines()), 1, res.stdout)
+            self.assertFalse((root / "worktrees" / "integration" / "pkg_a").exists())
+
+    def test_shared_state_writes_are_locked_under_concurrency(self):
+        """Racing threads create exactly one event queue and lose no owner or fallback-phase write."""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self.init_target_repo(root / "repo")
+            spec_file = self.write_spec(root / "spec.json", [self.make_phase("solo")])
+            runner = self.create_runner(spec_file)
+
+            count = 16
+            barrier = threading.Barrier(count)
+            queues = []
+            publisher = SimpleNamespace(enabled=True, publish=lambda **kw: None)
+
+            def work(i):
+                barrier.wait(timeout=5)
+                queues.append(runner._execution_event_queue())
+                runner._current_phase = {"name": f"p{i}", "agent": "fake"}
+                event = SimpleNamespace(
+                    kind="execution.started", detail="d", metadata={"executionId": f"e{i}"},
+                )
+                runner._publish_execution_event(event)
+
+            with patch.object(runner_module, "default_publisher", publisher):
+                threads = [threading.Thread(target=work, args=(i,)) for i in range(count)]
+                for t in threads:
+                    t.start()
+                for t in threads:
+                    t.join()
+
+            self.assertEqual(len({id(q) for q in queues}), 1)
+            self.assertEqual(len(runner._execution_owners), count)
+            self.assertIsNotNone(runner._current_phase)
+
+    def _run_with_verifier(self, metadata):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self.init_target_repo(root / "repo")
+            phases = [
+                self.make_phase("v-build", owned_paths=["pkg_a/"]),
+                self.make_phase("v-verify", role="verifier"),
+            ]
+            spec_file = self.write_spec(root / "spec.json", phases)
+            build = self._builder_exec()
+
+            def fake_exec(context):
+                if context.phase["name"] == "v-build":
+                    return build(context)
+                (context.worktree / context.phase["expected_handoff"]).write_text("OK\n", encoding="utf-8")
+                return SimpleNamespace(stdout="", stderr="", returncode=0, runtime_metadata=metadata)
+
+            runner = self.create_runner(spec_file, FakeAgentAdapter(fake_exec))
+            success = runner.execute()
+            return success, runner.run_summary["status"]
+
+    def test_failed_verifier_verdict_blocks_ready_for_review(self):
+        success, status = self._run_with_verifier({"verdict": "failed"})
+        self.assertFalse(success)
+        self.assertEqual(status, "FAILED_VERIFIER_VERDICT")
+
+    def test_passed_verifier_verdict_reaches_ready_for_review(self):
+        success, status = self._run_with_verifier({"verdict": "passed"})
+        self.assertTrue(success, status)
+        self.assertEqual(status, "READY_FOR_REVIEW")
+
+    def test_missing_verifier_verdict_reaches_ready_for_review(self):
+        success, status = self._run_with_verifier({})
+        self.assertTrue(success, status)
+        self.assertEqual(status, "READY_FOR_REVIEW")
+
+
 if __name__ == "__main__":
     unittest.main()

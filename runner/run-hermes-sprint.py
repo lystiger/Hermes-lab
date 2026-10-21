@@ -1115,13 +1115,14 @@ class HermesSprintRunner:
             if not default_publisher or not default_publisher.enabled:
                 return
             execution_id = event.metadata.get("executionId")
-            owners = self.__dict__.setdefault("_execution_owners", {})
-            owner = owners.get(execution_id) if execution_id else None
-            if owner is None:
-                phase = getattr(self, "_current_phase", None) or {}
-                owner = (phase.get("name"), phase.get("agent"))
-                if execution_id:
-                    owners[execution_id] = owner
+            with self._state_lock():
+                owners = self.__dict__.setdefault("_execution_owners", {})
+                owner = owners.get(execution_id) if execution_id else None
+                if owner is None:
+                    phase = getattr(self, "_current_phase", None) or {}
+                    owner = (phase.get("name"), phase.get("agent"))
+                    if execution_id:
+                        owners[execution_id] = owner
             self._execution_event_queue().put_nowait(dict(
                 source_id=event.metadata.get("backend") or "runtime",
                 source_kind="runtime",
@@ -1137,25 +1138,26 @@ class HermesSprintRunner:
 
     def _execution_event_queue(self):
         """One daemon thread posts queued events in order, so a slow API never delays a phase."""
-        q = self.__dict__.get("_exec_event_q")
-        if q is None:
-            q = queue.Queue(maxsize=10000)
-            self._exec_event_q = q
+        with self._state_lock():
+            q = self.__dict__.get("_exec_event_q")
+            if q is None:
+                q = queue.Queue(maxsize=10000)
+                self._exec_event_q = q
 
-            def drain():
-                while True:
-                    item = q.get()
-                    try:
-                        if item is None:
-                            return
-                        default_publisher.publish(**item)
-                    except Exception:  # noqa: BLE001 - a lost observability event is acceptable
-                        pass
-                    finally:
-                        q.task_done()
+                def drain():
+                    while True:
+                        item = q.get()
+                        try:
+                            if item is None:
+                                return
+                            default_publisher.publish(**item)
+                        except Exception:  # noqa: BLE001 - a lost observability event is acceptable
+                            pass
+                        finally:
+                            q.task_done()
 
-            threading.Thread(target=drain, name="hermes-execution-events", daemon=True).start()
-        return q
+                threading.Thread(target=drain, name="hermes-execution-events", daemon=True).start()
+            return q
 
     def _flush_execution_events(self, timeout=5.0):
         """Best effort at the end of a run: give queued events a bounded chance to reach the API."""
@@ -1343,7 +1345,8 @@ class HermesSprintRunner:
     @_current_phase.setter
     def _current_phase(self, phase):
         self.__dict__.setdefault("_phase_local", threading.local()).phase = phase
-        self.__dict__["_last_phase"] = phase
+        with self._state_lock():
+            self.__dict__["_last_phase"] = phase
 
     def execute_phase(self, phase, phase_index=1):
         try:
@@ -1683,10 +1686,17 @@ class HermesSprintRunner:
                 self._report_phase_failure(phase, phase_index, exc)
                 raise
 
+        # A batch merges all of its phases or none: on any failure, restore the pre-batch tip.
+        integration_dir = self.worktree_root / "integration"
+        start_tip = self.run_cmd(["git", "rev-parse", "HEAD"], cwd=integration_dir).stdout.strip()
+        start_phase_count = len(self.run_summary["phases"])
         for (phase_index, phase), (state, _), changed_files in zip(batch, results, changed):
             try:
                 self._integrate_phase(phase, phase_index, state, changed_files)
             except Exception as exc:
+                self.run_cmd(["git", "merge", "--abort"], cwd=integration_dir, check=False)
+                self.run_cmd(["git", "reset", "--hard", start_tip], cwd=integration_dir)
+                del self.run_summary["phases"][start_phase_count:]
                 self._report_phase_failure(phase, phase_index, exc)
                 raise
 
@@ -2284,6 +2294,13 @@ class HermesSprintRunner:
                 raise SprintRunnerError(
                     "FAILED_INCOMPLETE_PHASE",
                     f"Phase '{p['phase']}' did not reach SUCCESS status (was {p['status']})."
+                )
+
+        for p in self.run_summary["phases"]:
+            if p.get("role") == "verifier" and p.get("runtime_metadata", {}).get("verdict") == "failed":
+                raise SprintRunnerError(
+                    "FAILED_VERIFIER_VERDICT",
+                    f"Verifier phase '{p['phase']}' reported a failed verdict.",
                 )
 
         if self.verification_steps:

@@ -6,20 +6,52 @@
   "directions": [
     {
       "id": "a-family-fresh",
-      "label": "A \u00b7 Family fresh",
+      "label": "A · Family fresh",
       "detail": "detail-a-family-fresh.png"
     },
     {
       "id": "b-clean-eco",
-      "label": "B \u00b7 Clean eco",
+      "label": "B · Clean eco",
       "detail": "detail-b-clean-eco.png"
     },
     {
       "id": "c-japanese-precision",
-      "label": "C \u00b7 Japanese precision",
+      "label": "C · Japanese precision",
       "detail": "detail-c-japanese-precision.png"
     }
   ],
   "decision": null,
-  "decision_note": "Chosen by Lystiger and recorded in decisions.md. Nothing is chosen until then."
+  "decision_note": "Chosen by Lystiger and recorded in decisions.md. Nothing is chosen until then.",
+  "diagrams": [
+    {
+      "id": "buyer-flow",
+      "label": "Buyer flow: from product to quotation request",
+      "file": "diagrams/buyer-flow.svg"
+    },
+    {
+      "id": "database",
+      "label": "Database (generated from the staging schema)",
+      "file": "diagrams/database.svg"
+    },
+    {
+      "id": "inquiry-status",
+      "label": "Inquiry status lifecycle",
+      "file": "diagrams/inquiry-status.svg"
+    },
+    {
+      "id": "sitemap",
+      "label": "Sitemap (English and Vietnamese routes)",
+      "file": "diagrams/sitemap.svg"
+    },
+    {
+      "id": "staff-flow",
+      "label": "Staff flow: from sign-in to an inquiry",
+      "file": "diagrams/staff-flow.svg"
+    },
+    {
+      "id": "submit-sequence",
+      "label": "Submitting an inquiry",
+      "file": "diagrams/submit-sequence.svg"
+    }
+  ]
 }

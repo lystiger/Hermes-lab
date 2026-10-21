@@ -20,6 +20,29 @@
     "stops_when": "every check has a status and every finding is reported",
     "authority": "reports only; HARDENER fixes, Lystiger decides"
   },
+  "production": {
+    "purpose": "Decide whether a change is ready to merge to main: run the trials that apply to its tier and report the evidence.",
+    "scope": [
+      "tests for the change",
+      "security scan",
+      "user-flow run on staging for user-facing or data changes",
+      "tiering: full, smoke or skip"
+    ],
+    "tools": [
+      "release.gate (readiness from evidence)",
+      "security.scan",
+      "the staging flow run",
+      "repo_state (read-only)"
+    ],
+    "may_edit_product_source": false,
+    "network": false,
+    "may_run_exploits": false,
+    "may_deploy_to_production": false,
+    "handoff": "HANDOFF_PRODUCTION.md",
+    "output": "readiness per tier: PASS, FAIL or UNPROVEN, with each check's evidence and what blocked it",
+    "stops_when": "every required check has a status; the verdict is reported; Lystiger merges and deploys",
+    "authority": "reports only; Lystiger merges to main and deploys to production"
+  },
   "researcher": {
     "purpose": "Watch the dependencies and tools we use, and report dated, sourced findings for planning upgrades and design references.",
     "scope": [

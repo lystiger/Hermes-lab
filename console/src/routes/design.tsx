@@ -2,7 +2,10 @@ import React, { useEffect, useState } from 'react';
 import { Card } from '../components/Card';
 import { PageHeader } from '../components/PageHeader';
 
-/** The design boards for a project, read from the manifest the design build writes. Read-only. */
+/**
+ * The design boards for a project. Choosing a direction records it as a human decision in LysStack,
+ * through the Hermes API. The page only shows boards and asks for the choice; it does not act on it.
+ */
 
 export interface DesignDirection {
   id: string;
@@ -20,12 +23,27 @@ export interface DesignManifest {
   decision_note: string;
 }
 
+interface CurrentDecision {
+  direction: string | null;
+  label: string;
+  reason: string;
+  date: string | null;
+}
+
 const BASE = '/design/unigreen';
+const API = import.meta.env.VITE_LYSSTACK_API_URL || 'http://localhost:8000';
+const MIN_REASON = 10;
 
 export const DesignRoute: React.FC = () => {
   const [manifest, setManifest] = useState<DesignManifest | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
+  const [chosen, setChosen] = useState<CurrentDecision | null>(null);
+  const [apiOk, setApiOk] = useState(false);
+  const [pending, setPending] = useState<string | null>(null);
+  const [reason, setReason] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
 
   useEffect(() => {
     fetch(`${BASE}/manifest.json`)
@@ -38,35 +56,106 @@ export const DesignRoute: React.FC = () => {
         setSelected(m.directions[0]?.id ?? null);
       })
       .catch((e: Error) => setError(e.message));
+
+    fetch(`${API}/design/unigreen/decision`)
+      .then((r) => {
+        if (!r.ok) throw new Error(String(r.status));
+        return r.json() as Promise<{ decision: CurrentDecision | null }>;
+      })
+      .then((body) => {
+        setChosen(body.decision);
+        setApiOk(true);
+      })
+      .catch(() => setApiOk(false));
   }, []);
 
   const current = manifest?.directions.find((d) => d.id === selected) ?? null;
+  const pendingLabel = manifest?.directions.find((d) => d.id === pending)?.label ?? '';
+
+  async function confirm() {
+    if (!pending || reason.trim().length < MIN_REASON) return;
+    setSaving(true);
+    setSaveError(null);
+    try {
+      const response = await fetch(`${API}/design/unigreen/decision`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ direction: pending, reason: reason.trim() }),
+      });
+      if (!response.ok) {
+        const body = (await response.json().catch(() => ({}))) as { detail?: string };
+        throw new Error(body.detail ?? `request failed (${response.status})`);
+      }
+      setChosen({ direction: pending, label: pendingLabel, reason: reason.trim(), date: null });
+      setPending(null);
+      setReason('');
+    } catch (e) {
+      setSaveError((e as Error).message);
+    } finally {
+      setSaving(false);
+    }
+  }
 
   return (
     <>
       <PageHeader title="Design" subtitle={manifest ? `${manifest.project} · generated ${manifest.generated}` : 'Unigreen'} />
       <div className="flex flex-col gap-4 p-4 md:p-6">
         {error && <div role="alert" className="text-[13px] text-lys-status-danger">Design boards are not available: {error}</div>}
+        {!apiOk && manifest && (
+          <div className="text-[12px] text-lys-muted">The Hermes API is not reachable, so a choice cannot be recorded right now.</div>
+        )}
         {manifest && (
           <>
-            <div className="text-[12px] text-lys-muted">
-              {manifest.decision ? `Chosen: ${manifest.decision}` : 'No direction chosen yet.'} {manifest.decision_note}
+            <div className="text-[13px] text-lys-primary">
+              {chosen ? `Chosen: ${chosen.label}. Reason: ${chosen.reason}` : 'No direction chosen yet.'}
             </div>
 
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
               {manifest.directions.map((d) => {
                 const active = d.id === selected;
+                const isChosen = chosen?.direction === d.id;
                 return (
-                  <button key={d.id} type="button" aria-pressed={active} onClick={() => setSelected(d.id)}
-                    className={`flex flex-col gap-2 rounded border p-2 text-left ${active ? 'border-lys-strong' : 'border-lys-subtle hover:border-lys-default'}`}>
-                    <span className="h-40 overflow-hidden rounded bg-lys-surface-1">
-                      <img src={`${BASE}/${d.detail}`} alt="" className="w-full object-cover object-top" loading="lazy" />
-                    </span>
-                    <span className="text-[13px] text-lys-primary">{d.label}</span>
-                  </button>
+                  <div key={d.id} className={`flex flex-col gap-2 rounded border p-2 ${active ? 'border-lys-strong' : 'border-lys-subtle'}`}>
+                    <button type="button" aria-pressed={active} onClick={() => setSelected(d.id)} className="flex flex-col gap-2 text-left">
+                      <span className="h-40 overflow-hidden rounded bg-lys-surface-1">
+                        <img src={`${BASE}/${d.detail}`} alt="" className="w-full object-cover object-top" loading="lazy" />
+                      </span>
+                      <span className="text-[13px] text-lys-primary">{d.label}</span>
+                    </button>
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-[12px] text-lys-muted">{isChosen ? 'Chosen' : 'Not chosen'}</span>
+                      <button type="button" disabled={!apiOk || saving || isChosen}
+                        onClick={() => { setPending(d.id); setReason(''); setSaveError(null); }}
+                        className="rounded border border-lys-subtle px-2 py-1 text-[12px] text-lys-primary disabled:opacity-40">
+                        Choose this direction
+                      </button>
+                    </div>
+                  </div>
                 );
               })}
             </div>
+
+            {pending && (
+              <Card as="section" label={`Choose ${pendingLabel}`} bodyClassName="p-4 flex flex-col gap-3">
+                <p className="text-[13px] text-lys-primary">
+                  This is recorded in LysStack as your decision. Write why, in at least {MIN_REASON} characters.
+                </p>
+                <label className="flex flex-col gap-1 text-[12px] text-lys-muted">
+                  Reason
+                  <textarea value={reason} onChange={(e) => setReason(e.target.value)} rows={3}
+                    className="rounded border border-lys-default bg-lys-surface-0 p-2 text-[13px] text-lys-primary" />
+                </label>
+                {saveError && <div role="alert" className="text-[12px] text-lys-status-danger">{saveError}</div>}
+                <div className="flex gap-2">
+                  <button type="button" onClick={() => void confirm()} disabled={saving || reason.trim().length < MIN_REASON}
+                    className="rounded border border-lys-strong px-3 py-1.5 text-[13px] text-lys-primary disabled:opacity-40">
+                    {saving ? 'Recording…' : 'Confirm choice'}
+                  </button>
+                  <button type="button" onClick={() => setPending(null)}
+                    className="rounded border border-lys-subtle px-3 py-1.5 text-[13px] text-lys-muted">Cancel</button>
+                </div>
+              </Card>
+            )}
 
             {current && (
               <Card as="section" label={current.label} bodyClassName="p-0">

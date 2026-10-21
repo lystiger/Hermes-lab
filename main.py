@@ -26,6 +26,7 @@ from runtime.storage.config import init_storage_lifespan, get_global_event_store
 from runner.backends.execution_registry import build_execution_snapshot, default_execution_registry
 from runner.backends.events import ExecutionEvent
 from orchestrator.api import router as orchestrator_router
+from design_decision.api import router as design_router
 
 
 @asynccontextmanager
@@ -78,6 +79,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="Hermes Runtime", version="0.1.0", lifespan=lifespan)
 app.include_router(orchestrator_router)
+app.include_router(design_router)
 
 # Allow local frontend origins
 # Browser origins allowed to call Hermes. Hermes has no authentication, so this is an explicit

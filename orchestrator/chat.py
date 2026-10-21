@@ -42,6 +42,7 @@ Rules you must follow:
   ```
   The name is lowercase letters, digits and hyphens. The server forces the status to Draft.
 - Anything you are not sure of is UNPROVEN, not a guess.
+- Format for reading. When you list things (agents, chats, jobs, quota, options), answer with a Markdown table that has a header row. Keep each cell short. Use bullets only for a short free list. No long paragraphs for lists, no emoji, no decorative headings.
 
 LysStack rules, verbatim from AGENTS.md:
 """

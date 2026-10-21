@@ -1,0 +1,104 @@
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { MemoryRouter } from 'react-router-dom';
+import { DesignRoute } from '../routes/design';
+
+const manifest = {
+  project: 'unigreen', generated: '2026-10-21', sheet: 'sheet.png', contrast: 'contrast.json',
+  directions: [
+    { id: 'a-family-fresh', label: 'A · Family fresh', detail: 'detail-a-family-fresh.png' },
+    { id: 'b-clean-eco', label: 'B · Clean eco', detail: 'detail-b-clean-eco.png' },
+  ],
+  decision: null, decision_note: 'Nothing is chosen until then.',
+};
+
+function mockFetch({ decision = null as Record<string, string> | null, post = { ok: true, status: 201, json: async () => ({}) } } = {}) {
+  const fn = vi.fn(async (url: string, init?: RequestInit) => {
+    if (url.endsWith('/manifest.json')) return { ok: true, status: 200, json: async () => manifest };
+    if (init?.method === 'POST') return post;
+    return { ok: true, status: 200, json: async () => ({ decision, directions: [] }) };
+  });
+  vi.stubGlobal('fetch', fn);
+  return fn;
+}
+
+afterEach(() => {
+  cleanup();
+  vi.unstubAllGlobals();
+});
+
+describe('choosing a design direction', () => {
+  it('records a choice with its reason, and shows it as chosen', async () => {
+    const fetchMock = mockFetch();
+    render(<MemoryRouter><DesignRoute /></MemoryRouter>);
+    fireEvent.click((await screen.findAllByRole('button', { name: 'Choose this direction' }))[1]);
+
+    fireEvent.change(screen.getByRole('textbox', { name: 'Reason' }), { target: { value: 'Clear for buyers and calm.' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Confirm choice' }));
+
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Show the boards' })).toBeInTheDocument());
+    const post = fetchMock.mock.calls.find(([, init]) => init?.method === 'POST');
+    expect(JSON.parse(String(post![1]!.body))).toEqual({ direction: 'b-clean-eco', reason: 'Clear for buyers and calm.' });
+  });
+
+  it('locks the other directions once one is chosen, until the choice is changed', async () => {
+    mockFetch({ decision: { direction: 'a-family-fresh', label: 'A · Family fresh', reason: 'Already decided here.', date: '2026-10-21' } });
+    render(<MemoryRouter><DesignRoute /></MemoryRouter>);
+    fireEvent.click(await screen.findByRole('button', { name: 'Show the boards' }));
+    const buttons = await screen.findAllByRole('button', { name: 'Choose this direction' });
+
+    expect(buttons.every((b) => b.hasAttribute('disabled'))).toBe(true);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Change decision' }));
+
+    expect(screen.getAllByRole('button', { name: 'Choose this direction' })[1]).toBeEnabled();
+  });
+
+  it('waits for the next design task after a choice, and the boards stay one click away', async () => {
+    mockFetch({ decision: { direction: 'b-clean-eco', label: 'B · Clean eco', reason: 'Decided already.', date: '2026-10-21' } });
+    render(<MemoryRouter><DesignRoute /></MemoryRouter>);
+
+    expect(await screen.findByText(/Waiting for the next design task/)).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Choose this direction' })).toBeNull();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Show the boards' }));
+
+    await waitFor(() => expect(screen.getAllByRole('button', { name: 'Choose this direction' })).toHaveLength(2));
+
+    fireEvent.click(screen.getByRole('button', { name: '← Back to decision' }));
+
+    expect(await screen.findByText(/Waiting for the next design task/)).toBeInTheDocument();
+  });
+
+  it('keeps Confirm off until the reason is long enough', async () => {
+    mockFetch();
+    render(<MemoryRouter><DesignRoute /></MemoryRouter>);
+    fireEvent.click((await screen.findAllByRole('button', { name: 'Choose this direction' }))[0]);
+
+    fireEvent.change(screen.getByRole('textbox', { name: 'Reason' }), { target: { value: 'short' } });
+
+    expect(screen.getByRole('button', { name: 'Confirm choice' })).toBeDisabled();
+  });
+
+  it('shows the server refusal instead of pretending it worked', async () => {
+    mockFetch({ post: { ok: false, status: 400, json: async () => ({ detail: 'already the chosen direction' }) } });
+    render(<MemoryRouter><DesignRoute /></MemoryRouter>);
+    fireEvent.click((await screen.findAllByRole('button', { name: 'Choose this direction' }))[0]);
+    fireEvent.change(screen.getByRole('textbox', { name: 'Reason' }), { target: { value: 'A long enough reason.' } });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Confirm choice' }));
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('already the chosen direction');
+  });
+
+  it('disables choosing when the API is down, and says why', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url.endsWith('/manifest.json')) return { ok: true, status: 200, json: async () => manifest };
+      throw new Error('network down');
+    }));
+    render(<MemoryRouter><DesignRoute /></MemoryRouter>);
+
+    expect(await screen.findByText(/Hermes API is not reachable/)).toBeInTheDocument();
+    expect(screen.getAllByRole('button', { name: 'Choose this direction' })[0]).toBeDisabled();
+  });
+});

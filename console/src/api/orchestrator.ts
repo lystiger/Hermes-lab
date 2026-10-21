@@ -3,6 +3,8 @@
  * cancels a run, so this client has none either.
  */
 
+import type { ChatUsage } from '../features/comms/contextUsage';
+
 const apiUrl = import.meta.env.VITE_LYSSTACK_API_URL || 'http://localhost:8000';
 
 export interface OrchestratorOptions {
@@ -24,6 +26,9 @@ export interface OrchestratorConversation {
   system_commit: string;
   created: string;
   messages: OrchestratorMessage[];
+  usage?: ChatUsage | null;
+  summary?: string | null;
+  summary_upto?: number;
 }
 
 export type OrchestratorConversationSummary = Omit<OrchestratorConversation, 'messages'>;
@@ -64,6 +69,8 @@ export const orchestratorApi = {
   deleteConversation: async (id: string): Promise<void> => {
     await request<void>(`/orchestrator/conversations/${id}`, { method: 'DELETE' });
   },
+  compactConversation: (id: string) =>
+    request<OrchestratorConversationSummary>(`/orchestrator/conversations/${id}/compact`, { method: 'POST' }),
   sendMessage: (id: string, content: string) =>
     request<OrchestratorMessage>(`/orchestrator/conversations/${id}/messages`, {
       method: 'POST',

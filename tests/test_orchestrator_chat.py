@@ -1,3 +1,4 @@
+import json
 import subprocess
 
 import pytest
@@ -13,16 +14,21 @@ from orchestrator.chat import (
 
 
 class FakeProvider:
-    def __init__(self, reply="ok", error=None):
+    def __init__(self, reply="ok", error=None, title="A short title", usage=None):
         self.reply_text = reply
+        self.title_text = title
         self.error = error
+        self.usage = usage or {"context_tokens": 1200, "cache_read_tokens": 1000, "cache_creation_tokens": 200,
+                               "output_tokens": 5, "context_window": 1000000}
         self.calls = []
 
     def reply(self, system_prompt, messages, model, effort):
         self.calls.append({"system": system_prompt, "messages": list(messages), "model": model, "effort": effort})
         if self.error:
             raise self.error
-        return self.reply_text
+        # The title call uses its own system prompt; everything else is a chat or compact reply.
+        text = self.title_text if system_prompt == chat_module.TITLE_RULES else self.reply_text
+        return chat_module.ChatReply(text=text, usage=self.usage)
 
 
 @pytest.fixture
@@ -149,11 +155,19 @@ def test_claude_provider_runs_with_no_tools_and_no_repository(monkeypatch):
     def fake_run(argv, **kwargs):
         seen["argv"] = argv
         seen["cwd"] = kwargs["cwd"]
-        return subprocess.CompletedProcess(argv, 0, stdout="answer\n", stderr="")
+        payload = {"result": "answer", "is_error": False,
+                   "usage": {"input_tokens": 2, "cache_read_input_tokens": 3024, "cache_creation_input_tokens": 505,
+                             "output_tokens": 4},
+                   "modelUsage": {"claude-opus-5-5": {"contextWindow": 1000000}}}
+        return subprocess.CompletedProcess(argv, 0, stdout=json.dumps(payload), stderr="")
 
     monkeypatch.setattr(chat_module.subprocess, "run", fake_run)
 
-    text = ClaudeChatProvider().reply("SYS", [{"role": "user", "content": "hi"}], "claude-opus-5-5", "low")
+    reply = ClaudeChatProvider().reply("SYS", [{"role": "user", "content": "hi"}], "claude-opus-5-5", "low")
+    text = reply.text
+    assert reply.usage["context_tokens"] == 2 + 3024 + 505
+    assert reply.usage["context_window"] == 1000000
+    assert "--output-format" in seen["argv"]
 
     argv = seen["argv"]
     assert text == "answer"
@@ -244,3 +258,89 @@ def test_api_renames_and_deletes_a_chat(chat, monkeypatch):
     assert client.get(url).status_code == 404
     assert client.delete(url).status_code == 404
     assert client.patch("/orchestrator/conversations/aaaaaaaaaaaa", json={"title": "x"}).status_code == 404
+
+
+def test_a_new_chat_is_named_from_its_first_reply(chat):
+    orchestrator = chat(FakeProvider(title='"Inquiry review plan"\nextra line'))
+    conversation = orchestrator.start("claude-sonnet-5-5", None)
+
+    orchestrator.send(conversation["id"], "Plan the inquiry review workspace")
+
+    assert orchestrator.store.get(conversation["id"])["title"] == "Inquiry review plan"
+
+
+def test_a_failed_title_call_falls_back_to_the_first_words(chat):
+    class TitleFails(FakeProvider):
+        def reply(self, system_prompt, messages, model, effort):
+            if system_prompt == chat_module.TITLE_RULES:
+                raise ChatError("title call failed")
+            return super().reply(system_prompt, messages, model, effort)
+
+    orchestrator = chat(TitleFails())
+    conversation = orchestrator.start("claude-sonnet-5-5", None)
+
+    orchestrator.send(conversation["id"], "one two three four five six seven eight")
+
+    assert orchestrator.store.get(conversation["id"])["title"] == "one two three four five six"
+
+
+def test_a_renamed_chat_keeps_its_name(chat):
+    orchestrator = chat(FakeProvider())
+    conversation = orchestrator.start("claude-sonnet-5-5", None, "My name")
+
+    orchestrator.send(conversation["id"], "hello")
+
+    assert orchestrator.store.get(conversation["id"])["title"] == "My name"
+
+
+def test_the_last_call_usage_is_saved_on_the_chat(chat):
+    orchestrator = chat(FakeProvider())
+    conversation = orchestrator.start("claude-sonnet-5-5", None)
+
+    orchestrator.send(conversation["id"], "hello")
+
+    assert orchestrator.store.get(conversation["id"])["usage"]["context_tokens"] == 1200
+
+
+def test_compact_summarizes_and_later_turns_send_the_summary_and_newer_messages(chat):
+    provider = FakeProvider(reply="reply text")
+    orchestrator = chat(provider)
+    conversation = orchestrator.start("claude-sonnet-5-5", None, "Chat")
+    orchestrator.send(conversation["id"], "first question")
+    provider.reply_text = "Goal: plan the review. Decided: use a table."
+
+    result = orchestrator.compact(conversation["id"])
+
+    assert result["summary"] == "Goal: plan the review. Decided: use a table."
+    assert result["summary_upto"] == 2
+    provider.reply_text = "next"
+    orchestrator.send(conversation["id"], "second question")
+    sent = provider.calls[-1]["messages"]
+    assert sent[0]["content"].startswith("Summary of the earlier conversation:")
+    assert [m["content"] for m in sent[1:]] == ["second question"]
+
+
+def test_compact_needs_something_new(chat):
+    orchestrator = chat(FakeProvider())
+    conversation = orchestrator.start("claude-sonnet-5-5", None)
+    orchestrator.send(conversation["id"], "hello")
+    orchestrator.compact(conversation["id"])
+
+    with pytest.raises(ChatError, match="nothing new"):
+        orchestrator.compact(conversation["id"])
+
+
+def test_api_compacts_a_chat_and_reports_unknown_ids(chat, monkeypatch):
+    from fastapi.testclient import TestClient
+
+    import main
+    from orchestrator import api
+
+    orchestrator = chat(FakeProvider(reply="reply"))
+    monkeypatch.setattr(api, "get_chat", lambda: orchestrator)
+    client = TestClient(main.app)
+    conversation = client.post("/orchestrator/conversations", json={"model": "claude-sonnet-5-5"}).json()
+    client.post(f"/orchestrator/conversations/{conversation['id']}/messages", json={"content": "hi"})
+
+    assert client.post(f"/orchestrator/conversations/{conversation['id']}/compact").status_code == 200
+    assert client.post("/orchestrator/conversations/aaaaaaaaaaaa/compact").status_code == 404

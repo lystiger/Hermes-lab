@@ -3,6 +3,7 @@ import { orchestratorApi, OrchestratorConversation, OrchestratorConversationSumm
 import { ChatSidebar } from '../features/comms/ChatSidebar';
 import { ChatThread } from '../features/comms/ChatThread';
 import { Composer } from '../features/comms/Composer';
+import { contextView } from '../features/comms/contextUsage';
 
 const DEFAULT_MODEL = 'claude-sonnet-5-5';
 
@@ -20,12 +21,15 @@ export const CommsRoute: React.FC = () => {
   const [draft, setDraft] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [compacting, setCompacting] = useState(false);
 
   const claude = options?.providers.find((p) => p.id === 'claude');
   const models = claude?.models ?? [DEFAULT_MODEL];
   const efforts = claude?.efforts ?? [];
   const shownModel = selected?.model ?? model;
   const shownEffort = selected ? selected.effort ?? '' : effort;
+  const meter = contextView(selected?.usage);
+  const canCompact = !!selected && selected.messages.length - (selected.summary_upto ?? 0) >= 2 && !busy && !compacting;
 
   const refreshList = () =>
     orchestratorApi.listConversations().then(setConversations).catch((e: Error) => setError(e.message));
@@ -95,6 +99,20 @@ export const CommsRoute: React.FC = () => {
     }
   };
 
+  const compact = async () => {
+    if (!selected || !canCompact) return;
+    setCompacting(true);
+    setError(null);
+    try {
+      const result = await orchestratorApi.compactConversation(selected.id);
+      setSelected({ ...selected, ...result });
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setCompacting(false);
+    }
+  };
+
   const rename = async (id: string, title: string) => {
     setError(null);
     try {
@@ -139,6 +157,17 @@ export const CommsRoute: React.FC = () => {
               className="rounded bg-lys-surface-1 p-1 text-[12px] text-lys-primary">
               {models.map((m) => <option key={m} value={m}>{m}</option>)}
             </select>
+            {meter && (
+              <span className={`text-[11px] whitespace-nowrap ${meter.level === 'high' ? 'text-lys-status-danger' : meter.level === 'warn' ? 'text-lys-status-warning' : 'text-lys-faint'}`}
+                title="Tokens used by the last reply, from the model's own count">
+                {meter.label}
+              </span>
+            )}
+            {selected?.summary && <span className="text-[11px] text-lys-faint whitespace-nowrap">Earlier messages summarized</span>}
+            <button type="button" onClick={() => void compact()} disabled={!canCompact}
+              className="rounded border border-lys-subtle px-2 py-1 text-[12px] text-lys-primary disabled:opacity-40">
+              {compacting ? 'Compacting…' : 'Compact'}
+            </button>
             <label className="sr-only" htmlFor="comms-effort">Reasoning effort</label>
             <select id="comms-effort" value={shownEffort} onChange={(e) => void changeEffort(e.target.value)}
               className="rounded bg-lys-surface-1 p-1 text-[12px] text-lys-primary">
@@ -162,6 +191,18 @@ export const CommsRoute: React.FC = () => {
           </div>
         ) : (
           <ChatThread messages={selected?.messages ?? []} busy={busy} />
+        )}
+
+        {meter && meter.level !== 'ok' && (
+          <div role="status" className={`mx-auto mb-2 flex w-full max-w-3xl items-center justify-between gap-3 rounded border px-3 py-2 text-[12px] ${meter.level === 'high' ? 'border-lys-status-danger text-lys-status-danger' : 'border-lys-subtle text-lys-status-warning'}`}>
+            <span>
+              {meter.level === 'high'
+                ? `Context is ${meter.percent}% full. Compact now so the next reply stays fast and cheap.`
+                : `Context is ${meter.percent}% full. Compacting keeps replies fast and cheap.`}
+            </span>
+            <button type="button" onClick={() => void compact()} disabled={!canCompact}
+              className="shrink-0 rounded border border-lys-subtle px-2 py-0.5 text-lys-primary disabled:opacity-40">Compact</button>
+          </div>
         )}
 
         <Composer value={draft} busy={busy} onChange={setDraft} onSend={() => void send()} />

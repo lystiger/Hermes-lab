@@ -14,10 +14,13 @@ import subprocess
 import tempfile
 import time
 import uuid
+from dataclasses import dataclass, field
 from pathlib import Path
 
 CLAUDE_MODELS = ("claude-sonnet-5-5", "claude-opus-5-5", "claude-haiku-5-5")
 EFFORT_LEVELS = ("low", "medium", "high", "xhigh", "max")
+TITLE_MODEL = "claude-haiku-5-5"
+DEFAULT_TITLE = "New orchestrator chat"
 DRAFT_NAME = re.compile(r"^[a-z0-9][a-z0-9-]{0,60}\.md$")
 DRAFT_BLOCK = re.compile(r"```brief-draft\s+path=(\S+)\n(.*?)\n```", re.DOTALL)
 STATUS_LINE = re.compile(r"^- \*\*Status:\*\*.*$", re.MULTILINE)
@@ -40,9 +43,39 @@ Rules you must follow:
 LysStack rules, verbatim from AGENTS.md:
 """
 
+TITLE_RULES = "Write a short title of three to six words for this conversation. Reply with the title only, no quotes."
+
+COMPACT_RULES = (
+    "Summarize this conversation so it can continue later with less context. Keep the goal, "
+    "decisions made, brief drafts and their names, open questions, and what Lystiger asked for last. "
+    "Under 400 words. Reply with the summary only."
+)
+
 
 class ChatError(RuntimeError):
     """A chat request cannot be served."""
+
+
+@dataclass
+class ChatReply:
+    text: str
+    usage: dict = field(default_factory=dict)
+
+
+def _usage_from(payload):
+    """The context a call used, from the CLI's usage and modelUsage fields."""
+    usage = payload.get("usage") or {}
+    model_usage = next(iter((payload.get("modelUsage") or {}).values()), {})
+    cache_read = usage.get("cache_read_input_tokens", 0)
+    cache_creation = usage.get("cache_creation_input_tokens", 0)
+    return {
+        "context_tokens": usage.get("input_tokens", 0) + cache_read + cache_creation,
+        "cache_read_tokens": cache_read,
+        "cache_creation_tokens": cache_creation,
+        "output_tokens": usage.get("output_tokens", 0),
+        "context_window": model_usage.get("contextWindow"),
+        "measured_at": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
+    }
 
 
 class ClaudeChatProvider:
@@ -63,6 +96,7 @@ class ClaudeChatProvider:
             "--dangerously-skip-permissions",
             "--tools", "",
             "--no-session-persistence",
+            "--output-format", "json",
             "--model", model,
             "--system-prompt", system_prompt,
         ]
@@ -79,7 +113,13 @@ class ClaudeChatProvider:
                 raise ChatError("model did not answer in time") from exc
         if result.returncode != 0:
             raise ChatError(f"model call failed: {result.stderr.strip()[:300]}")
-        return result.stdout.strip()
+        try:
+            payload = json.loads(result.stdout)
+        except json.JSONDecodeError as exc:
+            raise ChatError("model returned an unreadable answer") from exc
+        if payload.get("is_error"):
+            raise ChatError(f"model call failed: {str(payload.get('result', ''))[:300]}")
+        return ChatReply(text=str(payload.get("result", "")).strip(), usage=_usage_from(payload))
 
 
 def write_drafts(reply, drafts_dir):
@@ -101,6 +141,18 @@ def write_drafts(reply, drafts_dir):
     return written
 
 
+def clean_title(text, fallback):
+    """A model's title, made safe for a list: one line, no quotes, short."""
+    first = (text or "").strip().splitlines()[0] if (text or "").strip() else ""
+    title = first.strip().strip('"\'`*#').strip()[:60].strip()
+    return title or fallback
+
+
+def fallback_title(message):
+    words = message.split()
+    return " ".join(words[:6])[:60] or DEFAULT_TITLE
+
+
 class ConversationStore:
     """One JSON file per conversation, kept outside the repository."""
 
@@ -116,12 +168,15 @@ class ConversationStore:
         self.root.mkdir(parents=True, exist_ok=True)
         conversation = {
             "id": uuid.uuid4().hex[:12],
-            "title": title or "New orchestrator chat",
+            "title": title or DEFAULT_TITLE,
             "model": model,
             "effort": effort,
             "system_commit": system_commit,
             "created": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
             "messages": [],
+            "usage": None,
+            "summary": None,
+            "summary_upto": 0,
         }
         self.save(conversation)
         return conversation
@@ -171,6 +226,14 @@ class OrchestratorChat:
         except OSError:
             return "unknown"
 
+    def prompt_messages(self, conversation):
+        """What the model sees: the summary of older messages, then the newer messages."""
+        newer = conversation["messages"][conversation.get("summary_upto", 0):]
+        if not conversation.get("summary"):
+            return newer
+        summary = {"role": "user", "content": "Summary of the earlier conversation:\n" + conversation["summary"]}
+        return [summary] + newer
+
     def start(self, model, effort, title=None):
         if model not in CLAUDE_MODELS:
             raise ChatError(f"model must be one of {', '.join(CLAUDE_MODELS)}")
@@ -205,15 +268,41 @@ class OrchestratorChat:
         if not content:
             raise ChatError("message is empty")
         conversation = self.store.get(conversation_id)
+        first_message = not conversation["messages"]
         conversation["messages"].append({"role": "user", "content": content, "at": time.strftime("%Y-%m-%dT%H:%M:%S%z")})
         self.store.save(conversation)
-        reply = self.provider.reply(self.system_prompt(), conversation["messages"],
-                                    conversation["model"], conversation["effort"])
-        drafts = write_drafts(reply, self.drafts_dir)
-        conversation["messages"].append({"role": "assistant", "content": reply, "drafts": drafts,
+        result = self.provider.reply(self.system_prompt(), self.prompt_messages(conversation),
+                                     conversation["model"], conversation["effort"])
+        drafts = write_drafts(result.text, self.drafts_dir)
+        conversation["usage"] = result.usage or None
+        conversation["messages"].append({"role": "assistant", "content": result.text, "drafts": drafts,
                                          "at": time.strftime("%Y-%m-%dT%H:%M:%S%z")})
+        if first_message and conversation["title"] == DEFAULT_TITLE:
+            conversation["title"] = self._auto_title(content)
         self.store.save(conversation)
         return conversation["messages"][-1]
+
+    def _auto_title(self, first_message):
+        """Name a new chat from its first message. Falls back to the first words if the call fails."""
+        try:
+            titled = self.provider.reply(TITLE_RULES, [{"role": "user", "content": first_message}], TITLE_MODEL, None)
+            return clean_title(titled.text, fallback_title(first_message))
+        except ChatError:
+            return fallback_title(first_message)
+
+    def compact(self, conversation_id):
+        """Summarize everything so far, so later turns send the summary instead of the full history."""
+        conversation = self.store.get(conversation_id)
+        if len(conversation["messages"]) <= conversation.get("summary_upto", 0):
+            raise ChatError("nothing new to compact")
+        transcript = "\n\n".join(f"{m['role'].upper()}: {m['content']}" for m in self.prompt_messages(conversation))
+        result = self.provider.reply(COMPACT_RULES, [{"role": "user", "content": transcript}],
+                                     conversation["model"], None)
+        conversation["summary"] = result.text
+        conversation["summary_upto"] = len(conversation["messages"])
+        conversation["usage"] = None
+        self.store.save(conversation)
+        return {k: v for k, v in conversation.items() if k != "messages"}
 
 
 def default_state_dir():

@@ -102,6 +102,16 @@ def delete_conversation(conversation_id: str):
     return Response(status_code=204)
 
 
+@router.post("/conversations/{conversation_id}/compact")
+def compact_conversation(conversation_id: str):
+    try:
+        return get_chat().compact(conversation_id)
+    except ChatError as exc:
+        if str(exc) == "unknown conversation":
+            raise HTTPException(status_code=404, detail=str(exc))
+        _fail(exc)
+
+
 @router.post("/conversations/{conversation_id}/messages", status_code=201)
 def send_message(conversation_id: str, body: NewMessage):
     try:

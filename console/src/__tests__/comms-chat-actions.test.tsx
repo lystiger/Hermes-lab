@@ -10,6 +10,7 @@ const api = vi.hoisted(() => ({
   sendMessage: vi.fn(),
   updateConversation: vi.fn(),
   deleteConversation: vi.fn(),
+  compactConversation: vi.fn(),
 }));
 
 vi.mock('../api/orchestrator', () => ({ orchestratorApi: api }));
@@ -123,5 +124,19 @@ describe('Comms chat actions', () => {
 
     await waitFor(() => expect(api.updateConversation).toHaveBeenCalledWith('abc123def456', { model: 'claude-opus-5-5' }));
     expect(within(screen.getByRole('log', { name: 'Messages' })).getByText('plan it')).toBeInTheDocument();
+  });
+
+  it('warns when the context is nearly full and compacts from the warning', async () => {
+    api.getConversation.mockResolvedValue({
+      ...chat,
+      usage: { context_tokens: 900_000, cache_read_tokens: 800_000, cache_creation_tokens: 0, output_tokens: 5, context_window: 1_000_000 },
+    });
+    api.compactConversation.mockResolvedValue({ ...summary, summary: 'Goal: plan', summary_upto: 2 });
+    await openOldChat();
+
+    expect(await screen.findByText(/Context is 90% full/)).toBeInTheDocument();
+    fireEvent.click(screen.getAllByRole('button', { name: 'Compact' })[0]);
+
+    await waitFor(() => expect(api.compactConversation).toHaveBeenCalledWith('abc123def456'));
   });
 });

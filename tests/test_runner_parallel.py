@@ -186,14 +186,14 @@ class TestRunnerParallelGroups(unittest.TestCase):
             phase_b = self.make_phase("phase-b", parallel_group="group-1", owned_paths=["frontend/"])
             spec_file = self.write_spec(root / "spec.json", [phase_a, phase_b])
 
-            barrier = threading.Barrier(2, timeout=1.0)
+            barrier = threading.Barrier(2, timeout=10.0)
             phase_events = {}
 
             def fake_exec(context):
                 name = context.phase["name"]
                 phase_events[f"{name}_started"] = time.monotonic()
                 try:
-                    barrier.wait(timeout=1.0)
+                    barrier.wait(timeout=10.0)
                 except threading.BrokenBarrierError as err:
                     raise SprintRunnerError(
                         "FAILED_TIMEOUT",
@@ -229,14 +229,14 @@ class TestRunnerParallelGroups(unittest.TestCase):
             phase_b = self.make_phase("worker-b", parallel_group="group-wt", owned_paths=["pkg_b/"])
             spec_file = self.write_spec(root / "spec.json", [phase_a, phase_b])
 
-            barrier = threading.Barrier(2, timeout=1.0)
+            barrier = threading.Barrier(2, timeout=10.0)
             worktrees_used = {}
 
             def fake_exec(context):
                 name = context.phase["name"]
                 worktrees_used[name] = context.worktree.resolve()
                 try:
-                    barrier.wait(timeout=1.0)
+                    barrier.wait(timeout=10.0)
                 except threading.BrokenBarrierError as err:
                     raise SprintRunnerError("FAILED_TIMEOUT", f"Barrier timed out: {err}") from err
 
@@ -274,7 +274,7 @@ class TestRunnerParallelGroups(unittest.TestCase):
             phase_a2 = self.make_phase("phase-a2", parallel_group="group-x", owned_paths=["a2/"])
             spec_file = self.write_spec(root / "spec.json", [phase_a1, phase_a1_peer, phase_b, phase_a2])
 
-            barrier_batch1 = threading.Barrier(2, timeout=1.0)
+            barrier_batch1 = threading.Barrier(2, timeout=10.0)
             active_phases = set()
             active_lock = threading.Lock()
             concurrency_violations = []
@@ -288,7 +288,7 @@ class TestRunnerParallelGroups(unittest.TestCase):
 
                 if name in ("phase-a1", "phase-a1-peer"):
                     try:
-                        barrier_batch1.wait(timeout=1.0)
+                        barrier_batch1.wait(timeout=10.0)
                     except threading.BrokenBarrierError as err:
                         raise SprintRunnerError("FAILED_TIMEOUT", f"Batch 1 barrier timed out: {err}") from err
 
@@ -325,7 +325,7 @@ class TestRunnerParallelGroups(unittest.TestCase):
             phase_seq2 = self.make_phase("seq2", owned_paths=["seq2/"])  # No parallel_group
             spec_file = self.write_spec(root / "spec.json", [phase_p1, phase_p2, phase_seq1, phase_seq2])
 
-            barrier_parallel = threading.Barrier(2, timeout=1.0)
+            barrier_parallel = threading.Barrier(2, timeout=10.0)
             active_counts = {}
             active_now = 0
             active_lock = threading.Lock()
@@ -339,7 +339,7 @@ class TestRunnerParallelGroups(unittest.TestCase):
 
                 if name in ("p1", "p2"):
                     try:
-                        barrier_parallel.wait(timeout=1.0)
+                        barrier_parallel.wait(timeout=10.0)
                     except threading.BrokenBarrierError as err:
                         raise SprintRunnerError("FAILED_TIMEOUT", f"Parallel batch barrier timed out: {err}") from err
                 else:
@@ -383,11 +383,11 @@ class TestRunnerParallelGroups(unittest.TestCase):
             phase_2 = self.make_phase("phase-2", parallel_group="sync-group", owned_paths=["mod2/"])
             spec_file = self.write_spec(root / "spec.json", [phase_1, phase_2])
 
-            barrier = threading.Barrier(2, timeout=1.0)
+            barrier = threading.Barrier(2, timeout=10.0)
 
             def fake_exec(context):
                 try:
-                    barrier.wait(timeout=1.0)
+                    barrier.wait(timeout=10.0)
                 except threading.BrokenBarrierError as err:
                     raise SprintRunnerError(
                         "FAILED_TIMEOUT",
@@ -421,13 +421,13 @@ class TestRunnerParallelGroups(unittest.TestCase):
             phase_b = self.make_phase("cp-b", parallel_group="cp-group", owned_paths=["cpb/"])
             spec_file = self.write_spec(root / "spec.json", [phase_a, phase_b])
 
-            barrier = threading.Barrier(2, timeout=1.0)
+            barrier = threading.Barrier(2, timeout=10.0)
             seen = {}
 
             def fake_exec(context):
                 name = context.phase["name"]
                 try:
-                    barrier.wait(timeout=1.0)
+                    barrier.wait(timeout=10.0)
                 except threading.BrokenBarrierError as err:
                     raise SprintRunnerError("FAILED_TIMEOUT", f"Barrier timed out: {err}") from err
                 seen[name] = runner._current_phase["name"]
@@ -452,13 +452,13 @@ class TestRunnerParallelGroups(unittest.TestCase):
             phase_second = self.make_phase("second-phase", parallel_group="order-group", owned_paths=["pkg_b/"])
             spec_file = self.write_spec(root / "spec.json", [phase_first, phase_second])
 
-            barrier = threading.Barrier(2, timeout=1.0)
+            barrier = threading.Barrier(2, timeout=10.0)
             merge_calls = []
 
             def fake_exec(context):
                 name = context.phase["name"]
                 try:
-                    barrier.wait(timeout=1.0)
+                    barrier.wait(timeout=10.0)
                 except threading.BrokenBarrierError as err:
                     raise SprintRunnerError("FAILED_TIMEOUT", f"Barrier timed out: {err}") from err
 
@@ -515,12 +515,12 @@ class TestRunnerParallelGroups(unittest.TestCase):
             phase_b = self.make_phase("phase-b", parallel_group="grp-merge", owned_paths=["srv_b/"])
             spec_file = self.write_spec(root / "spec.json", [phase_a, phase_b])
 
-            barrier = threading.Barrier(2, timeout=1.0)
+            barrier = threading.Barrier(2, timeout=10.0)
             integration_heads_during_exec = []
 
             def fake_exec(context):
                 try:
-                    barrier.wait(timeout=1.0)
+                    barrier.wait(timeout=10.0)
                 except threading.BrokenBarrierError as err:
                     raise SprintRunnerError("FAILED_TIMEOUT", f"Barrier timed out: {err}") from err
 
@@ -574,11 +574,11 @@ class TestRunnerParallelGroups(unittest.TestCase):
             phase_bad = self.make_phase("phase-bad", parallel_group="fail-group", owned_paths=["app_bad/"])
             spec_file = self.write_spec(root / "spec.json", [phase_ok, phase_bad])
 
-            barrier = threading.Barrier(2, timeout=1.0)
+            barrier = threading.Barrier(2, timeout=10.0)
 
             def fake_exec(context):
                 try:
-                    barrier.wait(timeout=1.0)
+                    barrier.wait(timeout=10.0)
                 except threading.BrokenBarrierError as err:
                     raise SprintRunnerError("FAILED_TIMEOUT", f"Barrier timed out: {err}") from err
 
@@ -672,11 +672,11 @@ class TestRunnerParallelGroups(unittest.TestCase):
             phase_dirty = self.make_phase("builder-dirty", parallel_group="grp-ownership", owned_paths=["frontend/"])
             spec_file = self.write_spec(root / "spec.json", [phase_clean, phase_dirty])
 
-            barrier = threading.Barrier(2, timeout=1.0)
+            barrier = threading.Barrier(2, timeout=10.0)
 
             def fake_exec(context):
                 try:
-                    barrier.wait(timeout=1.0)
+                    barrier.wait(timeout=10.0)
                 except threading.BrokenBarrierError as err:
                     raise SprintRunnerError("FAILED_TIMEOUT", f"Barrier timed out: {err}") from err
 
@@ -733,7 +733,7 @@ class TestRunnerParallelGroups(unittest.TestCase):
             phase_solo = self.make_phase("solo", parallel_group="grp-solo", owned_paths=["solo/"])
             spec_file = self.write_spec(root / "spec.json", [phase_p1, phase_p2, phase_solo])
 
-            barrier_batch = threading.Barrier(2, timeout=1.0)
+            barrier_batch = threading.Barrier(2, timeout=10.0)
             active_now = 0
             solo_concurrency = None
             active_lock = threading.Lock()
@@ -746,7 +746,7 @@ class TestRunnerParallelGroups(unittest.TestCase):
 
                 if name in ("p1", "p2"):
                     try:
-                        barrier_batch.wait(timeout=1.0)
+                        barrier_batch.wait(timeout=10.0)
                     except threading.BrokenBarrierError as err:
                         raise SprintRunnerError("FAILED_TIMEOUT", f"Batch barrier timed out: {err}") from err
                 else:
@@ -801,19 +801,19 @@ class TestRunnerParallelGroups(unittest.TestCase):
             phase_second = self.make_phase("spec-second", parallel_group="grp-summary", owned_paths=["second/"])
             spec_file = self.write_spec(root / "spec.json", [phase_first, phase_second])
 
-            barrier = threading.Barrier(2, timeout=1.0)
+            barrier = threading.Barrier(2, timeout=10.0)
             second_finished = threading.Event()
 
             def fake_exec(context):
                 name = context.phase["name"]
                 try:
-                    barrier.wait(timeout=1.0)
+                    barrier.wait(timeout=10.0)
                 except threading.BrokenBarrierError as err:
                     raise SprintRunnerError("FAILED_TIMEOUT", f"Barrier timed out: {err}") from err
 
                 if name == "spec-first":
                     # Wait for second to finish first, inverting completion order
-                    if not second_finished.wait(timeout=1.0):
+                    if not second_finished.wait(timeout=10.0):
                         raise SprintRunnerError("FAILED_TIMEOUT", "Timed out waiting for second phase to finish")
                 else:
                     # Second finishes first

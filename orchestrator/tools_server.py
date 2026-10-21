@@ -17,6 +17,7 @@ from pathlib import Path
 
 from agent_models import canonical
 from orchestrator.chat import TOOL_NAMES, ChatError, ConversationStore, write_drafts
+from security.urls import checked_urlopen
 
 PROTOCOL_VERSION = "2024-11-05"
 MAX_READ_BYTES = 64 * 1024
@@ -174,7 +175,7 @@ class LysStackTools:
 
     def _get(self, path):
         try:
-            with urllib.request.urlopen(self.api + path, timeout=10) as response:
+            with checked_urlopen(self.api + path, timeout=10) as response:
                 return json.loads(response.read().decode("utf-8"))
         except (urllib.error.URLError, OSError, ValueError) as exc:
             raise ToolError(f"Hermes API unavailable: {exc}") from exc

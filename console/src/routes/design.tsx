@@ -21,6 +21,7 @@ export interface DesignManifest {
   directions: DesignDirection[];
   decision: string | null;
   decision_note: string;
+  wireframes?: { id: string; label: string; file: string }[];
 }
 
 interface CurrentDecision {
@@ -190,6 +191,23 @@ export const DesignRoute: React.FC = () => {
                     className="block h-auto w-full" />
                 </div>
               </Card>
+            )}
+
+            {manifest.wireframes && manifest.wireframes.length > 0 && (
+              <details className="rounded border border-lys-subtle p-3">
+                <summary className="cursor-pointer text-[13px] text-lys-primary">Wireframes</summary>
+                <div className="mt-3 flex flex-col gap-4">
+                  {manifest.wireframes.map((w) => (
+                    <figure key={w.id} className="m-0">
+                      <figcaption className="mb-2 flex items-center justify-between text-[12px] text-lys-muted">
+                        <span>{w.label}</span>
+                        <a href={`${BASE}/${w.file}`} target="_blank" rel="noreferrer" className="text-lys-gold hover:underline">open →</a>
+                      </figcaption>
+                      <iframe src={`${BASE}/${w.file}`} title={`${w.label} wireframe`} className="block h-[520px] w-full border border-lys-subtle bg-white" />
+                    </figure>
+                  ))}
+                </div>
+              </details>
             )}
 
             <details className="rounded border border-lys-subtle p-3">

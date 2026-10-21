@@ -24,6 +24,7 @@ import subprocess
 import py_compile
 import logging
 import os
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path, PureWindowsPath
 from datetime import datetime
 
@@ -347,13 +348,14 @@ class HermesSprintRunner:
             except Exception as e:
                 self.logger.debug("Failed to evaluate artifact trust: %s", e)
 
-        self.local_artifacts.append(artifact_dict)
-        try:
-            self.artifacts_file.parent.mkdir(parents=True, exist_ok=True)
-            with open(self.artifacts_file, "w", encoding="utf-8") as f:
-                json.dump(self.local_artifacts, f, indent=2)
-        except Exception as exc:
-            self.logger.warning("Failed writing artifacts.json: %s", exc)
+        with self._state_lock():
+            self.local_artifacts.append(artifact_dict)
+            try:
+                self.artifacts_file.parent.mkdir(parents=True, exist_ok=True)
+                with open(self.artifacts_file, "w", encoding="utf-8") as f:
+                    json.dump(self.local_artifacts, f, indent=2)
+            except Exception as exc:
+                self.logger.warning("Failed writing artifacts.json: %s", exc)
 
         if default_publisher:
             default_publisher.publish_artifact(artifact_dict)
@@ -372,6 +374,16 @@ class HermesSprintRunner:
         correlation_id=None,
         artifact_refs=None,
         metadata=None,
+    ):
+        with self._state_lock():
+            return self._record_message_locked(
+                from_actor, to_actors, kind, text, intent, phase_id, conversation_id,
+                reply_to, correlation_id, artifact_refs, metadata,
+            )
+
+    def _record_message_locked(
+        self, from_actor, to_actors, kind, text, intent, phase_id, conversation_id,
+        reply_to, correlation_id, artifact_refs, metadata,
     ):
         now_iso = datetime.now().isoformat()
         ts_ms = int(datetime.now().timestamp() * 1000)
@@ -1067,6 +1079,10 @@ class HermesSprintRunner:
         )
 
     def _get_backend(self, backend_name):
+        with self._state_lock():
+            return self._get_backend_locked(backend_name)
+
+    def _get_backend_locked(self, backend_name):
         if backend_name not in self._backend_cache:
             backend_kwargs = {
                 "run_dir": self.run_dir,
@@ -1314,14 +1330,26 @@ class HermesSprintRunner:
                     f"Python syntax error in {py_file.name}: {e}"
                 )
 
+    def _state_lock(self):
+        """Lock guarding shared runner state (summary, messages, artifacts, backend cache)."""
+        return self.__dict__.setdefault("_shared_lock", threading.RLock())
+
     def execute_phase(self, phase, phase_index=1):
+        try:
+            state = self._run_phase_agent(phase, phase_index)
+            self._integrate_phase(phase, phase_index, state)
+        except Exception as exc:
+            self._report_phase_failure(phase, phase_index, exc)
+            raise
+
+    def _run_phase_agent(self, phase, phase_index, sync=True):
+        """Agent half of a phase: touches only the phase's own worktree."""
         phase_name = phase["name"]
         agent = phase["agent"]
         role = self.resolve_phase_role(phase)
         wt_dir = self.worktree_root / phase["worktree_dir"]
         prompt_file = self.resolve_prompt_file(phase)
         expected_handoff = phase["expected_handoff"]
-        commit_msg = phase["commit_message"]
 
         self.logger.info(f"\n=== Executing Phase: {phase_name} (Agent: {agent}) ===")
         self._current_phase = phase
@@ -1329,199 +1357,229 @@ class HermesSprintRunner:
         self._get_backend(backend_name)
 
         if default_publisher:
-            default_publisher.publish(
-                source_id=agent,
-                source_kind="agent",
-                kind="phase.started",
-                detail=f"Starting phase {phase_name} ({role}) with agent {agent}",
-                job_id=self.job_id,
-                metadata={
-                    "phase": phase_name,
-                    "role": role,
-                    "agent": agent,
-                    "order": phase_index,
-                },
-            )
-
-        try:
-            if not prompt_file.exists():
-                raise SprintRunnerError("FAILED_MISSING_PROMPT", f"Prompt file not found: {prompt_file}")
-
-            # Every phase after the first starts from the latest integration state.
-            if self.run_summary["phases"]:
-                target_branch = self.spec.get("target_branch", "s02/integration")
-                self.sync_phase_worktree(wt_dir, target_branch)
-
-            # Fetch pending mailbox messages specifically targeted to this agent for this job
-            pending_mailbox_messages = self.fetch_pending_mailbox_messages(agent)
-            consumed_ids = [m["id"] for m in pending_mailbox_messages if "id" in m]
-
-            handoff_path, original_handoff = self._prepare_handoff_path(
-                wt_dir,
-                expected_handoff,
-            )
-            try:
-                if not self.skip_agent_exec and not self.dry_run:
-                    execution_result = self.execute_agent(phase, wt_dir, mailbox_messages=pending_mailbox_messages)
-                else:
-                    execution_result = None
-                    self.logger.info(f"Skipping agent execution CLI (skip_agent_exec={self.skip_agent_exec}, dry_run={self.dry_run})")
-
-                self.capture_handoff(
-                    phase_index,
-                    role,
-                    agent,
-                    wt_dir,
-                    expected_handoff,
-                )
-
-                # Successfully executed agent -> acknowledge consumed mailbox messages
-                for msg_id in consumed_ids:
-                    if default_publisher and default_publisher.enabled:
-                        default_publisher.acknowledge_message(agent, msg_id)
-                    self._consumed_message_ids.add(msg_id)
-                if consumed_ids:
-                    self.logger.info("Acknowledged %s mailbox message(s) for agent %s", len(consumed_ids), agent)
-            finally:
-                self._restore_handoff_path(handoff_path, original_handoff)
-
-            changed_files = self.inspect_changed_files(wt_dir)
-            max_limit = self.limits.get("max_changed_files", 15)
-            if role == "verifier" and changed_files:
-                raise SprintRunnerError(
-                    "FAILED_FORBIDDEN_CHANGES",
-                    f"Verifier phase '{phase_name}' modified {len(changed_files)} target files.",
-                )
-            if role != "verifier" and len(changed_files) > max_limit:
-                raise SprintRunnerError(
-                    "FAILED_EXCESSIVE_FILES",
-                    f"Worktree {wt_dir.name} changed {len(changed_files)} files, exceeding limit of {max_limit}.",
-                )
-            if role in {"builder", "legacy"} and not changed_files:
-                raise SprintRunnerError(
-                    "FAILED_NO_CHANGES",
-                    f"Worktree {wt_dir.name} produced NO file changes.",
-                )
-            if role != "verifier" and phase.get("owned_paths") is not None:
-                self._enforce_phase_ownership(phase, changed_files)
-
-            self.validate_python_syntax(wt_dir)
-
-            should_integrate = bool(changed_files) and role != "verifier"
-            commit_sha = None
-            if should_integrate:
-                self.logger.info(f"Controller staging changes in {wt_dir.name}")
-                self.run_cmd(["git", "add", "."], cwd=wt_dir)
-                self.run_cmd(["git", "commit", "-m", commit_msg], cwd=wt_dir)
-
-                sha_res = self.run_cmd(["git", "rev-parse", "HEAD"], cwd=wt_dir)
-                commit_sha = sha_res.stdout.strip()
-                self.logger.info(f"Committed phase changes: {commit_sha[:7]} - {commit_msg}")
-
-                integration_dir = self.worktree_root / "integration"
-                self.logger.info(f"Controller merging commit {commit_sha[:7]} into integration worktree")
-                self.run_cmd(["git", "merge", "--no-ff", "-m", f"merge({self.sprint_id}): merge {agent} phase ({commit_sha[:7]})", commit_sha], cwd=integration_dir)
-
-            phase_result = {
-                "phase": phase_name,
-                "role": role,
-                "agent": agent,
-                "backend": backend_name,
-                "status": "SUCCESS",
-                "commit_sha": commit_sha,
-                "changed_files_count": len(changed_files),
-                "integrated": should_integrate,
-                "handoff": "captured",
-                "runtime_metadata": (
-                    dict(execution_result.runtime_metadata) if execution_result else {}
-                ),
-            }
-            self.run_summary["phases"].append(phase_result)
-
-            # Phase 5 Operational Messaging & Artifact Registration
-            phases_list = self.spec.get("phases", [])
-            next_agent = phases_list[phase_index]["agent"] if phase_index < len(phases_list) else "hermes_runner"
-            intent = (
-                "review_request" if role == "builder" else (
-                    "verification_request" if role == "hardener" else (
-                        "verification_result" if role == "verifier" else "handoff"
-                    )
-                )
-            )
-
-            msg_artifacts = []
-            if commit_sha:
-                art_commit = {
-                    "id": f"art_commit_{phase_index}",
-                    "type": "git_commit",
-                    "label": f"{phase_name} commit ({commit_sha[:7]})",
-                    "ref": commit_sha,
-                    "jobId": self.job_id,
-                    "phaseId": f"phase-{phase_index}-{phase_name}",
-                }
-                self._record_artifact(art_commit)
-                msg_artifacts.append(art_commit)
-
-            handoff_rel = f"handoffs/{phase_index:02d}_{self._safe_filename_component(role)}_{self._safe_filename_component(agent)}.md"
-            art_handoff = {
-                "id": f"art_handoff_{phase_index}",
-                "type": "handoff",
-                "label": f"{phase_name} handoff ({expected_handoff})",
-                "ref": handoff_rel,
-                "jobId": self.job_id,
-                "phaseId": f"phase-{phase_index}-{phase_name}",
-            }
-            self._record_artifact(art_handoff)
-            msg_artifacts.append(art_handoff)
-
-            if role == "builder":
-                msg_text = f"{phase_name} ({role}) implementation completed. Commit {commit_sha[:7] if commit_sha else 'n/a'}. {len(changed_files)} files modified. Please review."
-            elif role == "hardener":
-                msg_text = f"{phase_name} ({role}) review and hardening completed. Commit {commit_sha[:7] if commit_sha else 'n/a'}. Ready for verification."
-            elif role == "verifier":
-                msg_text = f"{phase_name} ({role}) verification completed."
-            else:
-                msg_text = f"{phase_name} completed successfully."
-
-            from_actor = {"id": agent, "kind": "agent", "displayName": agent.capitalize()}
-            to_actor = {
-                "id": next_agent,
-                "kind": "agent" if any(p.get("agent") == next_agent for p in phases_list) else "runtime",
-                "displayName": next_agent.capitalize(),
-            }
-
-            conv_id = f"conv_phase_{phase_index}_{phase_name}"
-            self._record_message(
-                from_actor=from_actor,
-                to_actors=[to_actor],
-                kind="handoff" if role != "verifier" else "verification_result",
-                text=msg_text,
-                intent=intent,
-                conversation_id=conv_id,
-                phase_id=f"phase-{phase_index}-{phase_name}",
-                artifact_refs=msg_artifacts,
-            )
-
-            # Hermes A2A Multi-Agent Turn Scheduling (Phase 6)
-            self.schedule_a2a_turns(phase, wt_dir, conversation_id=conv_id)
-
-            if default_publisher:
+            with self._state_lock():
                 default_publisher.publish(
                     source_id=agent,
                     source_kind="agent",
-                    kind="phase.completed",
-                    detail=f"Phase {phase_name} completed successfully",
+                    kind="phase.started",
+                    detail=f"Starting phase {phase_name} ({role}) with agent {agent}",
                     job_id=self.job_id,
                     metadata={
                         "phase": phase_name,
                         "role": role,
                         "agent": agent,
-                        "commitSha": commit_sha,
-                        "changedFilesCount": len(changed_files),
+                        "order": phase_index,
                     },
                 )
-        except Exception as exc:
-            err_msg = getattr(exc, "message", str(exc))
+
+        if not prompt_file.exists():
+            raise SprintRunnerError("FAILED_MISSING_PROMPT", f"Prompt file not found: {prompt_file}")
+
+        # Every phase after the first starts from the latest integration state.
+        if sync and self.run_summary["phases"]:
+            target_branch = self.spec.get("target_branch", "s02/integration")
+            self.sync_phase_worktree(wt_dir, target_branch)
+
+        # Fetch pending mailbox messages specifically targeted to this agent for this job
+        pending_mailbox_messages = self.fetch_pending_mailbox_messages(agent)
+        consumed_ids = [m["id"] for m in pending_mailbox_messages if "id" in m]
+
+        handoff_path, original_handoff = self._prepare_handoff_path(
+            wt_dir,
+            expected_handoff,
+        )
+        try:
+            if not self.skip_agent_exec and not self.dry_run:
+                execution_result = self.execute_agent(phase, wt_dir, mailbox_messages=pending_mailbox_messages)
+            else:
+                execution_result = None
+                self.logger.info(f"Skipping agent execution CLI (skip_agent_exec={self.skip_agent_exec}, dry_run={self.dry_run})")
+
+            self.capture_handoff(
+                phase_index,
+                role,
+                agent,
+                wt_dir,
+                expected_handoff,
+            )
+
+            # Successfully executed agent -> acknowledge consumed mailbox messages
+            with self._state_lock():
+                for msg_id in consumed_ids:
+                    if default_publisher and default_publisher.enabled:
+                        default_publisher.acknowledge_message(agent, msg_id)
+                    self._consumed_message_ids.add(msg_id)
+            if consumed_ids:
+                self.logger.info("Acknowledged %s mailbox message(s) for agent %s", len(consumed_ids), agent)
+        finally:
+            self._restore_handoff_path(handoff_path, original_handoff)
+
+        return {"execution_result": execution_result, "backend_name": backend_name}
+
+    def _validate_phase_changes(self, phase):
+        """Check a finished phase's worktree changes; returns the changed file lines."""
+        phase_name = phase["name"]
+        role = self.resolve_phase_role(phase)
+        wt_dir = self.worktree_root / phase["worktree_dir"]
+
+        changed_files = self.inspect_changed_files(wt_dir)
+        max_limit = self.limits.get("max_changed_files", 15)
+        if role == "verifier" and changed_files:
+            raise SprintRunnerError(
+                "FAILED_FORBIDDEN_CHANGES",
+                f"Verifier phase '{phase_name}' modified {len(changed_files)} target files.",
+            )
+        if role != "verifier" and len(changed_files) > max_limit:
+            raise SprintRunnerError(
+                "FAILED_EXCESSIVE_FILES",
+                f"Worktree {wt_dir.name} changed {len(changed_files)} files, exceeding limit of {max_limit}.",
+            )
+        if role in {"builder", "legacy"} and not changed_files:
+            raise SprintRunnerError(
+                "FAILED_NO_CHANGES",
+                f"Worktree {wt_dir.name} produced NO file changes.",
+            )
+        if role != "verifier" and phase.get("owned_paths") is not None:
+            self._enforce_phase_ownership(phase, changed_files)
+
+        self.validate_python_syntax(wt_dir)
+        return changed_files
+
+    def _integrate_phase(self, phase, phase_index, state, changed_files=None):
+        """Post-run half of a phase: validate, commit, merge, record. Run one phase at a time."""
+        phase_name = phase["name"]
+        agent = phase["agent"]
+        role = self.resolve_phase_role(phase)
+        wt_dir = self.worktree_root / phase["worktree_dir"]
+        expected_handoff = phase["expected_handoff"]
+        commit_msg = phase["commit_message"]
+        backend_name = state["backend_name"]
+        execution_result = state["execution_result"]
+
+        if changed_files is None:
+            changed_files = self._validate_phase_changes(phase)
+
+        should_integrate = bool(changed_files) and role != "verifier"
+        commit_sha = None
+        if should_integrate:
+            self.logger.info(f"Controller staging changes in {wt_dir.name}")
+            self.run_cmd(["git", "add", "."], cwd=wt_dir)
+            self.run_cmd(["git", "commit", "-m", commit_msg], cwd=wt_dir)
+
+            sha_res = self.run_cmd(["git", "rev-parse", "HEAD"], cwd=wt_dir)
+            commit_sha = sha_res.stdout.strip()
+            self.logger.info(f"Committed phase changes: {commit_sha[:7]} - {commit_msg}")
+
+            integration_dir = self.worktree_root / "integration"
+            self.logger.info(f"Controller merging commit {commit_sha[:7]} into integration worktree")
+            self.run_cmd(["git", "merge", "--no-ff", "-m", f"merge({self.sprint_id}): merge {agent} phase {phase_name} ({commit_sha[:7]})", commit_sha], cwd=integration_dir)
+
+        phase_result = {
+            "phase": phase_name,
+            "role": role,
+            "agent": agent,
+            "backend": backend_name,
+            "status": "SUCCESS",
+            "commit_sha": commit_sha,
+            "changed_files_count": len(changed_files),
+            "integrated": should_integrate,
+            "handoff": "captured",
+            "runtime_metadata": (
+                dict(execution_result.runtime_metadata) if execution_result else {}
+            ),
+        }
+        with self._state_lock():
+            self.run_summary["phases"].append(phase_result)
+
+        # Phase 5 Operational Messaging & Artifact Registration
+        phases_list = self.spec.get("phases", [])
+        next_agent = phases_list[phase_index]["agent"] if phase_index < len(phases_list) else "hermes_runner"
+        intent = (
+            "review_request" if role == "builder" else (
+                "verification_request" if role == "hardener" else (
+                    "verification_result" if role == "verifier" else "handoff"
+                )
+            )
+        )
+
+        msg_artifacts = []
+        if commit_sha:
+            art_commit = {
+                "id": f"art_commit_{phase_index}",
+                "type": "git_commit",
+                "label": f"{phase_name} commit ({commit_sha[:7]})",
+                "ref": commit_sha,
+                "jobId": self.job_id,
+                "phaseId": f"phase-{phase_index}-{phase_name}",
+            }
+            self._record_artifact(art_commit)
+            msg_artifacts.append(art_commit)
+
+        handoff_rel = f"handoffs/{phase_index:02d}_{self._safe_filename_component(role)}_{self._safe_filename_component(agent)}.md"
+        art_handoff = {
+            "id": f"art_handoff_{phase_index}",
+            "type": "handoff",
+            "label": f"{phase_name} handoff ({expected_handoff})",
+            "ref": handoff_rel,
+            "jobId": self.job_id,
+            "phaseId": f"phase-{phase_index}-{phase_name}",
+        }
+        self._record_artifact(art_handoff)
+        msg_artifacts.append(art_handoff)
+
+        if role == "builder":
+            msg_text = f"{phase_name} ({role}) implementation completed. Commit {commit_sha[:7] if commit_sha else 'n/a'}. {len(changed_files)} files modified. Please review."
+        elif role == "hardener":
+            msg_text = f"{phase_name} ({role}) review and hardening completed. Commit {commit_sha[:7] if commit_sha else 'n/a'}. Ready for verification."
+        elif role == "verifier":
+            msg_text = f"{phase_name} ({role}) verification completed."
+        else:
+            msg_text = f"{phase_name} completed successfully."
+
+        from_actor = {"id": agent, "kind": "agent", "displayName": agent.capitalize()}
+        to_actor = {
+            "id": next_agent,
+            "kind": "agent" if any(p.get("agent") == next_agent for p in phases_list) else "runtime",
+            "displayName": next_agent.capitalize(),
+        }
+
+        conv_id = f"conv_phase_{phase_index}_{phase_name}"
+        self._record_message(
+            from_actor=from_actor,
+            to_actors=[to_actor],
+            kind="handoff" if role != "verifier" else "verification_result",
+            text=msg_text,
+            intent=intent,
+            conversation_id=conv_id,
+            phase_id=f"phase-{phase_index}-{phase_name}",
+            artifact_refs=msg_artifacts,
+        )
+
+        # Hermes A2A Multi-Agent Turn Scheduling (Phase 6)
+        self.schedule_a2a_turns(phase, wt_dir, conversation_id=conv_id)
+
+        if default_publisher:
+            default_publisher.publish(
+                source_id=agent,
+                source_kind="agent",
+                kind="phase.completed",
+                detail=f"Phase {phase_name} completed successfully",
+                job_id=self.job_id,
+                metadata={
+                    "phase": phase_name,
+                    "role": role,
+                    "agent": agent,
+                    "commitSha": commit_sha,
+                    "changedFilesCount": len(changed_files),
+                },
+            )
+
+    def _report_phase_failure(self, phase, phase_index, exc):
+        phase_name = phase["name"]
+        agent = phase["agent"]
+        role = self.resolve_phase_role(phase)
+        err_msg = getattr(exc, "message", str(exc))
+        with self._state_lock():
             self._record_message(
                 from_actor={"id": agent, "kind": "agent", "displayName": agent.capitalize()},
                 to_actors=[
@@ -1547,7 +1605,79 @@ class HermesSprintRunner:
                         "error": err_msg,
                     },
                 )
-            raise
+
+    def _phase_batches(self):
+        """Group consecutive phases sharing a parallel_group; every other phase is its own batch."""
+        batches = []
+        previous_group = None
+        for phase_index, phase in enumerate(self.spec.get("phases", []), start=1):
+            group = phase.get("parallel_group")
+            if group is not None and group == previous_group:
+                batches[-1].append((phase_index, phase))
+            else:
+                batches.append([(phase_index, phase)])
+            previous_group = group
+        return batches
+
+    def execute_batch(self, batch):
+        """Run a parallel_group batch: agents concurrently, then validate and integrate one at a time."""
+        group = batch[0][1]["parallel_group"]
+        self.logger.info(
+            "=== Executing parallel_group '%s': %s phases concurrently ===",
+            group,
+            len(batch),
+        )
+
+        # Prepare every worktree and backend before the pool starts.
+        for phase_index, phase in batch:
+            try:
+                self._get_backend(self.resolve_backend_name(phase))
+                if self.run_summary["phases"]:
+                    self.sync_phase_worktree(
+                        self.worktree_root / phase["worktree_dir"],
+                        self.spec.get("target_branch", "s02/integration"),
+                    )
+            except Exception as exc:
+                self._report_phase_failure(phase, phase_index, exc)
+                raise
+
+        results = []
+        with ThreadPoolExecutor(max_workers=len(batch)) as pool:
+            futures = [
+                pool.submit(self._run_phase_agent, phase, phase_index, False)
+                for phase_index, phase in batch
+            ]
+            for future in futures:
+                try:
+                    results.append((future.result(), None))
+                except Exception as exc:
+                    results.append((None, exc))
+
+        # Any agent failure stops the batch before anything is committed or merged.
+        failures = [
+            (phase_index, phase, error)
+            for (phase_index, phase), (_, error) in zip(batch, results)
+            if error is not None
+        ]
+        for phase_index, phase, error in failures:
+            self._report_phase_failure(phase, phase_index, error)
+        if failures:
+            raise failures[0][2]
+
+        changed = []
+        for phase_index, phase in batch:
+            try:
+                changed.append(self._validate_phase_changes(phase))
+            except Exception as exc:
+                self._report_phase_failure(phase, phase_index, exc)
+                raise
+
+        for (phase_index, phase), (state, _), changed_files in zip(batch, results, changed):
+            try:
+                self._integrate_phase(phase, phase_index, state, changed_files)
+            except Exception as exc:
+                self._report_phase_failure(phase, phase_index, exc)
+                raise
 
     def schedule_a2a_turns(self, phase, wt_dir, conversation_id=None):
         """
@@ -2332,8 +2462,12 @@ class HermesSprintRunner:
                 self.preflight()
             else:
                 self.prepare_environment()
-                for phase_index, phase in enumerate(self.spec.get("phases", []), start=1):
-                    self.execute_phase(phase, phase_index=phase_index)
+                for batch in self._phase_batches():
+                    if len(batch) == 1:
+                        phase_index, phase = batch[0]
+                        self.execute_phase(phase, phase_index=phase_index)
+                    else:
+                        self.execute_batch(batch)
                 if self.verification_steps:
                     self.run_verification()
                 else:

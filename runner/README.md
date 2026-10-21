@@ -276,7 +276,7 @@ Role-less historical phases retain legacy behavior: at least one change is requi
 
 A non-verifier phase may declare `owned_paths`, a non-empty array of relative path prefixes (no absolute paths, drive letters or `..`). After the phase finishes, any changed file outside those prefixes fails the phase with `FAILED_OUTSIDE_OWNERSHIP` before commit or merge. Prefixes match at `/` boundaries, so `backend/` does not cover `backend2/`. Phases without `owned_paths` behave as before; verifiers still forbid all target changes.
 
-`parallel_group` is an optional non-empty string that requires `owned_paths`. Phases sharing a group must not have overlapping prefixes. Invalid values or overlaps fail at spec load with `FAILED_INVALID_OWNERSHIP`. Groups are validated only; phases still run sequentially.
+`parallel_group` is an optional non-empty string that requires `owned_paths`. Phases sharing a group must not have overlapping prefixes. Invalid values or overlaps fail at spec load with `FAILED_INVALID_OWNERSHIP`. Consecutive phases sharing a group form one batch (non-consecutive phases with the same name do not). A batch's agents run concurrently, one thread per phase, each in its own worktree prepared before the pool starts. After every agent has finished, the runner validates all phases (change limits, ownership, syntax) and then commits and merges them into the integration worktree one at a time, in spec order. If any phase fails, nothing from the batch is merged and the sprint stops with that phase's failure code. Phases without a group, and groups with a single phase, run sequentially as before.
 
 ## Execution Backends
 

@@ -6,7 +6,7 @@ import pytest
 from orchestrator import chat as chat_module
 from orchestrator import tools_server
 from orchestrator.chat import ClaudeChatProvider
-from orchestrator.tools_server import LysStackTools, analyze_usage, handle
+from orchestrator.tools_server import ToolError, LysStackTools, analyze_usage, build_brief, check_brief, handle, repo_state_for, search_knowledge
 
 
 @pytest.fixture
@@ -15,6 +15,7 @@ def root(tmp_path):
     (lysstack / "operating_system").mkdir(parents=True)
     (lysstack / "operating_system" / "current_focus.md").write_text("focus\n")
     (lysstack / "AGENTS.md").write_text("# rules\n")
+    (lysstack / "operating_system" / "active_task.md").write_text("# Active Task\n")
     (lysstack / ".git").mkdir()
     (lysstack / ".git" / "config").write_text("secret\n")
     return lysstack
@@ -30,9 +31,9 @@ def test_the_server_offers_exactly_the_agreed_tools(root):
     response = handle({"jsonrpc": "2.0", "id": 1, "method": "tools/list"}, LysStackTools(root))
 
     names = [t["name"] for t in response["result"]["tools"]]
-    assert names == ["lysstack_list", "lysstack_read", "hermes_jobs", "hermes_capacity",
-                     "usage_analysis", "agent_options", "draft_save"]
     assert set(names) == set(tools_server.TOOL_NAMES)
+    assert len(names) == len(set(names)) == 13
+    assert "draft_save" in names and "start_run" not in names
 
 
 def test_notifications_get_no_answer(root):
@@ -43,7 +44,7 @@ def test_list_and_read_stay_inside_lysstack(root):
     tools = LysStackTools(root)
 
     assert _call(tools, "lysstack_list", {"scope": "operating_system"})["content"][0]["text"] == \
-        json.dumps(["operating_system/current_focus.md"], indent=2)
+        json.dumps(["operating_system/active_task.md", "operating_system/current_focus.md"], indent=2)
     assert _call(tools, "lysstack_read", {"path": "AGENTS.md"})["content"][0]["text"] == "# rules\n"
     assert _call(tools, "lysstack_read", {"path": "../outside.md"})["isError"] is True
     assert _call(tools, "lysstack_read", {"path": ".git/config"})["isError"] is True
@@ -193,3 +194,101 @@ def test_gemini_agy_and_antigravity_are_one_agent(root, monkeypatch):
     assert [r["id"] for r in rows] == ["antigravity"]
     assert rows[0]["leftPct"] == 75
     assert rows[0]["allowed"] == ["gemini-3.8-flash-high"]
+
+
+SHA_A = "a" * 40
+GOOD_FIELDS = {
+    "task_id": "UG-009", "goal": "Do the thing.", "repository": "lystiger/Unigreen", "baseline": SHA_A,
+    "context_files": ["operating_system/active_task.md"],
+    "acceptance": ["It works", "It is tested"], "verification": ["pytest -q"], "non_goals": ["No redesign"],
+}
+
+
+def test_a_built_brief_passes_its_own_check(root):
+    text = build_brief(GOOD_FIELDS)
+
+    checks = check_brief(text, root)
+
+    assert all(c["ok"] for c in checks), [c for c in checks if not c["ok"]]
+    assert "- **Status:** Draft" in text
+
+
+def test_build_refuses_a_short_baseline_and_empty_criteria(root):
+    with pytest.raises(ToolError):
+        build_brief({**GOOD_FIELDS, "baseline": "069aed0"})
+    with pytest.raises(ToolError):
+        build_brief({**GOOD_FIELDS, "acceptance": []})
+
+
+def test_check_flags_a_ready_status_and_missing_files(root):
+    text = build_brief(GOOD_FIELDS).replace("- **Status:** Draft", "- **Status:** Ready")
+    text = text.replace("`operating_system/active_task.md`", "`operating_system/missing.md`")
+
+    failed = {c["check"] for c in check_brief(text, root) if not c["ok"]}
+
+    assert "status is Draft" in failed
+    assert "context file exists: operating_system/missing.md" in failed
+
+
+def test_check_reads_a_saved_draft_by_name(root, tmp_path):
+    drafts = tmp_path / "drafts"
+    drafts.mkdir()
+    (drafts / "ug-009.md").write_text(build_brief(GOOD_FIELDS))
+    tools = LysStackTools(root, drafts_dir=drafts)
+
+    assert all(c["ok"] for c in tools.brief_check("ug-009.md"))
+    assert _call(tools, "brief_check", {"name": "../secret.md"})["isError"] is True
+
+
+def test_decision_search_finds_lines_and_refuses_one_letter(root):
+    (root / "projects" / "unigreen").mkdir(parents=True)
+    (root / "projects" / "unigreen" / "decisions.md").write_text("### Decision 001\n- **Decision:** use FastAPI\n")
+
+    hits = search_knowledge(root, "fastapi")
+
+    assert hits == [{"file": "projects/unigreen/decisions.md", "line": 2, "text": "- **Decision:** use FastAPI"}]
+    with pytest.raises(ToolError):
+        search_knowledge(root, "x")
+
+
+def test_list_drafts_shows_status_and_task(root, tmp_path):
+    drafts = tmp_path / "drafts"
+    drafts.mkdir()
+    (drafts / "one.md").write_text(build_brief(GOOD_FIELDS))
+
+    rows = tools_server.list_draft_rows(drafts)
+
+    assert rows == [{"name": "one.md", "status": "Draft", "task_id": "UG-009"}]
+
+
+def test_repo_state_checks_the_pinned_baseline_and_cleanliness(tmp_path):
+    import subprocess as sp
+
+    repo = tmp_path / "Unigreen"
+    repo.mkdir()
+    sp.run(["git", "-C", str(repo), "init", "-q"], check=True)
+    sp.run(["git", "-C", str(repo), "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q",
+            "--allow-empty", "-m", "base"], check=True)
+    base = sp.run(["git", "-C", str(repo), "rev-parse", "HEAD"], capture_output=True, text=True).stdout.strip()
+
+    state = repo_state_for("Unigreen", projects=tmp_path, baseline_from=base)
+
+    assert state["baseline_present"] is True and state["on_baseline"] is True and state["clean"] is True
+    assert state["commits_after_baseline"] == 0
+    with pytest.raises(ToolError):
+        repo_state_for("../etc", projects=tmp_path)
+    with pytest.raises(ToolError):
+        repo_state_for("NotThere", projects=tmp_path)
+
+
+def test_job_detail_returns_the_useful_fields(root, monkeypatch):
+    tools = LysStackTools(root)
+    monkeypatch.setattr(tools, "_get", lambda path: {"id": "run_1", "status": "FAILED", "blockedReason": "verifier",
+                                                    "currentPhase": "02_verifier", "secret": "x"})
+
+    detail = tools.job_detail("run_1")
+
+    assert detail["status"] == "FAILED" and detail["blockedReason"] == "verifier"
+    assert "secret" not in detail
+    with pytest.raises(ToolError):
+        tools.job_detail("../../etc")

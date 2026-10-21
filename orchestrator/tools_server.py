@@ -8,6 +8,8 @@ the tools in this file are available.
 
 import argparse
 import json
+import re
+import subprocess
 import sys
 import urllib.error
 import urllib.request
@@ -62,6 +64,57 @@ TOOLS = [
         "name": "agent_options",
         "description": "List each agent with its allowed models, reasoning levels, readiness and quota left. "
                        "Use this before suggesting agents for a brief. Read-only.",
+        "inputSchema": {"type": "object", "properties": {}, "additionalProperties": False},
+    },
+    {
+        "name": "brief_check",
+        "description": "Check a saved draft before it is marked Ready: status, task id, goal, target repo, pinned "
+                       "40-character baseline, acceptance criteria, verification, and that every context file exists. Read-only.",
+        "inputSchema": {"type": "object", "properties": {"name": {"type": "string"}},
+                        "required": ["name"], "additionalProperties": False},
+    },
+    {
+        "name": "brief_build",
+        "description": "Assemble a brief in LysStack format from structured fields. Returns the text only; "
+                       "save it with draft_save.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "task_id": {"type": "string"},
+                "goal": {"type": "string"},
+                "repository": {"type": "string"},
+                "baseline": {"type": "string", "description": "full 40-character commit SHA"},
+                "context_files": {"type": "array", "items": {"type": "string"}},
+                "acceptance": {"type": "array", "items": {"type": "string"}},
+                "verification": {"type": "array", "items": {"type": "string"}},
+                "non_goals": {"type": "array", "items": {"type": "string"}},
+            },
+            "required": ["task_id", "goal", "repository", "baseline", "context_files", "acceptance", "verification"],
+            "additionalProperties": False,
+        },
+    },
+    {
+        "name": "decision_search",
+        "description": "Search the project decisions, lessons and memory for a word or phrase. Read-only.",
+        "inputSchema": {"type": "object", "properties": {"query": {"type": "string"}},
+                        "required": ["query"], "additionalProperties": False},
+    },
+    {
+        "name": "job_detail",
+        "description": "Show one Hermes job: status, phase, agents, progress, and the reason it is blocked or failed. Read-only.",
+        "inputSchema": {"type": "object", "properties": {"job_id": {"type": "string"}},
+                        "required": ["job_id"], "additionalProperties": False},
+    },
+    {
+        "name": "repo_state",
+        "description": "Check a product clone under ~/Projects: is it on the pinned baseline, is it clean, and is the "
+                       "baseline present. Read-only.",
+        "inputSchema": {"type": "object", "properties": {"repo": {"type": "string", "description": "folder name, e.g. Unigreen"}},
+                        "required": ["repo"], "additionalProperties": False},
+    },
+    {
+        "name": "list_drafts",
+        "description": "List the drafts in LysStack/drafts with their status and task id. Read-only.",
         "inputSchema": {"type": "object", "properties": {}, "additionalProperties": False},
     },
     {
@@ -173,6 +226,37 @@ class LysStackTools:
             })
         return rows
 
+    def brief_check(self, name):
+        target = self.drafts_dir / name if re.fullmatch(r"[a-z0-9][a-z0-9-]{0,60}\.md", name or "") else None
+        if target is None or not target.is_file():
+            raise ToolError("no draft with that name")
+        return check_brief(target.read_text(encoding="utf-8", errors="replace"), self.root)
+
+    def brief_build(self, fields):
+        return build_brief(fields)
+
+    def decision_search(self, query):
+        return search_knowledge(self.root, query)
+
+    def job_detail(self, job_id):
+        if not re.fullmatch(r"[A-Za-z0-9_.-]{1,120}", job_id or ""):
+            raise ToolError("job id has an unexpected form")
+        job = self._get(f"/jobs/{job_id}")
+        keys = ("id", "title", "status", "currentPhase", "assignedAgentIds", "progress", "blockedReason",
+                "repairCount", "replanCount", "startedAt", "completedAt")
+        return {k: job.get(k) for k in keys}
+
+    def repo_state(self, repo):
+        baseline = ""
+        task = self.root / "operating_system" / "active_task.md"
+        if task.is_file():
+            match = re.search(r"\*\*Pinned baseline:\*\*\s*`([^`]+)`", task.read_text(encoding="utf-8", errors="replace"))
+            baseline = match.group(1) if match else ""
+        return repo_state_for(repo, baseline_from=baseline)
+
+    def list_drafts(self):
+        return list_draft_rows(self.drafts_dir)
+
     def draft_save(self, name, body):
         try:
             written = write_drafts(f"```brief-draft path={name}\n{body}\n```", self.drafts_dir)
@@ -224,6 +308,129 @@ def analyze_usage(quota, chats):
     }
 
 
+SHA = re.compile(r"^[0-9a-f]{40}$")
+REQUIRED_SECTIONS = ("Goal", "Target", "Bounded Context Files", "Acceptance Criteria", "Verification")
+
+
+def check_brief(text, root):
+    """Each check on a brief: a list of {check, ok, detail}. Pure apart from reading the context files."""
+    checks = []
+
+    def add(name, ok, detail=""):
+        checks.append({"check": name, "ok": bool(ok), "detail": detail})
+
+    status = re.search(r"^- \*\*Status:\*\*\s*(.+)$", text, re.MULTILINE)
+    add("status line", status is not None, status.group(1) if status else "missing")
+    add("status is Draft", status and status.group(1).strip() == "Draft",
+        "a draft is never Ready until Lystiger sets it")
+    task = re.search(r"^- \*\*Task ID:\*\*\s*(\S+)", text, re.MULTILINE)
+    add("task id", task is not None, task.group(1) if task else "missing")
+    for section in REQUIRED_SECTIONS:
+        add(f"section: {section}", re.search(rf"^## {re.escape(section)}\s*$", text, re.MULTILINE) is not None)
+    baseline = re.search(r"\*\*Pinned baseline:\*\*\s*`([^`]+)`", text)
+    add("pinned baseline is a full SHA", baseline and SHA.match(baseline.group(1)),
+        baseline.group(1) if baseline else "missing")
+    context = re.findall(r"^- `([^`]+)`", _section_text(text, "Bounded Context Files"), re.MULTILINE)
+    add("context files listed", bool(context), f"{len(context)} listed")
+    for name in context:
+        add(f"context file exists: {name}", (Path(root) / name).is_file())
+    criteria = re.findall(r"^\s*(?:-\s+\[[ xX]\]|-|\d+\.)\s+(.+)$", _section_text(text, "Acceptance Criteria"), re.MULTILINE)
+    add("acceptance criteria", len(criteria) >= 1, f"{len(criteria)} criteria")
+    commands = re.findall(r"^\s*(?:-|\d+\.)\s+.+$", _section_text(text, "Verification"), re.MULTILINE)
+    add("verification commands", len(commands) >= 1, f"{len(commands)} commands")
+    return checks
+
+
+def _section_text(text, heading):
+    match = re.search(rf"^## {re.escape(heading)}\s*$(.*?)(?=^## |\Z)", text, re.MULTILINE | re.DOTALL)
+    return match.group(1) if match else ""
+
+
+def build_brief(fields):
+    """A brief in LysStack format from structured fields. Refuses a baseline that is not a full SHA."""
+    baseline = fields["baseline"].strip()
+    if not SHA.match(baseline):
+        raise ToolError("baseline must be a full 40-character commit SHA")
+    if not fields["acceptance"] or not fields["verification"]:
+        raise ToolError("a brief needs acceptance criteria and verification commands")
+    lines = [
+        "# Active Task", "",
+        "## Assignment", "",
+        f"- **Task ID:** {fields['task_id']}",
+        "- **Status:** Draft",
+        "", "## Goal", "", fields["goal"],
+        "", "## Target", "",
+        f"- **Repository:** `{fields['repository']}`",
+        f"- **Pinned baseline:** `{baseline}`",
+        "", "## Bounded Context Files", "",
+    ]
+    lines += [f"- `{name}`" for name in fields["context_files"]]
+    lines += ["", "## Acceptance Criteria", ""]
+    lines += [f"- [ ] {item}" for item in fields["acceptance"]]
+    lines += ["", "## Verification", ""]
+    lines += [f"- `{command}`" for command in fields["verification"]]
+    if fields.get("non_goals"):
+        lines += ["", "## Non-Goals", ""] + [f"- {item}" for item in fields["non_goals"]]
+    return "\n".join(lines) + "\n"
+
+
+def repo_state_for(name, projects=None, baseline_from=None):
+    """Read-only git checks on a clone under ~/Projects. Refuses names that are not plain folder names."""
+    if not re.fullmatch(r"[A-Za-z0-9._-]+", name or ""):
+        raise ToolError("repo must be a plain folder name, such as Unigreen")
+    base = Path(projects) if projects else Path.home() / "Projects"
+    repo = base / name
+    if not (repo / ".git").exists():
+        raise ToolError(f"{name} is not a git clone under {base}")
+    baseline = baseline_from or ""
+
+    def git(*args):
+        return subprocess.run(["git", "-C", str(repo), *args], capture_output=True, text=True, check=False)
+
+    head = git("rev-parse", "HEAD").stdout.strip()
+    status = git("status", "--porcelain").stdout
+    present = git("cat-file", "-e", f"{baseline}^{{commit}}").returncode == 0 if baseline else False
+    ahead = git("rev-list", "--count", f"{baseline}..HEAD").stdout.strip() if present else None
+    return {
+        "repo": name, "head": head, "baseline": baseline or None, "baseline_present": present,
+        "on_baseline": bool(baseline) and head == baseline, "clean": status.strip() == "",
+        "commits_after_baseline": int(ahead) if ahead and ahead.isdigit() else None,
+    }
+
+
+def search_knowledge(root, query):
+    """Lines that mention the query in project decisions and lessons, memory, and the decision log."""
+    needle = (query or "").strip().lower()
+    if len(needle) < 2:
+        raise ToolError("search for at least two characters")
+    files = sorted(Path(root).glob("projects/*/decisions.md")) + sorted(Path(root).glob("projects/*/lessons.md"))
+    files += sorted(Path(root).glob("memory/*.md")) + [Path(root) / "operating_system" / "decision-log.md"]
+    hits = []
+    for path in files:
+        if not path.is_file():
+            continue
+        for number, line in enumerate(path.read_text(encoding="utf-8", errors="replace").splitlines(), 1):
+            if needle in line.lower():
+                hits.append({"file": str(path.relative_to(root)), "line": number, "text": line.strip()[:200]})
+                if len(hits) >= 30:
+                    return hits
+    return hits
+
+
+def list_draft_rows(drafts_dir):
+    rows = []
+    folder = Path(drafts_dir)
+    if not folder.is_dir():
+        return rows
+    for path in sorted(folder.glob("*.md")):
+        text = path.read_text(encoding="utf-8", errors="replace")
+        status = re.search(r"^- \*\*Status:\*\*\s*(.+)$", text, re.MULTILINE)
+        task = re.search(r"^- \*\*Task ID:\*\*\s*(\S+)", text, re.MULTILINE)
+        rows.append({"name": path.name, "status": status.group(1).strip() if status else None,
+                     "task_id": task.group(1) if task else None})
+    return rows
+
+
 def _text_result(value, is_error=False):
     text = value if isinstance(value, str) else json.dumps(value, ensure_ascii=False, indent=2)
     return {"content": [{"type": "text", "text": text}], "isError": is_error}
@@ -256,6 +463,18 @@ def handle(message, tools):
                 result = _text_result(tools.hermes_jobs())
             elif name == "hermes_capacity":
                 result = _text_result(tools.hermes_capacity())
+            elif name == "brief_check":
+                result = _text_result(tools.brief_check(args.get("name", "")))
+            elif name == "brief_build":
+                result = _text_result(tools.brief_build(args))
+            elif name == "decision_search":
+                result = _text_result(tools.decision_search(args.get("query", "")))
+            elif name == "job_detail":
+                result = _text_result(tools.job_detail(args.get("job_id", "")))
+            elif name == "repo_state":
+                result = _text_result(tools.repo_state(args.get("repo", "")))
+            elif name == "list_drafts":
+                result = _text_result(tools.list_drafts())
             elif name == "usage_analysis":
                 result = _text_result(tools.usage_analysis())
             elif name == "agent_options":

@@ -102,6 +102,7 @@ describe('Comms chat', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Send message' }));
 
     expect(await screen.findByRole('status')).toHaveTextContent('Orchestrator is replying');
+    expect(document.querySelectorAll('.lys-wave-dot')).toHaveLength(3);
     answer({ role: 'assistant', content: 'done', drafts: ['ug-002.md'], at: '' });
 
     expect(await screen.findByText(/Draft saved: ug-002\.md/)).toBeInTheDocument();

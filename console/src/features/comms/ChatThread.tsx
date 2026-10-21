@@ -47,9 +47,9 @@ export const ChatThread: React.FC<ChatThreadProps> = ({ messages, busy }) => {
         {busy && (
           <div role="status" className="lys-enter flex items-center gap-2 text-[12px] text-lys-muted">
             <span className="inline-flex gap-1" aria-hidden="true">
-              <span className="h-1.5 w-1.5 rounded-full bg-lys-muted" />
-              <span className="h-1.5 w-1.5 rounded-full bg-lys-muted" />
-              <span className="h-1.5 w-1.5 rounded-full bg-lys-muted" />
+              <span className="lys-wave-dot h-1.5 w-1.5 rounded-full bg-lys-muted" style={{ animationDelay: '0ms' }} />
+              <span className="lys-wave-dot h-1.5 w-1.5 rounded-full bg-lys-muted" style={{ animationDelay: '150ms' }} />
+              <span className="lys-wave-dot h-1.5 w-1.5 rounded-full bg-lys-muted" style={{ animationDelay: '300ms' }} />
             </span>
             Orchestrator is replying…
           </div>

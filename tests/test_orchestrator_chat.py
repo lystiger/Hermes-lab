@@ -344,3 +344,13 @@ def test_api_compacts_a_chat_and_reports_unknown_ids(chat, monkeypatch):
 
     assert client.post(f"/orchestrator/conversations/{conversation['id']}/compact").status_code == 200
     assert client.post("/orchestrator/conversations/aaaaaaaaaaaa/compact").status_code == 404
+
+
+@pytest.mark.parametrize("raw, expected", [
+    ('Title: Inquiry Review Workspace', "Inquiry Review Workspace"),
+    ('**Chat title:** "Staff inquiry plan"', "Staff inquiry plan"),
+    ("  Plain title  \nsecond line", "Plain title"),
+    ("", "fallback"),
+])
+def test_model_titles_are_cleaned_for_the_list(raw, expected):
+    assert chat_module.clean_title(raw, "fallback") == expected

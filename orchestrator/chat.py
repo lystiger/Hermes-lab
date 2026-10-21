@@ -144,7 +144,9 @@ def write_drafts(reply, drafts_dir):
 def clean_title(text, fallback):
     """A model's title, made safe for a list: one line, no quotes, short."""
     first = (text or "").strip().splitlines()[0] if (text or "").strip() else ""
-    title = first.strip().strip('"\'`*#').strip()[:60].strip()
+    title = re.sub(r"^[\s*#>_`]+", "", first.strip())
+    title = re.sub(r"^(chat\s+)?title\s*:\s*", "", title, flags=re.IGNORECASE)
+    title = re.sub(r"^[\s*#>_`\"']+|[\s*#_`\"']+$", "", title)[:60].strip()
     return title or fallback
 
 

@@ -26,7 +26,8 @@ def default_lysstack_root():
 
 def tools_config(root):
     repo = Path(__file__).resolve().parent.parent
-    return {"python": sys.executable, "repo": repo, "root": root, "drafts": root / "drafts"}
+    return {"python": sys.executable, "repo": repo, "root": root, "drafts": root / "drafts",
+            "state": default_state_dir()}
 
 
 def get_chat():

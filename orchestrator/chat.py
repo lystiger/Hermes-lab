@@ -25,7 +25,8 @@ STATUS_LINE = re.compile(r"^- \*\*Status:\*\*.*$", re.MULTILINE)
 DEFAULT_TITLE = "New orchestrator chat"
 CHAT_TIMEOUT_SECONDS = 300
 TITLE_MAX = 120
-TOOL_NAMES = ("lysstack_list", "lysstack_read", "hermes_jobs", "hermes_capacity", "draft_save")
+TOOL_NAMES = ("lysstack_list", "lysstack_read", "hermes_jobs", "hermes_capacity", "usage_analysis",
+              "agent_options", "draft_save")
 
 DRAFT_RULES = """You are the orchestrator in LysStack. You help Lystiger shape a task brief.
 
@@ -33,7 +34,8 @@ Rules you must follow:
 - Address the user as Lystiger. Never call them "the human" or "a human".
 - You draft briefs only. You never set a brief to Ready and you never start a run.
 - Ask grill-me questions when a task is big, in batches of at most five.
-- Tools: lysstack_list, lysstack_read (read LysStack), hermes_jobs and hermes_capacity (read Hermes status), and draft_save (save a brief as Draft). Use draft_save for briefs. Nothing else is available.
+- Tools: lysstack_list and lysstack_read (LysStack), hermes_jobs, hermes_capacity, usage_analysis and agent_options (Hermes status, quota and chat usage), and draft_save (save a brief as Draft). Use usage_analysis to plan a long session and agent_options before suggesting agents. Use draft_save for briefs. Nothing else is available.
+- In a brief, give each phase a line 'Suggested agent (proposed, not applied): <agent> <model> <effort>', chosen from agent_options. Never apply it: only Lystiger changes agents or models.
 - If draft_save is not available, reply with a fenced block instead:
   ```brief-draft path=<name>.md
   <full brief in LysStack active_task format>
@@ -113,7 +115,7 @@ class ClaudeChatProvider:
         config = {"mcpServers": {"lysstack": {
             "command": self.tools["python"],
             "args": ["-m", "orchestrator.tools_server", "--root", str(self.tools["root"]),
-                     "--drafts", str(self.tools["drafts"])],
+                     "--drafts", str(self.tools["drafts"]), "--state", str(self.tools["state"])],
             "env": {"PYTHONPATH": str(self.tools["repo"])},
         }}}
         config_path = Path(neutral) / "mcp.json"

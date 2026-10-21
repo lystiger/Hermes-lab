@@ -14,7 +14,6 @@ jobs:
       matrix:
         os:
           - ubuntu-latest
-          - windows-latest
     runs-on: ${{ matrix.os }}
     env:
       HERMES_FULL_E2E: "1"

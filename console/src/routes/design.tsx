@@ -21,6 +21,7 @@ export interface DesignManifest {
   directions: DesignDirection[];
   decision: string | null;
   decision_note: string;
+  diagrams?: { id: string; label: string; file: string }[];
 }
 
 interface CurrentDecision {
@@ -190,6 +191,20 @@ export const DesignRoute: React.FC = () => {
                     className="block h-auto w-full" />
                 </div>
               </Card>
+            )}
+
+            {manifest.diagrams && manifest.diagrams.length > 0 && (
+              <details className="rounded border border-lys-subtle p-3">
+                <summary className="cursor-pointer text-[13px] text-lys-primary">Flows and structure</summary>
+                <div className="mt-3 flex flex-col gap-4">
+                  {manifest.diagrams.map((d) => (
+                    <figure key={d.id} className="m-0">
+                      <figcaption className="mb-2 text-[12px] text-lys-muted">{d.label}</figcaption>
+                      <img src={`${BASE}/${d.file}`} alt={d.label} className="block h-auto w-full" loading="lazy" />
+                    </figure>
+                  ))}
+                </div>
+              </details>
             )}
 
             <details className="rounded border border-lys-subtle p-3">

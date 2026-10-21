@@ -172,7 +172,7 @@ def test_agent_options_merges_models_with_quota(root, monkeypatch):
 
     assert rows["claude"]["allowed"] == ["claude-sonnet-5-5", "claude-opus-5-5"]
     assert rows["claude"]["leftPct"] == 92
-    assert rows["agy"]["ready"] is False
+    assert rows["antigravity"]["ready"] is False
 
 
 def test_both_analysis_tools_still_answer_when_hermes_is_down(root):
@@ -180,3 +180,16 @@ def test_both_analysis_tools_still_answer_when_hermes_is_down(root):
 
     assert _call(tools, "agent_options", {})["isError"] is False
     assert _call(tools, "usage_analysis", {})["isError"] is False
+
+
+def test_gemini_agy_and_antigravity_are_one_agent(root, monkeypatch):
+    tools = LysStackTools(root)
+    models = {"gemini": {"allowed": ["gemini-3.8-flash-high"], "configured": {"default": "gemini-3.8-flash-high"}}}
+    capacity = {"agents": [{"id": "agy", "ready": True, "status": "ok", "leftPct": 75, "resetsAt": "2026-10-26"}]}
+    monkeypatch.setattr(tools, "_get", lambda path: capacity if path == "/capacity/limits" else models)
+
+    rows = tools.agent_options()
+
+    assert [r["id"] for r in rows] == ["antigravity"]
+    assert rows[0]["leftPct"] == 75
+    assert rows[0]["allowed"] == ["gemini-3.8-flash-high"]

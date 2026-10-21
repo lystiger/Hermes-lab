@@ -13,6 +13,7 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
+from agent_models import canonical
 from orchestrator.chat import TOOL_NAMES, ChatError, ConversationStore, write_drafts
 
 PROTOCOL_VERSION = "2024-11-05"
@@ -132,12 +133,16 @@ class LysStackTools:
         return self._get("/capacity/limits")
 
     def _quota(self):
-        """Per-agent quota as Hermes reports it. Empty when Hermes is down."""
+        """Per-agent quota as Hermes reports it, keyed by canonical agent id. Empty when Hermes is down."""
         try:
             rows = self._get("/capacity/limits").get("agents", [])
         except ToolError:
             return {}
-        return {row["id"]: row for row in rows if isinstance(row, dict) and "id" in row}
+        merged = {}
+        for row in rows:
+            if isinstance(row, dict) and "id" in row:
+                merged.setdefault(canonical(row["id"]), row)
+        return merged
 
     def usage_analysis(self):
         quota = self._quota()
@@ -150,9 +155,12 @@ class LysStackTools:
             models = self._get("/agents/models")
         except ToolError:
             models = {}
+        configs = {}
+        for agent_id, config in models.items():
+            configs.setdefault(canonical(agent_id), config)
         rows = []
-        for agent_id in sorted(set(models) | set(quota)):
-            config = models.get(agent_id, {})
+        for agent_id in sorted(set(configs) | set(quota)):
+            config = configs.get(agent_id, {})
             q = quota.get(agent_id, {})
             rows.append({
                 "id": agent_id,
@@ -183,6 +191,7 @@ def analyze_usage(quota, chats):
     agents = []
     recommendations = []
     for agent_id in sorted(quota):
+        # quota keys are already canonical, so gemini, agy and antigravity are one agent
         q = quota[agent_id]
         left = q.get("leftPct")
         agents.append({"id": agent_id, "ready": q.get("ready"), "status": q.get("status"),

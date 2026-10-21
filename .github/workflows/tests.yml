@@ -26,4 +26,4 @@ jobs:
           cache: pip
       - run: python -m pip install --upgrade pip
       - run: python -m pip install -r requirements.txt
-      - run: python -m pytest tests/test_execution_events.py -q --full-trace -p no:cacheprovider
+      - run: python -m pytest -v -p no:cacheprovider

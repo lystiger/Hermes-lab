@@ -105,7 +105,7 @@ export const DesignRoute: React.FC = () => {
 
   return (
     <>
-      <PageHeader title="Design" subtitle={chosen ? `Decision: ${chosen.label}` : 'No decision yet'} />
+      <PageHeader title="Design" />
       <div className="flex flex-col gap-4 p-4 md:p-6">
         {error && <div role="alert" className="text-[13px] text-lys-status-danger">Design boards are not available: {error}</div>}
         {!apiOk && manifest && (
@@ -114,7 +114,7 @@ export const DesignRoute: React.FC = () => {
         {manifest && (
           <>
             <div className="flex flex-wrap items-center justify-between gap-2 text-[13px] text-lys-primary">
-              <span>{chosen ? `Chosen: ${chosen.label}. Reason: ${chosen.reason}` : 'No direction chosen yet.'}</span>
+              <span>{chosen ? 'A direction is decided.' : 'No direction chosen yet.'}</span>
               {chosen && !changing && (
                 <button type="button" onClick={() => setChanging(true)} disabled={!apiOk}
                   className="rounded border border-lys-subtle px-3 py-1 text-[12px] text-lys-muted disabled:opacity-40">

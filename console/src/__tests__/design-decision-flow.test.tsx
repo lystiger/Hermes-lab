@@ -36,7 +36,7 @@ describe('choosing a design direction', () => {
     fireEvent.change(screen.getByRole('textbox', { name: 'Reason' }), { target: { value: 'Clear for buyers and calm.' } });
     fireEvent.click(screen.getByRole('button', { name: 'Confirm choice' }));
 
-    await waitFor(() => expect(screen.getByText(/Chosen: B · Clean eco/)).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText(/A direction is decided/)).toBeInTheDocument());
     const post = fetchMock.mock.calls.find(([, init]) => init?.method === 'POST');
     expect(JSON.parse(String(post![1]!.body))).toEqual({ direction: 'b-clean-eco', reason: 'Clear for buyers and calm.' });
   });

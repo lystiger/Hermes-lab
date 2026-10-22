@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { NavLink } from 'react-router-dom';
-import { Activity, GitPullRequest, Cpu, Gauge, LayoutDashboard, LayoutGrid, ListChecks, MessageSquare, PanelLeftClose, PanelLeftOpen, ScrollText, Settings, Users, type LucideIcon } from 'lucide-react';
+import { Activity, Gauge, LayoutDashboard, PanelLeftClose, PanelLeftOpen, Users, type LucideIcon, GitPullRequestArrow, ListTodo, Logs, MessagesSquare, Radar, Server, SlidersHorizontal } from 'lucide-react';
 import { Icon } from './Icon';
 import { useConsoleStore } from '../stores/useConsoleStore';
 import { useExecutionStore } from '../stores/useExecutionStore';
@@ -21,31 +21,34 @@ interface NavItem {
 
 // Jobs that have not reached a terminal state: the work the queue still holds.
 
-/** Pages grouped by what the operator is doing: running work, asking for work, agents, and the system. */
+/**
+ * Three main areas: Overview (the state of the work), Live (what is happening now) and System (agents and
+ * runtime). Icons are outline glyphs of similar weight, each centred in the same 20px box so the column aligns.
+ */
 const NAV_GROUPS: { label: string; items: NavItem[] }[] = [
   {
-    label: 'Run',
+    label: 'Overview',
     items: [
-      { to: '/', label: 'Overview', icon: LayoutDashboard },
-      { to: '/floor', label: 'Floor', icon: LayoutGrid },
-      { to: '/review', label: 'Review', icon: GitPullRequest },
-      { to: '/queue', label: 'Queue', icon: ListChecks }
+      { to: '/', label: 'Dashboard', icon: LayoutDashboard },
+      { to: '/queue', label: 'Queue', icon: ListTodo },
+      { to: '/review', label: 'Review', icon: GitPullRequestArrow }
     ]
   },
-  { label: 'Ask', items: [{ to: '/comms', label: 'Comms', icon: MessageSquare }] },
   {
-    label: 'Agents',
+    label: 'Live',
     items: [
-      { to: '/agents', label: 'Agents', icon: Users },
-      { to: '/usage', label: 'Usage', icon: Gauge }
+      { to: '/floor', label: 'Floor', icon: Radar },
+      { to: '/events', label: 'Events', icon: Logs },
+      { to: '/comms', label: 'Comms', icon: MessagesSquare }
     ]
   },
   {
     label: 'System',
     items: [
-      { to: '/events', label: 'Events', icon: ScrollText },
-      { to: '/execution', label: 'Execution', icon: Cpu },
-      { to: '/settings', label: 'Settings', icon: Settings }
+      { to: '/agents', label: 'Agents', icon: Users },
+      { to: '/usage', label: 'Usage', icon: Gauge },
+      { to: '/execution', label: 'Execution', icon: Server },
+      { to: '/settings', label: 'Settings', icon: SlidersHorizontal }
     ]
   }
 ];
@@ -151,9 +154,11 @@ export const Sidebar: React.FC = () => {
 
       {/* Nav List */}
       <nav aria-label="Pages" className="flex flex-col gap-3 mt-1">
-        {navGroups.map((group) => (
+        {navGroups.map((group, index) => (
           <div key={group.label} role="group" aria-label={group.label} className="flex flex-col gap-0.5">
-            {!collapsed && (
+            {collapsed ? (
+              index > 0 && <hr aria-hidden="true" className="mx-3 mb-2 border-lys-subtle" />
+            ) : (
               <span className="px-3 pb-1 text-[10px] font-medium tracking-wider uppercase text-lys-faint">{group.label}</span>
             )}
             {group.items.map((item) => (
@@ -171,7 +176,9 @@ export const Sidebar: React.FC = () => {
                 `}
               >
                 <span className="flex items-center gap-2.5 min-w-0">
-                  <Icon icon={item.icon} size={16} />
+                  <span className="inline-flex items-center justify-center w-5 h-5 shrink-0">
+                    <Icon icon={item.icon} size={16} />
+                  </span>
                   {!collapsed && <span className="truncate" title={item.label}>{item.label}</span>}
                 </span>
                 {item.badge && !collapsed && (

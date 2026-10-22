@@ -62,7 +62,7 @@ export const OverviewRoute: React.FC = () => {
 
   return (
     <div className="flex flex-col min-h-full">
-      <PageHeader updatedAt={updatedAt} title="Overview" subtitle="What needs you" counts={counts} />
+      <PageHeader updatedAt={updatedAt} title="Dashboard" subtitle="What needs you" counts={counts} />
 
       <div className="flex-1 flex flex-col gap-6 p-6 max-w-5xl w-full">
         {telemetryError && !telemetry && <ErrorState label="Metrics" error={telemetryError} onRetry={refetchTelemetry} />}

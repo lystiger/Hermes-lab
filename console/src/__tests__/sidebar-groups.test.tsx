@@ -12,7 +12,7 @@ import { installLiveHermes } from './support/liveHermes';
 afterEach(() => vi.unstubAllGlobals());
 
 describe('sidebar navigation', () => {
-  it('groups pages by what the operator is doing, and keeps project tools out of it', () => {
+  it('groups pages into three areas, and keeps project tools out of it', () => {
     installLiveHermes();
     render(<MemoryRouter><Sidebar /></MemoryRouter>);
     const nav = screen.getByRole('navigation', { name: 'Pages' });
@@ -21,10 +21,9 @@ describe('sidebar navigation', () => {
       within(g).getAllByRole('link').map((l) => l.textContent?.replace(/\d+|live/g, '').trim())
     ]);
     expect(groups).toEqual([
-      ['Run', ['Overview', 'Floor', 'Review', 'Queue']],
-      ['Ask', ['Comms']],
-      ['Agents', ['Agents', 'Usage']],
-      ['System', ['Events', 'Execution', 'Settings']]
+      ['Overview', ['Dashboard', 'Queue', 'Review']],
+      ['Live', ['Floor', 'Events', 'Comms']],
+      ['System', ['Agents', 'Usage', 'Execution', 'Settings']]
     ]);
     expect(within(nav).queryByRole('link', { name: /Design/ })).not.toBeInTheDocument();
   });

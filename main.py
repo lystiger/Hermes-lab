@@ -642,8 +642,14 @@ async def get_capacity_limits():
 @app.get("/jobs/{job_id}/telemetry")
 async def get_job_telemetry(job_id: str):
     """
-    Returns token usage and resource telemetry for a specific job.
+    Returns token usage for a job: totals, cost and one row per agent run, from the job's usage file
+    (durable across restarts). Falls back to the in-memory capacity registry for older jobs.
     """
+    from runtime.task_usage import read_job_usage
+
+    recorded = read_job_usage(Path.home() / "hermes-runs" / job_id) if job_id.replace("_", "").replace("-", "").isalnum() else None
+    if recorded:
+        return {"job_id": job_id, **recorded}
     return default_capacity_registry.get_job_telemetry(job_id)
 
 

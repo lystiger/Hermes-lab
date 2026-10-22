@@ -35,6 +35,7 @@ from runtime.task_graph import TaskNode, TaskGraph, TaskStatus
 from runtime.job_state import JobRecord
 from runtime.observations import Observation
 from runtime.target_subdir import normalize_target_subdir, subdir_path
+from runtime.task_usage import append_usage, task_usage
 from runtime.replanning import ProductionPlannerAdapter, PlannerAdapter, ReplanRequest, ReplanResult, GraphMutation, GraphMutationType
 from runtime.capacity import UsageSnapshotNormalizer, default_capacity_registry
 from runner.agents.errors import SprintRunnerError
@@ -1148,6 +1149,18 @@ class HermesActorAdapter(ActorAdapter):
                 exec_meta["repairable"] = runtime_meta.get("repairable", False)
                 if runtime_meta.get("blocked_by"):
                     exec_meta["blocked_by"] = runtime_meta["blocked_by"]
+
+            # Durable per-task token use (the capacity registry is in memory and resets with the runtime).
+            usage = task_usage(runtime_meta, stdout_text, stderr_text)
+            exec_meta["usage"] = usage
+            try:
+                append_usage(self.run_dir, {
+                    "task_id": task.task_id, "actor_id": actor_id, "role": role, "attempt": task.attempt,
+                    "status": status_str, "model": runtime_meta.get("model"),
+                    "at": datetime.now(timezone.utc).isoformat(), **usage,
+                })
+            except OSError as exc:
+                logger.warning("Could not record usage for task %s: %s", task.task_id, exc)
 
             error_msg = stderr_text if exit_code != 0 else (runtime_meta.get("summary") if status_str == "failed" else None)
 

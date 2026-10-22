@@ -46,7 +46,7 @@ export const QueueRoute: React.FC = () => {
           <Card accent="var(--lys-accent-gold)" label="Execution order">
             <div className="p-5 flex flex-col gap-2">
               <div className="flex items-center justify-between">
-                <span className="text-[11px] font-medium tracking-wider uppercase text-lys-faint">Execution order · active job</span>
+                <span className="text-[11px] font-medium tracking-wider uppercase text-lys-faint">Execution order · active jobs</span>
               </div>
               {Boolean(pipelineError) && <StaleNotice label="Execution order" error={pipelineError} onRetry={refetchPipeline} />}
               <ol className="flex flex-col gap-1.5">
@@ -61,6 +61,7 @@ export const QueueRoute: React.FC = () => {
                       >
                         <span className="w-6 text-lys-faint text-[11px]">{String(idx + 1).padStart(2, '0')}</span>
                         <span className="w-28 text-lys-primary font-semibold">{p.phase}</span>
+                        {p.note && <span className="text-[10px] tracking-wider uppercase text-lys-faint">{p.note}</span>}
                         <span className="text-lys-muted">{p.agentName || actor?.displayName || '—'}</span>
                         <span className="ml-auto text-[10px] tracking-wider uppercase text-lys-secondary">{p.state}</span>
                       </button>

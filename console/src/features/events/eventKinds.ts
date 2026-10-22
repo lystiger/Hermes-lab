@@ -4,15 +4,34 @@
  * so failure is matched by suffix rather than by a fixed list of mock-era names.
  */
 export function isErrorKind(kind: string): boolean {
-  return kind === 'error' || kind === 'retry' || kind === 'quota.warn' || /\.(failed|release_failed)$/.test(kind);
+  return kind === 'error' || isWarningKind(kind) || /\.(failed|release_failed|timed_out)$/.test(kind);
+}
+
+/** Degraded but not failed: Hermes kinds for limits, capacity, circuit breakers and rerouting. */
+const WARNING_KINDS = new Set([
+  'retry',
+  'quota.warn',
+  'provider.rate_limited',
+  'provider.quota_exhausted',
+  'job.waiting_for_capacity',
+  'job.blocked',
+  'verification.blocked',
+  'circuit.opened',
+  'task.rerouted',
+  'conversation.limit_reached',
+  'delegation.limit_reached'
+]);
+
+export function isWarningKind(kind: string): boolean {
+  return WARNING_KINDS.has(kind);
 }
 
 export function eventKindColor(kind: string): string {
   if (isErrorKind(kind)) {
-    return kind === 'retry' || kind === 'quota.warn' ? 'var(--lys-status-warning)' : 'var(--lys-status-danger)';
+    return isWarningKind(kind) ? 'var(--lys-status-warning)' : 'var(--lys-status-danger)';
   }
   if (kind.startsWith('agent.')) return 'var(--lys-status-success)';
-  if (kind === 'job.start' || kind === 'phase.change') return 'var(--lys-accent-gold)';
+  if (kind.startsWith('job.') || kind.startsWith('phase.')) return 'var(--lys-accent-gold)';
   return 'var(--lys-text-muted)';
 }
 
@@ -32,10 +51,10 @@ export const EVENT_CATEGORIES: { id: EventCategory; label: string; tone: string 
 
 /** Failure taxonomy for the log: a failure is a failure, a warning is a degraded state, the rest are normal. */
 export function eventCategory(kind: string): EventCategory {
-  if (isErrorKind(kind) && kind !== 'retry' && kind !== 'quota.warn') return 'failures';
-  if (kind === 'retry' || kind === 'quota.warn') return 'warnings';
+  if (isWarningKind(kind)) return 'warnings';
+  if (isErrorKind(kind)) return 'failures';
   if (kind.startsWith('agent.')) return 'agents';
-  if (kind.startsWith('job.') || kind.startsWith('phase.')) return 'jobs';
+  if (kind.startsWith('job.') || kind.startsWith('phase.') || kind.startsWith('task.')) return 'jobs';
   if (kind.startsWith('execution.')) return 'execution';
   if (kind.startsWith('message.') || kind.startsWith('thread.') || kind.startsWith('artifact.')) return 'messages';
   if (kind.startsWith('tool.')) return 'tools';

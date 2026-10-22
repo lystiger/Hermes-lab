@@ -3,7 +3,7 @@ import { describe, it, expect, beforeAll, beforeEach, vi } from 'vitest';
 vi.hoisted(() => {
   process.env.VITE_LYSCONTROL_MOCK = '1';
 });
-import { render, screen, within } from '@testing-library/react';
+import { render, screen } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import ExecutionRoute from '../routes/execution';
 import { hermesApi } from '../api/client';
@@ -37,23 +37,9 @@ describe('Execution route (mock fixtures)', () => {
     expect(screen.getByText(/MOCK FIXTURES/)).toBeInTheDocument();
   });
 
-  it('renders every live resource card with its state', () => {
-    const cards = screen.getAllByTestId('execution-resource');
-    expect(cards).toHaveLength(5);
-    expect(cards.filter((c) => c.dataset.state === 'failed')).toHaveLength(1);
-  });
-
-  it('shows the reused seat, the pooled seat countdown and the failed release', () => {
-    const reused = screen.getByText('reviewer-2').closest('[data-testid="execution-resource"]') as HTMLElement;
-    expect(within(reused).getByText('reused')).toBeInTheDocument();
-
-    const pooled = screen.getByText('builder-1').closest('[data-testid="execution-resource"]') as HTMLElement;
-    expect(within(pooled).getByText(/expires in/)).toBeInTheDocument();
-
-    const failed = screen.getByText('codex-1').closest('[data-testid="execution-resource"]') as HTMLElement;
-    expect(failed.dataset.state).toBe('failed');
-    expect(within(failed).getByText('RELEASE_FAILED')).toBeInTheDocument();
-    expect(within(failed).getByText(/release failed/i)).toBeInTheDocument();
+  it('does not render a deployed seats section', () => {
+    expect(screen.queryByText('Deployed seats')).not.toBeInTheDocument();
+    expect(screen.queryAllByTestId('execution-resource')).toHaveLength(0);
   });
 
   it('renders the recent execution timeline from events', () => {

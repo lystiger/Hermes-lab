@@ -1,5 +1,7 @@
 # M4b decisions: visible redesign (research §1.1, §2, §5, §6)
 
+> **Superseded (2026-10-22):** the character art, `agentArt.ts` and `FocalImage` described below were removed from LysControl in `066b8c9` and now live in the private repo `lystiger/LysControl-art`. Agents are shown as initial marks.
+
 Judged by screenshots. Captured at 1600×1000 from this worktree's dev server with `scripts/shoot.mjs`, plus
 a copy that adds the agent detail routes (`/agents/claude`, `/agents/codex`, `/agents/gemini`).
 

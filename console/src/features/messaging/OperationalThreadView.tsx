@@ -7,7 +7,6 @@ import { ArtifactRef, Message } from '../../api/types';
 import { CyberButton } from '../../components/CyberButton';
 import { formatTimeOfDay } from '../time/format';
 import { ErrorState } from '../../components/DataStates';
-import { PERSONA_ART_ENABLED } from '../../theme/agentArt';
 
 interface OperationalThreadViewProps {
   jobId?: string;
@@ -178,17 +177,8 @@ export const OperationalThreadView: React.FC<OperationalThreadViewProps> = ({
                 <div className="flex items-center justify-between flex-wrap gap-1 font-sans text-[11px]">
                   <div className="flex items-center flex-wrap gap-1.5">
                     {/* Avatar / Sigil */}
-                    {PERSONA_ART_ENABLED && senderPres.avatarUrl ? (
-                      <img
-                        src={senderPres.avatarUrl}
-                        alt={msg.from.displayName}
-                        className="w-4 h-4 rounded-full object-cover border border-lys-default"
-                        onError={(e) => {
-                          // Fallback to text sigil if image fails
-                          (e.target as HTMLElement).style.display = 'none';
-                        }}
-                      />
-                    ) : (
+                    {(
+
                       <span
                         style={{ color: senderCol, borderColor: `color-mix(in srgb, ${senderCol} 27%, transparent)`, backgroundColor: `color-mix(in srgb, ${senderCol} 7%, transparent)` }}
                         className="px-1 py-0.2 border text-[10px] font-bold"

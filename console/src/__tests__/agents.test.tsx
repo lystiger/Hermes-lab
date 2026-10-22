@@ -9,7 +9,6 @@ import { AgentPortrait } from '../features/agents/AgentPortrait';
 import { AgentLaneCard } from '../features/agents/AgentLaneCard';
 import { AgentDetailRoute } from '../routes/agents/$agentId';
 import { AgentSummary } from '../api/types';
-import { PERSONA_ART_ENABLED } from '../theme/agentArt';
 
 describe('Agent UI & Portrait Fallbacks', () => {
   it('renders generic agent without portrait cleanly using fallback sigil and initials', () => {
@@ -44,41 +43,19 @@ describe('Agent UI & Portrait Fallbacks', () => {
   });
 
   // Anime persona art is off on this branch; this runs on style/anime-persona.
-  it.skipIf(!PERSONA_ART_ENABLED)('renders portrayed agent correctly with portrait container', () => {
-    render(
-      <AgentPortrait
-        displayName="Gemini"
-        presentation={{
-          displayName: 'Gemini',
-          avatarUrl: '/portrait/gemini.png',
-          characterCardUrl: '/portrait/gemini.png',
-          accentColor: '#5B8CFF',
-          sigil: 'BUILD'
-        }}
-        status="RUNNING"
-        phase="BUILD"
-      />
-    );
-
-    expect(screen.getByAltText('Gemini Portrait')).toBeInTheDocument();
-    expect(screen.getByText('BUILD')).toBeInTheDocument();
-  });
-
   it('gracefully handles missing presentation object altogether', () => {
     render(
       <AgentPortrait
         displayName="Subagent-99"
         status="IDLE"
-        phase="CUSTOM"
       />
     );
 
     expect(screen.getAllByText('S').length).toBeGreaterThanOrEqual(1);
-    expect(screen.getByText('CUSTOM')).toBeInTheDocument();
+    expect(screen.queryByText('CUSTOM')).not.toBeInTheDocument();
   });
 
-  // Anime persona art is off on this branch; this runs on style/anime-persona.
-  it.skipIf(!PERSONA_ART_ENABLED)('renders view character sheet trigger on Agent Detail when characterCardUrl is present', async () => {
+  it('does not offer a character sheet, since the console shows no character art', async () => {
     render(
       <MemoryRouter initialEntries={['/agents/claude']}>
         <Routes>
@@ -89,7 +66,7 @@ describe('Agent UI & Portrait Fallbacks', () => {
 
     // The name appears in the roster and as the dossier heading; the heading is the dossier.
     expect(await screen.findByRole('heading', { name: 'Claude' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /character sheet/i })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /character sheet/i })).not.toBeInTheDocument();
   });
 
   it('renders Agent Detail without view character sheet when characterCardUrl is not present', async () => {

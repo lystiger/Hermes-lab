@@ -46,7 +46,6 @@ export const AgentLaneCard: React.FC<AgentLaneCardProps> = ({
             displayName={agent.displayName}
             presentation={agent.presentation}
             status={agent.status}
-            phase={agent.phase}
             size="sm"
           />
 
@@ -67,16 +66,11 @@ export const AgentLaneCard: React.FC<AgentLaneCardProps> = ({
               >
                 {agent.status}
               </span>
-              {agent.phase && (
-                <span className="font-sans text-[11px] tracking-wider text-lys-muted border-l border-lys-default pl-2">
-                  {agent.phase}
-                </span>
-              )}
             </div>
 
-            <p className="mt-2 text-[12px] text-lys-secondary line-clamp-2 leading-relaxed">
-              {agent.currentTask || agent.role}
-            </p>
+            {agent.currentTask && (
+              <p className="mt-2 text-[12px] text-lys-secondary line-clamp-2 leading-relaxed">{agent.currentTask}</p>
+            )}
 
             <div className="mt-2.5 flex flex-wrap items-center gap-x-3.5 gap-y-1 font-sans text-[11px] text-lys-muted">
               <span>{isRunning ? 'active runtime' : 'idle'}</span>
@@ -118,24 +112,12 @@ export const AgentLaneCard: React.FC<AgentLaneCardProps> = ({
         displayName={agent.displayName}
         presentation={agent.presentation}
         status={agent.status}
-        phase={agent.phase}
         size="md"
       />
 
       <div className="flex-1 min-w-0 flex flex-col">
         <div className="flex items-center gap-2.5">
           <span className="text-[15px] font-semibold text-lys-primary">{agent.displayName}</span>
-          {agent.phase && (
-            <span
-              style={{
-                color: accentColor,
-                borderColor: `color-mix(in srgb, ${accentColor} 27%, transparent)`
-              }}
-              className="font-sans text-[11px] tracking-wider border px-1.5 py-0.5"
-            >
-              {agent.phase}
-            </span>
-          )}
           <span
             style={{ color: isRunning ? 'var(--lys-status-success)' : 'var(--lys-text-muted)' }}
             className="flex items-center gap-1.5 font-sans text-[11px] tracking-wider"
@@ -182,9 +164,9 @@ export const AgentLaneCard: React.FC<AgentLaneCardProps> = ({
           )}
         </div>
 
-        <p className="mt-3 text-[12px] text-lys-secondary line-clamp-2 leading-relaxed font-sans">
-          {agent.currentTask || agent.role}
-        </p>
+        {agent.currentTask && (
+          <p className="mt-3 text-[12px] text-lys-secondary line-clamp-2 leading-relaxed font-sans">{agent.currentTask}</p>
+        )}
 
         <div className="flex-1 min-h-3" />
 
@@ -203,7 +185,7 @@ export const AgentLaneCard: React.FC<AgentLaneCardProps> = ({
             <div className="font-sans text-[13px] text-lys-success mt-0.5">{agent.status}</div>
           </div>
           <div>
-            <div className="text-[11px] text-lys-faint tracking-wider font-sans">ROLE</div>
+            <div className="text-[11px] text-lys-faint tracking-wider font-sans">FOCUS</div>
             <div className="font-sans text-[13px] text-lys-muted mt-0.5 truncate">{agent.capabilities[0] || 'agent'}</div>
           </div>
         </div>

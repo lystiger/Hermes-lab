@@ -22,14 +22,14 @@ export const JobModal: React.FC = () => {
       >
         {/* Modal Top Bar */}
         <div className="flex items-center justify-between px-4 py-2.5 bg-lys-surface-0 border-b border-lys-subtle">
-          <div className="font-sans text-[12px] text-lys-muted flex items-center gap-2">
-            <span className="text-lys-gold">LYSCONTROL // JOB INSPECTOR</span>
+          <div className="min-w-0 flex-1 font-sans text-[12px] text-lys-muted flex items-center gap-2">
+            <span className="shrink-0 text-lys-gold">LYSCONTROL // JOB INSPECTOR</span>
             <span>·</span>
-            <CopyId value={activeModalJobId} />
+            <CopyId truncate value={activeModalJobId} />
           </div>
           <button
             onClick={() => setActiveModalJobId(null)}
-            className="font-sans text-[12px] text-lys-muted hover:text-lys-primary px-2 py-0.5 border border-transparent hover:border-lys-default cursor-pointer transition-colors"
+            className="shrink-0 font-sans text-[12px] text-lys-muted hover:text-lys-primary px-2 py-0.5 border border-transparent hover:border-lys-default cursor-pointer transition-colors"
           >
             <X size={12} strokeWidth={2} aria-hidden="true" className="inline-block mr-1 -mt-0.5" /> CLOSE
           </button>

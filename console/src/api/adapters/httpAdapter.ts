@@ -146,10 +146,35 @@ interface BackendTraceEventDTO {
   metadata?: Record<string, any>;
 }
 
+/** A Hermes response whose JSON body has already been read. Callers use only these members. */
+interface HermesResponse {
+  ok: boolean;
+  status: number;
+  statusText: string;
+  json(): Promise<any>;
+}
+
 export class HttpHermesApi implements HermesApi {
   private baseUrl: string;
   private lastEventId: string | null = null;
   private activeEventSource: EventSource | null = null;
+  private requestsInFlight = 0;
+  private idleWaiters = new Set<() => void>();
+
+  /** Recheck after waking: a completed request can immediately start another request in the burst. */
+  async waitForIdle(signal?: AbortSignal): Promise<void> {
+    while (this.requestsInFlight > 0 && !signal?.aborted) {
+      await new Promise<void>((resolve) => {
+        const done = () => {
+          this.idleWaiters.delete(done);
+          signal?.removeEventListener('abort', done);
+          resolve();
+        };
+        this.idleWaiters.add(done);
+        signal?.addEventListener('abort', done, { once: true });
+      });
+    }
+  }
 
   constructor(baseUrl = 'http://localhost:8000') {
     // Strip trailing slash if present
@@ -160,14 +185,35 @@ export class HttpHermesApi implements HermesApi {
    * Single entry point for HTTP requests. A network failure is reported as HermesUnreachableError and
    * recorded for the connection banner; any HTTP response, whatever its status, counts as contact.
    */
-  private async request(url: string, init?: RequestInit): Promise<Response> {
-    let res: Response;
+  private async request(url: string, init?: RequestInit): Promise<HermesResponse> {
+    let res: HermesResponse;
+    this.requestsInFlight += 1;
     try {
-      // A request that never settles would leave its panel loading forever; after the limit it counts as unreachable.
-      res = await fetch(url, { ...init, signal: init?.signal ?? AbortSignal.timeout(REQUEST_TIMEOUT_MS) });
-    } catch {
-      recordUnreachable(this.baseUrl);
-      throw new HermesUnreachableError(this.baseUrl);
+      let raw: Response;
+      try {
+        // A request that never settles would leave its panel loading forever; after the limit it counts as unreachable.
+        raw = await fetch(url, { ...init, signal: init?.signal ?? AbortSignal.timeout(REQUEST_TIMEOUT_MS) });
+      } catch {
+        recordUnreachable(this.baseUrl);
+        throw new HermesUnreachableError(this.baseUrl);
+      }
+      // Read the body while the request is still counted, so waitForIdle means every response has fully
+      // arrived, not only its headers. A body that is not JSON keeps its parse error for the caller.
+      const body = raw.status === 204 ? { value: undefined } : await Promise.resolve().then(() => raw.json()).then((value: unknown) => ({ value }), (error: unknown) => ({ error }));
+      res = {
+        ok: raw.ok,
+        status: raw.status,
+        statusText: raw.statusText,
+        json: async () => {
+          if ('error' in body) throw body.error;
+          return body.value as any;
+        }
+      };
+    } finally {
+      this.requestsInFlight -= 1;
+      if (this.requestsInFlight === 0) {
+        for (const wake of this.idleWaiters) wake();
+      }
     }
     // Only a successful response is contact. A 4xx/5xx proves the server answered, not that the data is current.
     if (res.ok) recordContact();
@@ -207,8 +253,6 @@ export class HttpHermesApi implements HermesApi {
         presentation: {
           displayName: dto.presentation?.displayName || dto.displayName || actor.displayName,
           accentColor: actorAccent(dto.id, dto.presentation?.accentColor || actor.accentColor),
-          avatarUrl: dto.presentation?.avatarUrl || `/portrait/${dto.id}.png`,
-          characterCardUrl: dto.presentation?.characterCardUrl || (['gemini', 'claude', 'codex'].includes(dto.id) ? `/portrait/${dto.id}.png` : undefined),
           sigil: dto.presentation?.sigil || dto.id.toUpperCase().slice(0, 4),
           code: dto.presentation?.code || dto.id.toUpperCase().slice(0, 4),
           subtitle: dto.presentation?.subtitle || dto.persona?.visual?.subtitle || dto.persona?.summary,
@@ -329,18 +373,14 @@ export class HttpHermesApi implements HermesApi {
     };
   }
 
-  /** Steps of the job that is active right now. Empty when none is active; a historical job is never shown here. */
+  /** Steps of every job that is active right now, in job-list order. Empty when none is active; historical jobs are never shown. */
   async getPipeline(): Promise<PipelineStep[]> {
     const jobs = await this.getJobs();
-    const activeJob = jobs.find((j) => ACTIVE_JOB_STATUSES.includes(j.status));
-    if (!activeJob) {
-      return [];
-    }
-    const detail = await this.getJob(activeJob.id);
-    return (detail?.executionGraph || []).map((s) => ({
-      ...s,
-      jobId: activeJob.id
-    }));
+    const activeJobs = jobs.filter((j) => ACTIVE_JOB_STATUSES.includes(j.status));
+    const details = await Promise.all(activeJobs.map((j) => this.getJob(j.id)));
+    return details.flatMap((detail, idx) =>
+      (detail?.executionGraph || []).map((s) => ({ ...s, jobId: activeJobs[idx].id }))
+    );
   }
 
   /**

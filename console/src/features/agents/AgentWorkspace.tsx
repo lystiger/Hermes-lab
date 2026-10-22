@@ -5,6 +5,7 @@ import { useConsoleStore } from '../../stores/useConsoleStore';
 import { EmptyState, ErrorState, LoadingState, ResourceError } from '../../components/DataStates';
 import { AgentRoster } from './AgentRoster';
 import { AgentDossier } from './AgentDossier';
+import { RunningPhasesStrip } from './RunningPhasesStrip';
 
 /**
  * Roster on the left, dossier of the selected agent on the right (research §5.1). The route decides the
@@ -39,6 +40,7 @@ export const AgentWorkspace: React.FC<{ selectedId?: string }> = ({ selectedId }
       />
 
       <div className="flex-1 min-w-0 flex flex-col">
+        <RunningPhasesStrip />
         {!effectiveId && !roster.loading && !roster.error && (
           <EmptyState>No agent selected</EmptyState>
         )}

@@ -116,11 +116,12 @@ describe('M1 truth sweep: HTTP-mode screens render only real data', () => {
     expect(metricValue('FAILED 24H')).toBe('0');
     // Process total since runtime start, from the observed capacity report; never labelled as today.
     expect(metricValue('TOKENS')).toMatch(/^0/);
-    // Spend and budget are unknown-only, so they are listed on the not-reported line instead of a panel.
-    expect(screen.getByText('estimated spend')).toBeInTheDocument();
-    expect(screen.getByText(/Unreported metrics/)).toBeInTheDocument();
-
-    expect(await screen.findByText('provider usage')).toBeInTheDocument();
+    // Unknown spend and budget stay explicit in the compact summary, with reasons on hover.
+    expect(metricValue('SPEND')).toBe('—');
+    expect(metricValue('BUDGET')).toBe('—');
+    expect(screen.getByText('SPEND').parentElement).toHaveAttribute('title', 'Hermes reports no cost data');
+    expect(screen.getByText('BUDGET').parentElement).toHaveAttribute('title', 'Hermes exposes no sprint budget');
+    expect(screen.queryByText(/Unreported metrics/)).not.toBeInTheDocument();
     expectNoFabrication(container);
   });
 

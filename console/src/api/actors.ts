@@ -7,7 +7,6 @@ export const SYSTEM_ACTORS: Record<string, ActorRef> = {
     kind: 'runtime',
     displayName: 'Hermes',
     accentColor: agentAccent('hermes'),
-    avatarUrl: '/portrait/hermes.png',
     subtitle: 'Orchestrator'
   },
   hermes_runner: {
@@ -41,7 +40,6 @@ export const SYSTEM_ACTORS: Record<string, ActorRef> = {
     kind: 'runtime',
     displayName: 'Hermes',
     accentColor: agentAccent('hermes'),
-    avatarUrl: '/portrait/hermes.png',
     subtitle: 'Orchestrator'
   },
   lyscontrol: {
@@ -93,9 +91,6 @@ export function resolveActorPresentation(
       : agentRegistry[normalized];
 
     if (foundAgent) {
-      const avatarUrl =
-        foundAgent.presentation?.avatarUrl ||
-        foundAgent.persona?.visual?.avatar;
       const subtitle =
         foundAgent.presentation?.subtitle ||
         foundAgent.persona?.visual?.subtitle ||
@@ -107,7 +102,6 @@ export function resolveActorPresentation(
         kind: 'agent',
         displayName: foundAgent.displayName,
         accentColor: actorAccent(foundAgent.id, foundAgent.presentation?.accentColor),
-        avatarUrl,
         subtitle
       };
     }

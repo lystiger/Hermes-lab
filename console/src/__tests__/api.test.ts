@@ -5,7 +5,7 @@ import { resolveActorPresentation } from '../api/actors';
 describe('MockHermesApi Contract Implementation', () => {
   const api = new MockHermesApi();
 
-  it('should return a list of registered agents with character card metadata', async () => {
+  it('should return a list of registered agents without character art', async () => {
     const agents = await api.getAgents();
     expect(Array.isArray(agents)).toBe(true);
     expect(agents.length).toBeGreaterThan(0);
@@ -13,7 +13,7 @@ describe('MockHermesApi Contract Implementation', () => {
     const gemini = agents.find(a => a.id === 'gemini');
     expect(gemini).toBeDefined();
     expect(gemini?.displayName).toBe('Gemini');
-    expect(gemini?.presentation?.characterCardUrl).toBeDefined();
+    expect(gemini?.presentation?.characterCardUrl).toBeUndefined();
     expect(gemini?.presentation?.accentColor).toBe('var(--lys-agent-gemini)');
   });
 
@@ -22,7 +22,7 @@ describe('MockHermesApi Contract Implementation', () => {
     expect(agent).not.toBeNull();
     expect(agent?.id).toBe('claude');
     expect(agent?.role).toContain('Architecture');
-    expect(agent?.presentation?.characterCardUrl).toBe('/portrait/claude.png');
+    expect(agent?.presentation?.characterCardUrl).toBeUndefined();
     expect(agent?.allowance.length).toBeGreaterThan(0);
   });
 

@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 const [out, base = 'http://localhost:3001', waitMs = '5000'] = process.argv.slice(2);
 const WIDTHS = [900, 1280, 1440, 1920];
-const PAGES = ['', 'queue', 'agents', 'execution', 'events', 'usage', 'settings'];
+const PAGES = ['', 'queue', 'agents', 'execution', 'events', 'inspector', 'usage', 'settings'];
 const profile = mkdtempSync(join(process.env.SCRATCH || tmpdir(), 'chrome-'));
 const port = 9300 + Math.floor(Math.random() * 500);
 const chrome = spawn('chromium', ['--headless=new', `--user-data-dir=${profile}`, '--no-first-run', '--no-default-browser-check',
@@ -14,6 +14,7 @@ const chrome = spawn('chromium', ['--headless=new', `--user-data-dir=${profile}`
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 let target;
 for (let i = 0; i < 50 && !target; i++) { try { target = (await (await fetch(`http://127.0.0.1:${port}/json`)).json()).find((t) => t.type === 'page'); } catch { await sleep(200); } }
+if (!target) { chrome.kill(); rmSync(profile, { recursive: true, force: true }); throw new Error('Chromium debugging endpoint unavailable; layout check did not run'); }
 const ws = new WebSocket(target.webSocketDebuggerUrl);
 await new Promise((r) => ws.addEventListener('open', r));
 let id = 0; const pending = new Map();
@@ -22,7 +23,8 @@ const send = (method, params = {}) => new Promise((r) => { const i = ++id; pendi
 // Runs in the page: overlapping text, horizontal overflow, clipped text without a title.
 const SCAN = `(() => {
   const issues = [];
-  const texts = [...document.querySelectorAll('body *')].filter(el => {
+  const scanRoot = document.querySelector('[role=dialog]') || document.body;
+  const texts = [...scanRoot.querySelectorAll('*')].filter(el => {
     const own = [...el.childNodes].some(n => n.nodeType === 3 && n.textContent.trim());
     const s = getComputedStyle(el); const r = el.getBoundingClientRect();
     return own && s.visibility !== 'hidden' && s.display !== 'none' && r.width > 0 && r.height > 0 && +s.opacity > 0.05;
@@ -56,8 +58,20 @@ for (const width of WIDTHS) {
   await send('Emulation.setDeviceMetricsOverride', { width, height: 1000, deviceScaleFactor: 1, mobile: false });
   for (const page of PAGES) {
     const name = page || 'overview';
-    await send('Page.navigate', { url: `${base}/${page}` });
+    await send('Page.navigate', { url: `${base}/${page === 'inspector' ? 'queue' : page}` });
     await sleep(Number(waitMs));
+    if (page === 'inspector') {
+      await send('Runtime.evaluate', { expression: `(() => {
+        const job = [...document.querySelectorAll('button')].find(el => el.title?.startsWith('/home/lystiger/Projects/Hermes-lab/prompts/'));
+        job?.click();
+      })()` });
+      await sleep(1000);
+    }
+    // A short fixture must never silently pass this long-text regression check.
+    if (['', 'queue', 'events', 'inspector'].includes(page)) {
+      const fixture = await send('Runtime.evaluate', { expression: `!!document.querySelector('[title^="/home/lystiger/Projects/Hermes-lab/prompts/"]')`, returnByValue: true });
+      if (!fixture.result.value) throw new Error(`Long-text mock fixture missing on ${name}; start Vite with VITE_LYSCONTROL_MOCK=1`);
+    }
     const { result } = await send('Runtime.evaluate', { expression: SCAN, returnByValue: true });
     report[`${width}/${name}`] = result.value;
     const { data } = await send('Page.captureScreenshot', { format: 'png' });

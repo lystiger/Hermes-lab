@@ -1,41 +1,23 @@
 import React, { useMemo } from 'react';
-import { ExecutionResourceCard } from '../features/execution/ExecutionResourceCard';
 import { ExecutionTimeline } from '../features/execution/ExecutionTimeline';
-import { executionTimeline, groupByBackend, stateStyle } from '../features/execution/executionFormat';
-import { useNow } from '../features/execution/useNow';
+import { executionTimeline } from '../features/execution/executionFormat';
 import { useExecution } from '../api/hooks';
 import { useConsoleStore } from '../stores/useConsoleStore';
 import { isRealApiMode } from '../api/client';
 import { Card } from '../components/Card';
 import { EmptyState, ErrorState, LoadingState } from '../components/DataStates';
 import { PageHeader, HeaderCount } from '../components/PageHeader';
-import { NotReportedItem } from '../components/NotReported';
-
-const NOT_REPORTED: NotReportedItem[] = [
-  { label: 'seat memory', reason: 'The execution snapshot carries no memory or compute figures' },
-  { label: 'seat output', reason: 'Hermes does not stream stdout from seats into this console' },
-  { label: 'seat heartbeat', reason: 'No heartbeat latency is measured by the snapshot' }
-];
 
 export const ExecutionRoute: React.FC = () => {
   const { view, snapshotStatus, snapshotError, snapshotLoadedAt, refresh } = useExecution();
   const allEvents = useConsoleStore((s) => s.allEvents);
-  const nowMs = useNow(1000);
 
-  const backendNames = view.backends.map((b) => b.name);
-  const resources = useMemo(() => Object.values(view.resources), [view.resources]);
-  const groups = useMemo(() => groupByBackend(resources, backendNames), [resources, backendNames]);
   const timeline = useMemo(() => executionTimeline(allEvents), [allEvents]);
   const loaded = snapshotStatus === 'ready';
-  const active = resources.filter((r) => r.state === 'acquiring' || r.state === 'running').length;
   const available = view.backends.filter((b) => b.available).length;
 
   const counts: HeaderCount[] = loaded
-    ? [
-        { label: 'DEPLOYED SEATS', value: resources.length },
-        { label: 'ACTIVE', value: active, tone: active ? 'var(--lys-status-success)' : undefined },
-        { label: 'BACKENDS AVAILABLE', value: `${available}/${view.backends.length}`, tone: available === view.backends.length ? undefined : 'var(--lys-status-warning)' }
-      ]
+    ? [{ label: 'BACKENDS AVAILABLE', value: `${available}/${view.backends.length}`, tone: available === view.backends.length ? undefined : 'var(--lys-status-warning)' }]
     : [];
 
   return (
@@ -43,9 +25,8 @@ export const ExecutionRoute: React.FC = () => {
       <PageHeader
         updatedAt={snapshotLoadedAt ? Date.parse(snapshotLoadedAt) : null}
         title="Execution"
-        subtitle="Backends and seats"
+        subtitle="Backends"
         counts={counts}
-        notReported={NOT_REPORTED}
         actions={
           <button onClick={() => void refresh()} className="text-[12px] px-3 py-1.5 border border-lys-default text-lys-muted hover:text-lys-primary cursor-pointer transition-colors">
             Refresh
@@ -88,31 +69,6 @@ export const ExecutionRoute: React.FC = () => {
               </Card>
             );
           })}
-        </section>
-
-        <section aria-label="Deployed seats" className="flex flex-col gap-3">
-          <div className="text-[11px] font-medium tracking-wider uppercase text-lys-faint">Deployed seats</div>
-          {groups.length === 0 ? (
-            <div className="px-5 py-3 bg-lys-surface-1 border border-lys-subtle rounded-md flex items-center justify-between text-[12px] text-lys-muted">
-              <span>No deployed seats</span>
-            </div>
-          ) : (
-            groups.map((g) => (
-              <div key={g.backend} className="flex flex-col gap-3">
-                <div className="flex items-center gap-3 text-[13px]">
-                  <span className="font-semibold text-lys-primary">{g.backend}</span>
-                  <span className="text-lys-faint">{g.resources.length} seat{g.resources.length === 1 ? '' : 's'}</span>
-                </div>
-                <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
-                  {g.resources.map((r, idx) => (
-                    <Card key={`${r.backend}|${r.kind}|${r.id}`} accent={stateStyle(r.state).color} label={`Seat ${r.id}`}>
-                      <ExecutionResourceCard resource={r} nowMs={nowMs} seat={idx + 1} />
-                    </Card>
-                  ))}
-                </div>
-              </div>
-            ))
-          )}
         </section>
 
         <Card label="Recent execution timeline">

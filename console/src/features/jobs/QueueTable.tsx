@@ -68,15 +68,15 @@ export const QueueTable: React.FC<QueueTableProps> = ({
       )}
 
       {/* Table Header */}
-      <div className="flex items-center gap-3.5 px-5 py-2.5 border-b border-lys-subtle font-sans text-[11px] tracking-wider text-lys-faint bg-lys-surface-0">
-        <span className="w-8 flex-shrink-0">P</span>
-        <span className="w-12 flex-shrink-0">JOB</span>
-        <span className="flex-1 min-w-[220px]">TASK</span>
-        <span className="w-36 flex-shrink-0 hidden md:block">REPOSITORY</span>
-        <span className="w-48 flex-shrink-0 hidden lg:block">AGENT CHAIN</span>
-        <span className="w-24 flex-shrink-0 text-right">EST TOKENS</span>
-        <span className="w-20 flex-shrink-0 text-right hidden sm:block">EST TIME</span>
-        <span className="w-24 flex-shrink-0 text-right">STATUS</span>
+      <div className="grid grid-cols-[24px_90px_minmax(0,1fr)_80px_88px] xl:grid-cols-[24px_110px_minmax(0,1fr)_100px_90px_80px_70px_88px] items-center gap-3 px-5 py-2.5 border-b border-lys-subtle font-sans text-[11px] tracking-wider text-lys-faint bg-lys-surface-0">
+        <span className="min-w-0">P</span>
+        <span className="min-w-0">JOB</span>
+        <span className="min-w-0">TASK</span>
+        <span className="min-w-0 hidden xl:block">REPOSITORY</span>
+        <span className="min-w-0 hidden xl:block">AGENT CHAIN</span>
+        <span className="min-w-0 text-right">EST TOKENS</span>
+        <span className="min-w-0 text-right hidden xl:block">EST TIME</span>
+        <span className="min-w-0 text-right">STATUS</span>
       </div>
 
       {/* Table Body */}
@@ -93,33 +93,33 @@ export const QueueTable: React.FC<QueueTableProps> = ({
               style={{
                 backgroundColor: isBlocked ? 'color-mix(in srgb, var(--lys-status-warning) 5%, transparent)' : 'var(--lys-bg-base)'
               }}
-              className="flex items-center gap-3.5 px-5 py-3 border-b border-lys-subtle cursor-pointer hover:bg-lys-surface-1 transition-colors"
+              className="grid grid-cols-[24px_90px_minmax(0,1fr)_80px_88px] xl:grid-cols-[24px_110px_minmax(0,1fr)_100px_90px_80px_70px_88px] items-center gap-3 px-5 py-3 border-b border-lys-subtle cursor-pointer hover:bg-lys-surface-1 transition-colors"
             >
               {/* Priority */}
               <span
                 style={{ color: prioColor }}
-                className="w-8 flex-shrink-0 font-sans text-[11px] font-semibold"
+                className="min-w-0 font-sans text-[11px] font-semibold"
               >
                 {q.priority}
               </span>
 
               {/* ID */}
-              <span className="w-12 flex-shrink-0 font-sans text-[12px] text-lys-muted">
+              <span title={q.id} className="min-w-0 truncate font-sans text-[12px] text-lys-muted">
                 {q.id}
               </span>
 
               {/* Task Name */}
-              <span className="flex-1 min-w-[220px] text-[13px] text-lys-primary break-words">
+              <span title={q.title} className="min-w-0 truncate text-[13px] text-lys-primary">
                 {q.title}
               </span>
 
               {/* Repo */}
-              <span className="w-36 flex-shrink-0 hidden md:block font-sans text-[11px] text-lys-muted break-words">
+              <span title={q.repository} className="min-w-0 hidden xl:block truncate font-sans text-[11px] text-lys-muted">
                 {q.repository}
               </span>
 
               {/* Agent Chain Badges */}
-              <div className="w-48 flex-shrink-0 hidden lg:flex items-center gap-1.5 overflow-hidden">
+              <div className="min-w-0 hidden xl:flex items-center gap-1.5 overflow-hidden">
                 {q.assignedAgentIds.map((agId: AgentId, i: number) => {
                   const actor = resolveActorPresentation(agId, agents);
                   const agColor = actor.accentColor || 'var(--lys-text-muted)';
@@ -145,19 +145,19 @@ export const QueueTable: React.FC<QueueTableProps> = ({
               </div>
 
               {/* Tokens */}
-              <span className="w-24 flex-shrink-0 text-right font-sans text-[11px] text-lys-muted">
+              <span className="min-w-0 text-right font-sans text-[11px] text-lys-muted">
                 {q.estimatedTokens || '—'}
               </span>
 
               {/* Time */}
-              <span className="w-20 flex-shrink-0 text-right hidden sm:block font-sans text-[11px] text-lys-muted">
+              <span className="min-w-0 text-right hidden xl:block font-sans text-[11px] text-lys-muted">
                 {q.estimatedTime || '—'}
               </span>
 
               {/* Status */}
               <span
                 style={{ color: statusColor }}
-                className="w-24 flex-shrink-0 text-right font-sans text-[11px] tracking-wider font-semibold"
+                className="min-w-0 text-right font-sans text-[11px] tracking-wider font-semibold"
               >
                 {q.status}
               </span>

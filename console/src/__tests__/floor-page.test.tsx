@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import type { JobPhase } from '../api/types';
 
-const hooks = vi.hoisted(() => ({ useAgents: vi.fn(), useJob: vi.fn(), useJobs: vi.fn(), useJobTelemetry: vi.fn(() => ({ telemetry: null })) }));
+const hooks = vi.hoisted(() => ({ useAgents: vi.fn(), useJob: vi.fn(), useJobs: vi.fn(), useJobTelemetry: vi.fn((): { telemetry: unknown } => ({ telemetry: null })) }));
 vi.mock('../api/hooks', () => hooks);
 
 import { FloorRoute } from '../routes/floor';

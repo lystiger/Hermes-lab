@@ -7,6 +7,7 @@ import {
   JobObservation,
   JobTokenTelemetry,
   TaskUsage,
+  RunReview,
   ProviderTelemetry,
   TaskNode,
   TraceEvent,
@@ -314,4 +315,30 @@ export function describeError(err: unknown): string {
     return JSON.stringify(err);
   }
   return String(err);
+}
+
+export function mapRunReview(raw: any): RunReview {
+  const verdict = pick(raw, 'verdict');
+  return {
+    jobId: String(pick(raw, 'jobId', 'job_id') ?? ''),
+    goal: String(pick(raw, 'goal') ?? ''),
+    branch: String(pick(raw, 'branch') ?? ''),
+    repairs: nullableNumber(pick(raw, 'repairs')) ?? 0,
+    tasks: Array.isArray(pick(raw, 'tasks'))
+      ? (pick(raw, 'tasks') as any[]).map((t) => ({
+          id: String(t?.id ?? ''), role: String(t?.role ?? '?'), agent: String(t?.agent ?? '-'), status: String(t?.status ?? '')
+        }))
+      : [],
+    verdict: verdict && typeof verdict === 'object'
+      ? {
+          task: String(verdict.task ?? ''),
+          summary: typeof verdict.summary === 'string' ? verdict.summary : null,
+          findings: Array.isArray(verdict.findings) ? verdict.findings.filter((f: unknown) => typeof f === 'string') : []
+        }
+      : null,
+    costUsd: nullableNumber(pick(raw, 'costUsd', 'cost_usd')),
+    totalTokens: nullableNumber(pick(raw, 'totalTokens', 'total_tokens')) ?? 0,
+    prUrl: (pick(raw, 'prUrl', 'pr_url') as string | null | undefined) ?? null,
+    finishedAt: (pick(raw, 'finalizedAt', 'finishedAt') as string | null | undefined) ?? null
+  };
 }

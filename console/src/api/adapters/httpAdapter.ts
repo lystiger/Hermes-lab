@@ -19,6 +19,7 @@ import {
   CapacityTelemetry,
   AgentLimitsReport,
   JobTokenTelemetry,
+  RunReview,
   TaskNode,
   AgentRun,
   JobObservation,
@@ -37,6 +38,7 @@ import {
   mapCapacityTelemetry,
   mapAgentLimits,
   mapJobTokenTelemetry,
+  mapRunReview,
   mapTaskNode,
   mapAgentRun,
   mapObservation
@@ -714,6 +716,11 @@ export class HttpHermesApi implements HermesApi {
 
   async getAgentLimits(): Promise<AgentLimitsReport> {
     return mapAgentLimits(await this.getJson('/capacity/limits', '/capacity/limits'));
+  }
+
+  async getReviews(): Promise<RunReview[]> {
+    const data = await this.getJson('/reviews', '/reviews');
+    return Array.isArray(data) ? data.map(mapRunReview) : [];
   }
 
   async getJobTelemetry(jobId: string): Promise<JobTokenTelemetry> {

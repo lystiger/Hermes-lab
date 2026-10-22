@@ -77,6 +77,8 @@ export function floorDependencies(phases: readonly JobPhase[] | undefined, insig
 /** "$0.0047 · 104k tokens", "12.9k tokens" or null when nothing was recorded. */
 export function formatCost(costUsd: number | null, totalTokens: number): string | null {
   if (costUsd === null && totalTokens === 0) return null;
-  const tokens = totalTokens >= 1000 ? `${(totalTokens / 1000).toFixed(totalTokens >= 100_000 ? 0 : 1)}k` : String(totalTokens);
+  const tokens = totalTokens >= 1_000_000
+    ? `${(totalTokens / 1_000_000).toFixed(2)}M`
+    : totalTokens >= 1000 ? `${(totalTokens / 1000).toFixed(totalTokens >= 100_000 ? 0 : 1)}k` : String(totalTokens);
   return costUsd === null ? `${tokens} tokens` : `$${costUsd.toFixed(4)} · ${tokens} tokens`;
 }

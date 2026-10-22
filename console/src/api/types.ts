@@ -808,3 +808,33 @@ export interface SetAgentModelResponse {
   default: string;
   effort: string | null;
 }
+
+/** One task of a finished run, as the review lists it. */
+export interface ReviewTask {
+  id: string;
+  role: string;
+  agent: string;
+  status: string;
+}
+
+/** The last passing check of a finished run: its summary and the findings it reported. */
+export interface ReviewVerdict {
+  task: string;
+  summary: string | null;
+  findings: string[];
+}
+
+/** A completed goal-planned run waiting for (or past) human review, from GET /reviews. */
+export interface RunReview {
+  jobId: string;
+  goal: string;
+  branch: string;
+  repairs: number;
+  tasks: ReviewTask[];
+  verdict: ReviewVerdict | null;
+  costUsd: number | null;
+  totalTokens: number;
+  /** null when Hermes could not open the pull request (no remote, gh missing, or turned off). */
+  prUrl: string | null;
+  finishedAt: string | null;
+}

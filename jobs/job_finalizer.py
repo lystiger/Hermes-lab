@@ -140,11 +140,14 @@ def prune_merged_job_branches(repo: Path, keep: Optional[str] = None) -> List[st
 
 
 def finalize_completed_job(engine: Any, repo: Path, worktree_root: Path, run_dir: Path,
-                           lysstack_root: Optional[Path] = None) -> Dict[str, Any]:
+                           lysstack_root: Optional[Path] = None, review: bool = True) -> Dict[str, Any]:
+    """review=False (a dry run: no agent changed anything) only cleans up: no PR, no run record."""
     summary = summarize(engine, run_dir)
-    pr_url = open_pull_request(repo, engine.job.branch, summary)
-    lysstack = lysstack_root or Path(os.environ.get("HERMES_LYSSTACK_ROOT", Path.home() / "Projects" / "LysStack"))
-    record = record_run(lysstack, summary, pr_url)
+    pr_url = record = None
+    if review:
+        pr_url = open_pull_request(repo, engine.job.branch, summary)
+        lysstack = lysstack_root or Path(os.environ.get("HERMES_LYSSTACK_ROOT", Path.home() / "Projects" / "LysStack"))
+        record = record_run(lysstack, summary, pr_url)
     removed = clean_job_worktrees(repo, worktree_root, engine.job.job_id)
     pruned = prune_merged_job_branches(repo, keep=engine.job.branch)
     result = {"prUrl": pr_url, "runLog": str(record) if record else None, "worktreesRemoved": removed, "pruned": pruned}

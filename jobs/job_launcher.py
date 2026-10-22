@@ -103,7 +103,7 @@ class JobLauncher:
         try:
             result = await asyncio.to_thread(
                 finalize_completed_job, engine, Path(meta["target_repo"]), Path(meta["worktree_root"]),
-                Path(meta["runs_root"]) / job_id,
+                Path(meta["runs_root"]) / job_id, review=not meta.get("dry_run"),
             )
         except Exception as exc:
             logger.exception("Finalizing job %s failed: %s", job_id, exc)
@@ -552,6 +552,7 @@ class JobLauncher:
             "runs_root": str(runs_root),
             "planning_mode": "grounded_planner",
             "launch_mode": mode,
+            "dry_run": bool(dry_run or skip_agent_exec),
         }
 
         engine = ReactiveJobEngine(

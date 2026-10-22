@@ -78,3 +78,18 @@ def test_integration_branches_already_in_main_are_pruned_locally_and_on_origin(t
     assert sorted(pruned) == ["job/run_2/integration", "job/run_3/integration"]
     assert git(repo, "branch", "--list", "job/*").split() == ["job/run_4/integration"]
     assert "job/run_2/integration" not in git(repo, "ls-remote", "--heads", "origin")
+
+
+def test_a_dry_run_is_only_cleaned_up(tmp_path, monkeypatch):
+    monkeypatch.setenv("HERMES_AUTO_PR", "1")
+    repo, job = make_repo(tmp_path), "run_dry"
+    wt_root = tmp_path / "worktrees" / job
+    git(repo, "worktree", "add", "-q", "-b", f"job/{job}/integration", str(wt_root / "integration"))
+    lysstack = tmp_path / "LysStack"
+    (lysstack / "operating_system").mkdir(parents=True)
+    run_dir = tmp_path / "runs" / job
+    run_dir.mkdir(parents=True)
+    result = finalize_completed_job(fake_engine(job), repo, wt_root, run_dir, lysstack_root=lysstack, review=False)
+    assert result["prUrl"] is None and result["runLog"] is None and result["worktreesRemoved"] == 1
+    assert not (lysstack / "operating_system" / "run-log.md").exists()
+    assert "job/run_dry/integration" not in git(repo, "ls-remote", "--heads", "origin")

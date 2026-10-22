@@ -436,7 +436,9 @@ class TestAgentRegistryAndCommands(unittest.TestCase):
 
     def test_codex_command_is_non_interactive_and_scoped(self):
         worktree = Path("/tmp/worker")
-        command = CodexAdapter().build_command("do work", {"sandbox": "danger-full-access"}, worktree)
+        # _model_resolved bypasses the gitignored config/agent_models.json lookup.
+        options = {"sandbox": "danger-full-access", "_model_resolved": True}
+        command = CodexAdapter().build_command("do work", options, worktree)
         self.assertEqual(
             command,
             [

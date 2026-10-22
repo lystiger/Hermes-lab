@@ -1,8 +1,8 @@
 import { ProviderQuota, ProjectionItem, SettingItem, OverviewTelemetry } from '../types';
 
 export const MOCK_TELEMETRY: OverviewTelemetry = {
-  runningJobsCount: 2,
-  queuedJobsCount: 4,
+  runningJobsCount: 1,
+  queuedJobsCount: 6,
   blockedJobsCount: 1,
   failed24hCount: 0,
   sampleSize: 6,

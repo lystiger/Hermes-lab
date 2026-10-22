@@ -23,6 +23,12 @@ export function fmtTs(sec: number): string {
   return `${pad(h, 2)}:${pad(m, 2)}:${pad(s, 2)}.${pad(ms, 3)}`;
 }
 
+/** One running sprint phase: its job plus its spec order (or name when Hermes sent no order). */
+function runningPhaseKey(event: TraceEvent): string {
+  const jobId = event.jobId ?? event.metadata?.jobId ?? '';
+  return `${jobId}:${event.metadata?.order ?? event.metadata?.phase ?? ''}`;
+}
+
 interface AgentRuntimeState {
   status: AgentStatus;
   currentTask?: string;
@@ -35,6 +41,8 @@ interface ConsoleUIState {
 
   // Reactive Runtime State
   agentRuntimeStatuses: Record<string, AgentRuntimeState>;
+  /** Sprint phases each agent is running now: agent id -> phase key -> phase name. */
+  runningPhases: Record<string, Record<string, string>>;
   jobRuntimeVersion: number;
   messageRuntimeVersion: number;
   /** Bumped on agent.* events and after an SSE reconnect, so agent identity and telemetry refetch. */
@@ -89,6 +97,7 @@ export const useConsoleStore = create<ConsoleUIState>((set, get) => ({
   connectionStatus: isMockMode ? 'CONNECTED' : 'CONNECTING',
   backendHealth: null,
   agentRuntimeStatuses: {},
+  runningPhases: {},
   jobRuntimeVersion: 0,
   messageRuntimeVersion: 0,
   agentRuntimeVersion: 0,
@@ -140,40 +149,50 @@ export const useConsoleStore = create<ConsoleUIState>((set, get) => ({
         ? state.allEvents
         : sortNewestFirst([event, ...state.allEvents]).slice(0, 150);
 
-      // 2. Reactively reduce agent status from live runtime events
+      // 2. Reactively reduce agent status from live runtime events (same rules as Hermes GET /agents)
       let nextStatuses = state.agentRuntimeStatuses;
+      let nextPhases = state.runningPhases;
       const sourceId = event.source?.id?.toLowerCase();
 
-      if (sourceId && event.source.kind === 'agent') {
-        if (event.kind === 'agent.started') {
-          nextStatuses = {
-            ...nextStatuses,
-            [sourceId]: {
-              status: 'RUNNING',
-              currentTask: event.metadata?.task || event.metadata?.phase || event.detail
-            }
-          };
+      if (sourceId && event.source.kind === 'agent' && !alreadyExists) {
+        const setStatus = (status: AgentStatus, currentTask?: string) => {
+          nextStatuses = { ...nextStatuses, [sourceId]: { status, currentTask } };
+        };
+        const agentPhases = nextPhases[sourceId] ?? {};
+
+        // Sprint phases: an agent in several parallel phases stays RUNNING until every one finishes.
+        if (event.kind.startsWith('phase.')) {
+          const key = runningPhaseKey(event);
+          const remaining = { ...agentPhases };
+          if (event.kind === 'phase.started') {
+            remaining[key] = event.metadata?.phase || event.detail;
+            setStatus('RUNNING', remaining[key]);
+          } else if (event.kind === 'phase.completed' || event.kind === 'phase.failed') {
+            delete remaining[key];
+            const stillRunning = Object.values(remaining);
+            if (event.kind === 'phase.failed') setStatus('ERROR');
+            else if (stillRunning.length > 0) setStatus('RUNNING', stillRunning[0]);
+            else setStatus('IDLE');
+          }
+          nextPhases = { ...nextPhases, [sourceId]: remaining };
+        } else if (event.kind === 'agent.started') {
+          setStatus('RUNNING', event.metadata?.task || event.metadata?.phase || event.detail);
         } else if (event.kind === 'agent.finished') {
-          nextStatuses = {
-            ...nextStatuses,
-            [sourceId]: {
-              status: 'IDLE',
-              currentTask: undefined
-            }
-          };
-        } else if (event.kind === 'agent.failed') {
-          nextStatuses = {
-            ...nextStatuses,
-            [sourceId]: {
-              status: 'ERROR',
-              currentTask: undefined
-            }
-          };
+          if (Object.keys(agentPhases).length === 0) setStatus('IDLE');
+        } else if (event.kind === 'agent.cancelled') {
+          nextPhases = { ...nextPhases, [sourceId]: {} };
+          setStatus('IDLE');
+        } else if (event.kind === 'agent.failed' || event.kind === 'agent.timed_out') {
+          setStatus('ERROR');
+        } else if (event.kind === 'agent.waiting') {
+          setStatus('WAITING', event.metadata?.task || event.detail);
+        } else if (event.kind === 'agent.busy') {
+          setStatus('BUSY', event.metadata?.task || event.detail);
         }
       }
 
       // 3. Reactively bump job/message runtime versions on runtime events
-      const isJobEvent = event.kind.startsWith('job.') || event.kind.startsWith('phase.');
+      const isJobEvent = event.kind.startsWith('job.') || event.kind.startsWith('phase.') || event.kind.startsWith('task.');
       const nextJobVersion = isJobEvent ? state.jobRuntimeVersion + 1 : state.jobRuntimeVersion;
       const isMessageEvent = event.kind.startsWith('message.') || event.kind.startsWith('thread.') || event.kind.startsWith('artifact.');
       const nextMessageVersion = isMessageEvent ? state.messageRuntimeVersion + 1 : state.messageRuntimeVersion;
@@ -182,6 +201,7 @@ export const useConsoleStore = create<ConsoleUIState>((set, get) => ({
       return {
         allEvents: nextEvents,
         agentRuntimeStatuses: nextStatuses,
+        runningPhases: nextPhases,
         jobRuntimeVersion: nextJobVersion,
         messageRuntimeVersion: nextMessageVersion,
         agentRuntimeVersion: nextAgentVersion

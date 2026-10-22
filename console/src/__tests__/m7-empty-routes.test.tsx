@@ -21,8 +21,8 @@ const routes = [
   ['/agents', AgentsListRoute, ['No agents']],
   ['/usage', UsageRoute, ['No agent limits']],
   ['/events', EventsRoute, ['No events']],
-  ['/execution', ExecutionRoute, ['No deployed seats', 'No execution events']],
-  ['/settings', SettingsRoute, ['No execution backends reported.']]
+  ['/execution', ExecutionRoute, ['No execution events']],
+  ['/settings', SettingsRoute, []]
 ] as const;
 
 beforeEach(async () => {

@@ -29,6 +29,8 @@ export interface EventSubscription {
 }
 
 export interface HermesApi {
+  /** Wait for outstanding HTTP requests; adapters without HTTP traffic need no barrier. */
+  waitForIdle?(signal?: AbortSignal): Promise<void>;
   getHealth(): Promise<HealthStatus>;
   getAgents(): Promise<AgentSummary[]>;
   getAgent(id: AgentId): Promise<AgentDetail | null>;

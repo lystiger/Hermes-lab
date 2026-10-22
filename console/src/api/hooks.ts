@@ -335,6 +335,7 @@ export function useEventStream() {
   useEffect(() => {
     let isSubscribed = true;
     let eventSub: EventSubscription | null = null;
+    const startup = new AbortController();
     // Set when the SSE connection errors; the next delivered event proves it is back, so state is resynced.
     let streamDropped = false;
 
@@ -354,29 +355,37 @@ export function useEventStream() {
 
       // 2. Load historical events from API first (Task 9 & Item 2: Establish cursor = newest event ID)
       let initialCursor: string | undefined;
-      try {
-        const history = await hermesApi.getTraceEvents(100);
-        if (isSubscribed) {
-          setInitialEvents(history);
-          // Close the snapshot -> stream gap: execution events that happened after the snapshot but before
-          // the SSE cursor only exist in this history. Replay them oldest first; the store dedupes by id and
-          // holds them behind any snapshot still in flight.
-          const executionStore = useExecutionStore.getState();
-          [...history]
-            .filter((e) => isExecutionEvent(e))
-            .sort((a, b) => a.rawTs - b.rawTs)
-            .forEach((e) => executionStore.applyEvent(e));
-          if (history.length > 0) {
-            // Find newest event by highest raw timestamp (Item 2)
-            const newestEvent = history.reduce((prev, curr) => (curr.rawTs > prev.rawTs ? curr : prev));
-            initialCursor = newestEvent.id;
+      const loadHistory = async () => {
+        try {
+          const history = await hermesApi.getTraceEvents(100);
+          if (isSubscribed) {
+            setInitialEvents(history);
+            // Close the snapshot -> stream gap: execution events that happened after the snapshot but before
+            // the SSE cursor only exist in this history. Replay them oldest first; the store dedupes by id and
+            // holds them behind any snapshot still in flight.
+            const executionStore = useExecutionStore.getState();
+            [...history]
+              .filter((e) => isExecutionEvent(e))
+              .sort((a, b) => a.rawTs - b.rawTs)
+              .forEach((e) => executionStore.applyEvent(e));
+            if (history.length > 0) {
+              // Find newest event by highest raw timestamp (Item 2)
+              const newestEvent = history.reduce((prev, curr) => (curr.rawTs > prev.rawTs ? curr : prev));
+              initialCursor = newestEvent.id;
+            }
+          }
+        } catch {
+          if (isSubscribed && isRealApiMode) {
+            setConnectionStatus('DISCONNECTED');
           }
         }
-      } catch {
-        if (isSubscribed && isRealApiMode) {
-          setConnectionStatus('DISCONNECTED');
-        }
-      }
+      };
+      await loadHistory();
+
+      // Let the initial HTTP burst release its connections before reserving one for SSE.
+      await hermesApi.waitForIdle?.(startup.signal);
+      // Without a cursor the stream starts at "now", so events from the wait would be lost; reload to get one.
+      if (!initialCursor && isSubscribed && !startup.signal.aborted) await loadHistory();
 
       // 3. Open SSE stream starting strictly after newest historical event
       if (isSubscribed) {
@@ -412,6 +421,7 @@ export function useEventStream() {
 
     return () => {
       isSubscribed = false;
+      startup.abort();
       if (eventSub) {
         eventSub.unsubscribe();
       }

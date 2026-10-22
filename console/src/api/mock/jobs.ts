@@ -1,6 +1,21 @@
-import { Job, JobDetail, PipelineStep, ChangedFile } from '../types';
+import { Job, JobDetail, JobPhase, ChangedFile } from '../types';
+
+/** Start of the running mock job #142, so its elapsed time and phase times line up. */
+const MOCK_ACTIVE_STARTED_AT = new Date(Date.now() - 14 * 60_000).toISOString();
 
 export const MOCK_JOBS: Job[] = [
+  {
+    id: '#142',
+    priority: 'P1',
+    title: 'Redis State Migration',
+    repository: 'moveinmate/backend',
+    branch: 'feat/redis-state',
+    assignedAgentIds: ['gemini', 'claude', 'codex'],
+    status: 'RUNNING',
+    currentPhase: 'build-store',
+    createdAt: MOCK_ACTIVE_STARTED_AT,
+    startedAt: MOCK_ACTIVE_STARTED_AT
+  },
   {
     id: '#143',
     priority: 'P0',
@@ -92,70 +107,6 @@ export const MOCK_JOBS: Job[] = [
   }
 ];
 
-export const MOCK_PIPELINE: PipelineStep[] = [
-  {
-    id: '#142',
-    phase: 'BUILD',
-    agentId: 'gemini',
-    agentName: 'Gemini',
-    task: 'Move VehicleStateStore to Redis',
-    meta: '30.4k · 06:12',
-    state: 'COMPLETED',
-    note: 'implementation complete',
-    mark: '✓'
-  },
-  {
-    id: '#142',
-    phase: 'HARDEN',
-    agentId: 'claude',
-    agentName: 'Claude',
-    task: 'Review store contract — TTL, read-after-write',
-    meta: '02:14',
-    state: 'RUNNING',
-    note: 'reviewing store contract',
-    mark: '●'
-  },
-  {
-    id: '#142',
-    phase: 'VERIFY',
-    agentId: 'codex',
-    agentName: 'Codex',
-    task: '186 tests · mypy strict · ruff',
-    meta: 'staged ~19k',
-    state: 'QUEUED',
-    note: 'waiting for handoff',
-    mark: '○'
-  },
-  {
-    id: '#142',
-    phase: 'COMPLETE',
-    agentId: 'hermes',
-    agentName: 'Hermes',
-    task: 'Merge + report telemetry',
-    meta: '',
-    state: 'IDLE',
-    note: 'merge + report'
-  },
-  {
-    id: '#143',
-    phase: 'BUILD',
-    agentId: 'gemini',
-    agentName: 'Gemini',
-    task: 'Fix production CI — flaky worker teardown',
-    meta: '~18–30k',
-    state: 'CLAIMED'
-  },
-  {
-    id: '#144',
-    phase: 'BUILD',
-    agentId: 'gemini',
-    agentName: 'Gemini',
-    task: 'Authentication refactor — session adapter',
-    meta: 'waiting on repo lock',
-    state: 'BLOCKED'
-  }
-];
-
 export const MOCK_CHANGED_FILES: ChangedFile[] = [
   { mark: 'A', path: 'src/state/redis_store.py', add: '+184', del: '−0', byActorId: 'gemini', byDisplayName: 'Gemini' },
   { mark: 'M', path: 'src/state/store.py', add: '+22', del: '−96', byActorId: 'gemini', byDisplayName: 'Gemini' },
@@ -166,6 +117,21 @@ export const MOCK_CHANGED_FILES: ChangedFile[] = [
   { mark: 'M', path: 'compose.yaml', add: '+9', del: '−0', byActorId: 'gemini', byDisplayName: 'Gemini' }
 ];
 
+/**
+ * Phases shaped like Hermes GET /jobs/{id}, matching the mock agents: Gemini and Claude run a parallel group,
+ * Codex waits on the harden phase. Builder and hardener each appear twice. Times are relative to load.
+ */
+function mockActivePhases(): JobPhase[] {
+  const at = (minutesAgo: number) => new Date(Date.now() - minutesAgo * 60_000).toISOString();
+  return [
+    { id: 'phase-1-scaffold', name: 'scaffold', order: 1, role: 'builder', agentId: 'codex', status: 'SUCCEEDED', startedAt: at(14), completedAt: at(9.5), commitSha: '4ea5e4d1' },
+    { id: 'phase-2-build-store', name: 'build-store', order: 2, role: 'builder', agentId: 'gemini', status: 'RUNNING', startedAt: at(9.5) },
+    { id: 'phase-3-review-contract', name: 'review-contract', order: 3, role: 'hardener', agentId: 'claude', status: 'RUNNING', startedAt: at(9.5) },
+    { id: 'phase-4-harden', name: 'harden', order: 4, role: 'hardener', agentId: 'codex', status: 'PENDING' },
+    { id: 'phase-5-verify', name: 'verify', order: 5, role: 'verifier', agentId: 'claude', status: 'PENDING' }
+  ];
+}
+
 export const MOCK_ACTIVE_JOB_DETAIL: JobDetail = {
   id: '#142',
   priority: 'P1',
@@ -173,12 +139,14 @@ export const MOCK_ACTIVE_JOB_DETAIL: JobDetail = {
   repository: 'moveinmate/backend',
   branch: 'feat/redis-state',
   status: 'RUNNING',
+  currentPhase: 'build-store',
   assignedAgentIds: ['gemini', 'claude', 'codex'],
-  startedAt: '10:38',
+  startedAt: MOCK_ACTIVE_STARTED_AT,
   budget: '80k',
   policy: 'serial · retry 3',
-  phases: [],
-  executionGraph: MOCK_PIPELINE.slice(0, 4),
+  phases: mockActivePhases(),
+  // Built from `phases` by the mock adapter, as Hermes detail is built by the HTTP adapter.
+  executionGraph: [],
   changedFiles: MOCK_CHANGED_FILES,
   testSummary: {
     passed: 184,

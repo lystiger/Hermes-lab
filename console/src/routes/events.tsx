@@ -5,7 +5,6 @@ import { EVENT_CATEGORIES, EventCategory, SEVERITY_COLOR, eventCategory, eventKi
 import { EmptyState, UNKNOWN_TIME_LABEL as UNKNOWN_TIME } from '../components/DataStates';
 import { Card } from '../components/Card';
 import { PageHeader, HeaderCount } from '../components/PageHeader';
-import { HERMES_ART } from '../theme/agentArt';
 import { FilterPills } from '../components/FilterPills';
 import { CopyId } from '../components/CopyId';
 import { useArrowNavigation, useEscape } from '../components/keyboard';
@@ -115,7 +114,7 @@ export const EventsRoute: React.FC = () => {
               <span className="text-[12px] text-lys-faint whitespace-nowrap">{shown.length} of {allEvents.length} shown</span>
             </div>
 
-            <div className="hidden sm:grid grid-cols-[80px_16px_110px_120px_minmax(0,1fr)_120px] items-center gap-3 px-5 py-2 border-b border-lys-subtle text-[10px] font-medium tracking-wider uppercase text-lys-faint bg-lys-surface-0 select-none">
+            <div className="hidden sm:grid grid-cols-[70px_16px_100px_110px_minmax(0,1fr)_90px] items-center gap-3 px-5 py-2 border-b border-lys-subtle text-[10px] font-medium tracking-wider uppercase text-lys-faint bg-lys-surface-0 select-none">
               <span>Time</span>
               <span>Sev</span>
               <span>Source</span>
@@ -126,7 +125,7 @@ export const EventsRoute: React.FC = () => {
 
             <div ref={listRef} role="log" aria-live="polite" aria-relevant="additions text" aria-label="Events" className="flex flex-col">
               {shown.length === 0 && (
-                <EmptyState art={HERMES_ART}>{allEvents.length === 0 ? 'No events' : 'No matching events'}</EmptyState>
+                <EmptyState>{allEvents.length === 0 ? 'No events' : 'No matching events'}</EmptyState>
               )}
               {shown.map((e) => {
                 const severity = eventSeverity(e.kind);
@@ -138,17 +137,17 @@ export const EventsRoute: React.FC = () => {
                       data-nav-item
                       aria-expanded={isOpen}
                       onClick={() => setExpanded(isOpen ? null : e.id)}
-                      className="w-full grid grid-cols-[80px_16px_110px_120px_minmax(0,1fr)_120px] items-center gap-3 px-5 py-2 text-[12px] text-left hover:bg-lys-surface-2 cursor-pointer transition-colors"
+                      className="w-full grid grid-cols-[70px_16px_100px_110px_minmax(0,1fr)_90px] items-center gap-3 px-5 py-2 text-[12px] text-left hover:bg-lys-surface-2 cursor-pointer transition-colors"
                       style={{ backgroundColor: severity === 'error' ? 'color-mix(in srgb, var(--lys-status-danger) 7%, transparent)' : severity === 'warn' ? 'color-mix(in srgb, var(--lys-status-warning) 5%, transparent)' : undefined }}
                     >
                       <span className="font-mono-code text-lys-faint whitespace-nowrap text-[11px]">{eventTime(e)}</span>
                       <span className="flex items-center justify-center" aria-label={`severity ${severity}`} title={severity}>
                         <span className="inline-block w-1.5 h-1.5 rounded-full" style={{ backgroundColor: SEVERITY_COLOR[severity] }} />
                       </span>
-                      <span className="font-semibold truncate text-[12px]" title={traceSourceName(e.source)} style={{ color: e.source.accentColor || 'var(--lys-text-muted)' }}>
+                      <span className="min-w-0 font-semibold truncate text-[12px]" title={traceSourceName(e.source)} style={{ color: e.source.accentColor || 'var(--lys-text-muted)' }}>
                         {traceSourceName(e.source)}
                       </span>
-                      <span className="font-mono-code text-[11px] truncate" title={e.kind} style={{ color: eventKindColor(e.kind) }}>
+                      <span className="min-w-0 font-mono-code text-[11px] truncate" title={e.kind} style={{ color: eventKindColor(e.kind) }}>
                         {e.kind}
                       </span>
                       <span className="text-lys-secondary truncate min-w-0" title={e.detail}>{e.detail}</span>

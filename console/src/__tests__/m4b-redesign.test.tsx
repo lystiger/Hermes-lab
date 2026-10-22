@@ -1,7 +1,4 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import fs from 'node:fs';
-import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 
 vi.hoisted(() => {
   delete process.env.VITE_LYSCONTROL_MOCK;
@@ -11,36 +8,31 @@ import { render, screen, within } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { OverviewRoute } from '../routes/index';
 import { QueueRoute } from '../routes/queue';
-import { AGENT_ART } from '../theme/agentArt';
 import { Card } from '../components/Card';
 import { PageHeader } from '../components/PageHeader';
 import { CopyId } from '../components/CopyId';
 import { groupOf } from '../features/jobs/MissionBoard';
 import { installLiveHermes, LIVE_JOB_SUMMARY } from './support/liveHermes';
 
-const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
-// Agent portraits are local-only (gitignored), so a clean checkout has no image files to check.
-const HAS_LOCAL_ART = fs.existsSync(path.join(ROOT, 'public', 'portrait'));
-
 afterEach(() => {
   vi.unstubAllGlobals();
 });
 
 describe('M4b noise rule: unknown-only panels are not rendered', () => {
-  it('Overview lists unknown-only values on one line, with reasons on hover, and renders no panel for them', async () => {
+  it('Overview puts unknown spend and budget in the summary strip with reasons on hover', async () => {
     installLiveHermes();
     render(
       <MemoryRouter>
         <OverviewRoute />
       </MemoryRouter>
     );
-    const line = await screen.findByText(/Unreported metrics/);
-    const container = line.parentElement!;
-    for (const label of ['estimated spend', 'sprint budget', 'queue projection', 'remaining budget']) {
-      const item = within(container).getByText(label);
+    for (const label of ['SPEND', 'BUDGET']) {
+      const item = (await screen.findByText(label)).parentElement!;
       expect(item).toHaveAttribute('title');
       expect(item.getAttribute('title')!.length).toBeGreaterThan(10);
+      expect(within(item).getByText('—')).toBeInTheDocument();
     }
+    expect(screen.queryByText(/Unreported metrics/)).not.toBeInTheDocument();
     expect(screen.queryByText('SPRINT BUDGET')).not.toBeInTheDocument();
     expect(screen.queryByText('QUEUE PROJECTION')).not.toBeInTheDocument();
     expect(screen.queryByText('EST. SPEND')).not.toBeInTheDocument();
@@ -86,32 +78,6 @@ describe('M4b hierarchy and cards', () => {
   });
 });
 
-describe('M4b agent art: focal crops of the existing files', () => {
-  it('each agent has a focus inside the frame, and the card showing the whole image', () => {
-    for (const [id, art] of Object.entries(AGENT_ART)) {
-      for (const focus of [art.avatarFocus, art.cardFocus]) {
-        expect(focus.x).toBeGreaterThanOrEqual(0);
-        expect(focus.x).toBeLessThanOrEqual(1);
-        expect(focus.y).toBeGreaterThanOrEqual(0);
-        expect(focus.y).toBeLessThanOrEqual(1);
-        expect(focus.zoom).toBeGreaterThanOrEqual(1);
-      }
-      // The card art is the clean portrait, so it shows the whole image rather than a tight crop.
-      expect(art.cardFocus.zoom, `${id} card crop`).toBe(1);
-    }
-  });
-
-  it.skipIf(!HAS_LOCAL_ART)('each agent has avatar and card files that exist', () => {
-    for (const [id, art] of Object.entries(AGENT_ART)) {
-      expect(fs.existsSync(path.join(ROOT, 'public', art.avatar)), `${id} avatar`).toBe(true);
-      expect(fs.existsSync(path.join(ROOT, 'public', art.card)), `${id} card`).toBe(true);
-    }
-  });
-
-  it.skipIf(!HAS_LOCAL_ART)('the Hermes emblem used for empty states exists', () => {
-    expect(fs.existsSync(path.join(ROOT, 'public', '/portrait/hermes.png'))).toBe(true);
-  });
-});
 
 describe('M4b queue columns by real status', () => {
   it('maps each status to one column with a shape glyph as well as a colour', () => {

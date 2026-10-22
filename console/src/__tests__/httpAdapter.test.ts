@@ -82,7 +82,8 @@ describe('HttpHermesApi Contract Implementation', () => {
     const gemini = agents.find((a) => a.id === 'gemini');
     expect(gemini?.displayName).toBe('Gemini');
     expect(gemini?.status).toBe('RUNNING');
-    expect(gemini?.presentation?.characterCardUrl).toBe('/portrait/gemini.png');
+    expect(gemini?.presentation?.avatarUrl).toBeUndefined();
+    expect(gemini?.presentation?.characterCardUrl).toBeUndefined();
 
     const custom = agents.find((a) => a.id === 'custom-subagent');
     expect(custom?.displayName).toBe('Custom Subagent');

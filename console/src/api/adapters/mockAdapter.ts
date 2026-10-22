@@ -6,6 +6,7 @@ import {
   Job,
   JobDetail,
   PipelineStep,
+  JobPhase,
   ProjectionItem,
   CapacityTelemetry,
   AgentLimitsReport,
@@ -25,7 +26,8 @@ import {
 } from '../types';
 import { MOCK_AGENTS, createDynamicMockAgent } from '../mock/agents';
 import { MOCK_AGENT_MODELS } from '../mock/models';
-import { MOCK_JOBS, MOCK_PIPELINE, MOCK_ACTIVE_JOB_DETAIL } from '../mock/jobs';
+import { MOCK_JOBS, MOCK_ACTIVE_JOB_DETAIL } from '../mock/jobs';
+import { mapPhaseState } from './httpAdapter';
 import {
   MOCK_TELEMETRY,
   MOCK_PROJECTIONS,
@@ -40,6 +42,33 @@ import {
 } from '../mock/execution';
 import { resolveActorPresentation } from '../actors';
 
+// Deliberately long values are always present in mock mode, including browser layout checks.
+export const LONG_PROMPT_PATH = '/home/lystiger/Projects/Hermes-lab/prompts/' + 'summary-first-console-'.repeat(2) + 'builder-run.md';
+export const LONG_JOB_ID = 'run_20261019_115655_' + 'lyscontrol-m10-summary-first-layout-fixture'.slice(0, 40).padEnd(40, 'x');
+export const LONG_TEXT_JOB: Job = {
+  // Queued, so mock mode still has exactly one active job (#142), matching the mock telemetry counts.
+  ...MOCK_JOBS[1], id: LONG_JOB_ID, title: LONG_PROMPT_PATH, status: 'QUEUED'
+};
+export const LONG_TEXT_EVENT: TraceEvent = {
+  id: 'long-text-event', ts: '10:42:47.400', rawTs: 38567.4,
+  source: { id: 'scheduler-fixture', kind: 'runtime', displayName: 'Hermes.scheduler' },
+  kind: 'task.created', detail: LONG_PROMPT_PATH, jobId: LONG_JOB_ID, dur: '—'
+};
+
+/** Same mapping as HttpHermesApi.getJob: one execution-graph step per Hermes phase. */
+function phaseSteps(jobId: string, phases: JobPhase[]): PipelineStep[] {
+  return phases.map((p) => ({
+    id: p.id,
+    jobId,
+    phase: p.name,
+    agentId: p.agentId,
+    task: p.name,
+    meta: p.commitSha ? p.commitSha.slice(0, 7) : p.status.toLowerCase(),
+    state: mapPhaseState(p.status),
+    note: p.role
+  }));
+}
+
 function fmtTs(sec: number): string {
   const h = Math.floor(sec / 3600);
   const m = Math.floor(sec / 60) % 60;
@@ -52,8 +81,7 @@ function fmtTs(sec: number): string {
 export class MockHermesApi implements HermesApi {
   private agents: Record<AgentId, AgentDetail> = { ...MOCK_AGENTS };
   private agentModels: AgentModelsMap = JSON.parse(JSON.stringify(MOCK_AGENT_MODELS));
-  private jobs: Job[] = [...MOCK_JOBS];
-  private pipeline: PipelineStep[] = [...MOCK_PIPELINE];
+  private jobs: Job[] = [LONG_TEXT_JOB, ...MOCK_JOBS];
   private simTick = 0;
   private lastSimTs = 10 * 3600 + 42 * 60 + 47.4;
   private execSeq = 0;
@@ -109,14 +137,17 @@ export class MockHermesApi implements HermesApi {
 
   async getJob(id: string): Promise<JobDetail | null> {
     if (id === '#142' || id === '142') {
-      return { ...MOCK_ACTIVE_JOB_DETAIL };
+      return { ...MOCK_ACTIVE_JOB_DETAIL, executionGraph: phaseSteps(MOCK_ACTIVE_JOB_DETAIL.id, MOCK_ACTIVE_JOB_DETAIL.phases ?? []) };
     }
     const found = this.jobs.find((j) => j.id === id);
     if (!found) return null;
 
+    // Like Hermes, a job that has not started reports only the phases it was created with.
+    const phases: JobPhase[] = id === LONG_JOB_ID ? [{ id: 'long-phase', order: 1, role: 'builder', name: LONG_PROMPT_PATH, status: 'PENDING', agentId: 'codex' }] : [];
     return {
       ...found,
-      executionGraph: this.pipeline.slice(0, 3),
+      phases,
+      executionGraph: phaseSteps(id, phases),
       changedFiles: [],
       retryHistory: [],
       retriesUsed: 0,
@@ -125,8 +156,9 @@ export class MockHermesApi implements HermesApi {
     };
   }
 
+  /** Steps of every active mock job, built from its phases the way the HTTP adapter builds them. */
   async getPipeline(): Promise<PipelineStep[]> {
-    return [...this.pipeline];
+    return phaseSteps(MOCK_ACTIVE_JOB_DETAIL.id, MOCK_ACTIVE_JOB_DETAIL.phases ?? []);
   }
 
   async getTelemetry(): Promise<OverviewTelemetry> {
@@ -176,8 +208,8 @@ export class MockHermesApi implements HermesApi {
     return [];
   }
 
-  async getJobEvents(_jobId: string): Promise<TraceEvent[]> {
-    return [];
+  async getJobEvents(jobId: string): Promise<TraceEvent[]> {
+    return jobId === LONG_JOB_ID ? [LONG_TEXT_EVENT] : [];
   }
 
   async getRecoverableJobs(): Promise<Job[]> {
@@ -206,16 +238,17 @@ export class MockHermesApi implements HermesApi {
 
     const seeds = RAW_SEED_EVENTS.slice(0, limit).map((e, idx) => ({
       id: `seed-${idx}`,
-      ts: fmtTs(baseTs + e.t),
-      rawTs: baseTs + e.t,
+      ts: fmtTs(baseTs + (e.t ?? 0)),
+      rawTs: baseTs + (e.t ?? 0),
       source: resolveActorPresentation(e.a, agentList),
       kind: e.k,
       detail: e.d,
       dur: e.dur || '—',
-      jobId: '#142'
+      jobId: '#142',
+      metadata: e.m
     })).reverse();
 
-    return [...seeds, ...createMockExecutionHistory(fmtTs)];
+    return [LONG_TEXT_EVENT, ...seeds, ...createMockExecutionHistory(fmtTs)];
   }
 
   subscribeEvents(

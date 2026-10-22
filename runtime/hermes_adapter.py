@@ -643,6 +643,14 @@ class HermesActorAdapter(ActorAdapter):
         if self.context_bundle:
             parts.append(self.context_bundle)
 
+        # Hermes owns version control; an agent that runs git is denied and loses the attempt.
+        parts.append(
+            "--- HERMES WORKSPACE RULES ---\n"
+            "Never run git (no status, add, commit, log or branch). Edit files in place; Hermes commits and "
+            "merges your changes after you finish.\n"
+            "--- END WORKSPACE RULES ---"
+        )
+
         if current_agent and mailbox_messages:
             mb_sec = self.build_mailbox_messages_section(current_agent, mailbox_messages)
             if mb_sec:

@@ -321,3 +321,10 @@ def test_job_permissions_and_timeout_reach_tasks_that_carry_none(tmp_path):
     assert result.status == "succeeded", result.error
     assert seen["phase"]["permissions"] == {"commands": ["npm run typecheck"]}
     assert FakeSessionfulBackend.instances[0].requests[0].timeout_seconds == 900
+
+
+def test_agent_prompts_tell_agents_not_to_run_git(tmp_path):
+    adapter = HermesActorAdapter(target_repo=_git_repo(tmp_path / "repo"), worktree_root=tmp_path / "wt",
+                                 run_dir=tmp_path / "run", job_id="job_contract")
+    prompt = adapter.build_effective_prompt("Build the page")
+    assert "Build the page" in prompt and "Never run git" in prompt

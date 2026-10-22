@@ -93,3 +93,18 @@ def test_a_dry_run_is_only_cleaned_up(tmp_path, monkeypatch):
     assert result["prUrl"] is None and result["runLog"] is None and result["worktreesRemoved"] == 1
     assert not (lysstack / "operating_system" / "run-log.md").exists()
     assert "job/run_dry/integration" not in git(repo, "ls-remote", "--heads", "origin")
+
+
+def test_finalized_jobs_are_listed_for_review_and_dry_runs_are_not(tmp_path, monkeypatch):
+    from jobs.job_finalizer import list_reviews
+
+    monkeypatch.setenv("HERMES_AUTO_PR", "0")
+    repo = make_repo(tmp_path)
+    runs = tmp_path / "runs"
+    for job, review in (("run_real", True), ("run_dry", False)):
+        finalize_completed_job(fake_engine(job), repo, tmp_path / "wt" / job, runs / job,
+                               lysstack_root=tmp_path / "nowhere", review=review)
+    [item] = list_reviews(runs)
+    assert item["jobId"] == "run_real" and item["goal"] == "Add a tooltip" and item["repairs"] == 1
+    assert item["verdict"]["summary"] == "all checks pass" and item["prUrl"] is None
+    assert [t["id"] for t in item["tasks"]] == ["build", "verify"]

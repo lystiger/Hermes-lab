@@ -35,7 +35,7 @@ def summarize(engine: Any, run_dir: Path) -> Dict[str, Any]:
         meta = t.metadata or {}
         tasks.append({"id": t.task_id, "role": meta.get("role") or meta.get("execution_role") or "?",
                       "agent": t.assigned_actor or "-", "status": t.status.value})
-        if meta.get("role") in ("verifier", "security") and t.status.value == "succeeded":
+        if meta.get("role") in ("verifier", "security") and t.status.value.lower() == "succeeded":
             verdict = {"task": t.task_id, "summary": meta.get("verification_summary"), "findings": meta.get("findings") or []}
     return {"job_id": engine.job.job_id, "goal": engine.job.goal, "branch": engine.job.branch,
             "repairs": engine.job.repair_count, "tasks": tasks, "verdict": verdict, "usage": read_job_usage(run_dir)}
@@ -150,8 +150,35 @@ def finalize_completed_job(engine: Any, repo: Path, worktree_root: Path, run_dir
         record = record_run(lysstack, summary, pr_url)
     removed = clean_job_worktrees(repo, worktree_root, engine.job.job_id)
     pruned = prune_merged_job_branches(repo, keep=engine.job.branch)
-    result = {"prUrl": pr_url, "runLog": str(record) if record else None, "worktreesRemoved": removed, "pruned": pruned}
+    usage = summary.get("usage") or {}
+    result = {
+        "prUrl": pr_url, "runLog": str(record) if record else None, "worktreesRemoved": removed, "pruned": pruned,
+        "finalizedAt": datetime.now(timezone.utc).isoformat(), "dryRun": not review,
+        # What the Review page shows, kept with the job so it survives restarts.
+        "review": {
+            "jobId": summary["job_id"], "goal": summary["goal"], "branch": summary["branch"],
+            "repairs": summary["repairs"], "tasks": summary["tasks"], "verdict": summary["verdict"],
+            "costUsd": usage.get("costUsd"), "totalTokens": (usage.get("tokens") or {}).get("total_tokens", 0),
+        },
+    }
     run_dir.mkdir(parents=True, exist_ok=True)  # a dry run never created it
     (run_dir / "finalize.json").write_text(json.dumps(result, indent=2), encoding="utf-8")
     logger.info("Finalized job %s: %s", engine.job.job_id, result)
     return result
+
+
+def list_reviews(runs_root: Path, limit: int = 50) -> List[Dict[str, Any]]:
+    """Finalized goal-planned jobs, newest first, from each job's finalize.json. Dry runs are left out."""
+    reviews = []
+    for path in sorted(runs_root.glob("*/finalize.json"), key=lambda p: p.stat().st_mtime, reverse=True):
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        if data.get("dryRun") or not isinstance(data.get("review"), dict):
+            continue
+        reviews.append({**data["review"], "prUrl": data.get("prUrl"), "finalizedAt": data.get("finalizedAt"),
+                        "runLog": data.get("runLog")})
+        if len(reviews) >= limit:
+            break
+    return reviews

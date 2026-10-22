@@ -1,0 +1,53 @@
+{
+  "sprint_id": "hermes-s08b-harden-parallel",
+  "name": "Harden parallel group atomicity, locking and verdict gating",
+  "canonical_repo": "~/Projects/Hermes-lab",
+  "base_ref": "b830c7e",
+  "target_branch": "s08b/integration",
+  "worktree_root": "~/hermes-worktrees/hermes-lab-s08b",
+  "runs_root": "~/hermes-runs",
+  "execution_backend": "subprocess",
+  "limits": {
+    "max_changed_files": 12,
+    "timeout_seconds": 900
+  },
+  "phases": [
+    {
+      "name": "parallel_hardening",
+      "role": "hardener",
+      "agent": "claude",
+      "worktree_dir": "claude",
+      "branch": "s08b/claude",
+      "prompt_file": "prompts/s08b-claude.md",
+      "expected_handoff": "HANDOFF_S08B_CLAUDE.md",
+      "commit_message": "fix(s08): make parallel batches atomic and lock shared state",
+      "cmd_options": {
+        "model": "sonnet",
+        "max_turns": 80,
+        "permission_mode": "dontAsk",
+        "output_format": "json"
+      }
+    },
+    {
+      "name": "parallel_reverification",
+      "role": "verifier",
+      "agent": "codex",
+      "worktree_dir": "codex",
+      "branch": "s08b/codex",
+      "prompt_file": "prompts/s08b-codex.md",
+      "expected_handoff": "HANDOFF_S08B_CODEX.md",
+      "commit_message": "test(s08): re-verify parallel group execution",
+      "cmd_options": {
+        "sandbox": "workspace-write",
+        "ephemeral": true
+      }
+    }
+  ],
+  "verification": [
+    {
+      "name": "runner-tests",
+      "command": ["/home/lystiger/Projects/Hermes-lab/.venv/bin/python", "-m", "pytest", "tests/test_runner.py", "tests/test_handoff_policy.py", "tests/test_runner_execution_visibility.py", "tests/test_runner_ownership.py", "tests/test_runner_parallel.py", "-q"],
+      "timeout_seconds": 600
+    }
+  ]
+}

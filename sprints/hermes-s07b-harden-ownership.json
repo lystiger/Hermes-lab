@@ -1,0 +1,53 @@
+{
+  "sprint_id": "hermes-s07b-harden-ownership",
+  "name": "Harden builder file ownership after S07 verification",
+  "canonical_repo": "~/Projects/Hermes-lab",
+  "base_ref": "0531b5c",
+  "target_branch": "s07b/integration",
+  "worktree_root": "~/hermes-worktrees/hermes-lab-s07b",
+  "runs_root": "~/hermes-runs",
+  "execution_backend": "subprocess",
+  "limits": {
+    "max_changed_files": 8,
+    "timeout_seconds": 900
+  },
+  "phases": [
+    {
+      "name": "ownership_hardening",
+      "role": "hardener",
+      "agent": "claude",
+      "worktree_dir": "claude",
+      "branch": "s07b/claude",
+      "prompt_file": "prompts/s07b-claude.md",
+      "expected_handoff": "HANDOFF_S07B_CLAUDE.md",
+      "commit_message": "fix(s07): harden builder file ownership checks",
+      "cmd_options": {
+        "model": "sonnet",
+        "max_turns": 70,
+        "permission_mode": "dontAsk",
+        "output_format": "json"
+      }
+    },
+    {
+      "name": "ownership_reverification",
+      "role": "verifier",
+      "agent": "codex",
+      "worktree_dir": "codex",
+      "branch": "s07b/codex",
+      "prompt_file": "prompts/s07b-codex.md",
+      "expected_handoff": "HANDOFF_S07B_CODEX.md",
+      "commit_message": "test(s07): re-verify builder file ownership",
+      "cmd_options": {
+        "sandbox": "workspace-write",
+        "ephemeral": true
+      }
+    }
+  ],
+  "verification": [
+    {
+      "name": "runner-tests",
+      "command": ["/home/lystiger/Projects/Hermes-lab/.venv/bin/python", "-m", "pytest", "tests/test_runner.py", "tests/test_handoff_policy.py", "tests/test_runner_execution_visibility.py", "tests/test_runner_ownership.py", "-q"],
+      "timeout_seconds": 600
+    }
+  ]
+}

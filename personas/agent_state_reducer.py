@@ -32,7 +32,7 @@ class AgentStateReducer:
 
         if kind.startswith("phase."):
             phases = self._running_phases.setdefault(normalized_id, {})
-            key = f"{job_id or meta.get('jobId') or ''}:{meta.get('order') or meta.get('phase') or detail}"
+            key = f"{job_id or meta.get('jobId') or ''}:{meta.get('order') or meta.get('phase') or ''}"
             if kind == "phase.started":
                 phases[key] = str(meta.get("phase") or detail or "Executing phase")
                 self._agent_service.set_agent_status(normalized_id, "RUNNING", current_task=phases[key])

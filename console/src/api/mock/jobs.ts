@@ -124,11 +124,11 @@ export const MOCK_CHANGED_FILES: ChangedFile[] = [
 function mockActivePhases(): JobPhase[] {
   const at = (minutesAgo: number) => new Date(Date.now() - minutesAgo * 60_000).toISOString();
   return [
-    { id: 'phase-1-scaffold', name: 'scaffold', order: 1, role: 'builder', agentId: 'codex', status: 'SUCCEEDED', startedAt: at(14), completedAt: at(9.5), commitSha: '4ea5e4d1' },
-    { id: 'phase-2-build-store', name: 'build-store', order: 2, role: 'builder', agentId: 'gemini', status: 'RUNNING', startedAt: at(9.5) },
-    { id: 'phase-3-review-contract', name: 'review-contract', order: 3, role: 'hardener', agentId: 'claude', status: 'RUNNING', startedAt: at(9.5) },
-    { id: 'phase-4-harden', name: 'harden', order: 4, role: 'hardener', agentId: 'codex', status: 'PENDING' },
-    { id: 'phase-5-verify', name: 'verify', order: 5, role: 'verifier', agentId: 'claude', status: 'PENDING' }
+    { id: 'phase-1-scaffold', name: 'scaffold', order: 1, role: 'builder', agentId: 'codex', status: 'SUCCEEDED', startedAt: at(14), completedAt: at(9.5), commitSha: '4ea5e4d1', dependencies: [] },
+    { id: 'phase-2-build-store', name: 'build-store', order: 2, role: 'builder', agentId: 'gemini', status: 'RUNNING', startedAt: at(9.5), dependencies: ['phase-1-scaffold'] },
+    { id: 'phase-3-review-contract', name: 'review-contract', order: 3, role: 'hardener', agentId: 'claude', status: 'RUNNING', startedAt: at(9.5), dependencies: ['phase-1-scaffold'] },
+    { id: 'phase-4-harden', name: 'harden', order: 4, role: 'hardener', agentId: 'codex', status: 'PENDING', dependencies: ['phase-2-build-store', 'phase-3-review-contract'] },
+    { id: 'phase-5-verify', name: 'verify', order: 5, role: 'verifier', agentId: 'claude', status: 'PENDING', dependencies: ['phase-4-harden'] }
   ];
 }
 

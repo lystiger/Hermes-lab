@@ -250,6 +250,8 @@ export interface JobPhase {
   changedFilesCount?: number;
   detail?: string;
   meta?: string;
+  /** Ids of the phases this one waits for, as Hermes reports them. */
+  dependencies?: string[];
 }
 
 export interface Job {
@@ -709,6 +711,20 @@ export interface JobTokenTelemetry {
   outputTokens: number;
   cachedTokens: number;
   totalTokens: number;
+  /** Agent-reported cost in USD; null when no agent of the job reported one (Codex reports none). */
+  costUsd: number | null;
+  /** One row per agent run, in the order they finished. Empty for jobs from before per-task usage. */
+  tasks: TaskUsage[];
+}
+
+/** Token use of one agent run on one task, from GET /jobs/{id}/telemetry. */
+export interface TaskUsage {
+  taskId: string;
+  actorId: string | null;
+  attempt: number | null;
+  status: string | null;
+  totalTokens: number;
+  costUsd: number | null;
 }
 
 export interface TaskNode {

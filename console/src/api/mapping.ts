@@ -6,6 +6,7 @@ import {
   AgentLimitsReport,
   JobObservation,
   JobTokenTelemetry,
+  TaskUsage,
   ProviderTelemetry,
   TaskNode,
   TraceEvent,
@@ -230,7 +231,20 @@ export function mapJobTokenTelemetry(raw: any, fallbackJobId: string): JobTokenT
     inputTokens: nullableNumber(pick(t, 'input_tokens', 'inputTokens')) ?? 0,
     outputTokens: nullableNumber(pick(t, 'output_tokens', 'outputTokens')) ?? 0,
     cachedTokens: nullableNumber(pick(t, 'cached_tokens', 'cachedTokens')) ?? 0,
-    totalTokens: nullableNumber(pick(t, 'total_tokens', 'totalTokens')) ?? 0
+    totalTokens: nullableNumber(pick(t, 'total_tokens', 'totalTokens')) ?? 0,
+    costUsd: nullableNumber(pick(raw, 'costUsd', 'cost_usd')),
+    tasks: Array.isArray(pick(raw, 'tasks')) ? (pick(raw, 'tasks') as any[]).map(mapTaskUsage) : []
+  };
+}
+
+export function mapTaskUsage(raw: any): TaskUsage {
+  return {
+    taskId: String(pick(raw, 'task_id', 'taskId') ?? ''),
+    actorId: (pick(raw, 'actor_id', 'actorId') as string | undefined) ?? null,
+    attempt: nullableNumber(pick(raw, 'attempt')),
+    status: (pick(raw, 'status') as string | undefined) ?? null,
+    totalTokens: nullableNumber(pick(raw, 'total_tokens', 'totalTokens')) ?? 0,
+    costUsd: nullableNumber(pick(raw, 'cost_usd', 'costUsd'))
   };
 }
 

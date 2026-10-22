@@ -193,7 +193,7 @@ export class MockHermesApi implements HermesApi {
   }
 
   async getJobTelemetry(jobId: string): Promise<JobTokenTelemetry> {
-    return { jobId, inputTokens: 0, outputTokens: 0, cachedTokens: 0, totalTokens: 0 };
+    return { jobId, inputTokens: 0, outputTokens: 0, cachedTokens: 0, totalTokens: 0, costUsd: null, tasks: [] };
   }
 
   async getJobTasks(_jobId: string): Promise<TaskNode[]> {

@@ -95,14 +95,15 @@ def test_goal_route_returns_the_job_and_plans_in_the_background(tmp_path, monkey
 
     monkeypatch.setattr(main.job_launcher, "launch_goal_background", fake_background)
     response = TestClient(main.app).post("/jobs/goal", json={"goal": "Build it", "targetRepo": "Repo", "dryRun": True,
-                                                              "targetSubdir": "console", "allowedCommands": ["npm test"]})
+                                                              "targetSubdir": "console", "allowedCommands": ["npm test"],
+                                                              "excludeAgents": ["antigravity"]})
     assert response.status_code == 202
     body = response.json()
     assert body["jobId"] == "run_x" and body["plannerModel"] == "claude-opus-5-5" and body["plannerEffort"] == "medium"
     assert started["target_repo"] == (root / "Repo").resolve()
     assert started["allow_heuristic_fallback"] is False and started["dry_run"] is True
     assert started["target_subdir"] == "console" and started["permissions"] == {"commands": ["npm test"]}
-    assert started["task_timeout_seconds"] == 1200
+    assert started["task_timeout_seconds"] == 1200 and started["exclude_agents"] == ["antigravity"]
 
 
 def test_planning_prompt_lists_the_available_capabilities():
@@ -212,3 +213,28 @@ async def test_planner_repairs_a_plan_that_fails_validation(tmp_path):
     plan = await GroundedPlanner(model_client=model, target_repo=repo).generate_initial_plan(request)
     assert len(prompts) == 2 and "ui.made-up" in prompts[1]
     assert [t.task_id for t in plan.tasks] == ["build_api", "harden_api", "verify_api"]
+
+
+def test_excluded_agents_are_not_registered():
+    from capabilities.capabilities import create_default_capability_registry
+
+    registry = create_default_capability_registry(exclude=["antigravity", "Gemini"])
+    assert set(registry._actors) == {"claude", "codex"}
+    assert "implementation" in registry.get_actor_capabilities("claude")
+
+
+def test_a_superseded_dependency_waits_for_its_replacement():
+    from runtime.task_graph import TaskGraph, TaskNode, TaskStatus
+
+    g = TaskGraph()
+    for tid, deps in (("build", []), ("fix_build", []), ("test", ["build"])):
+        g.add_task(TaskNode(task_id=tid, job_id="j", description=tid, dependencies=deps))
+    g.supersede_task("build", superseded_by="fix_build")
+    ready = lambda: {t.task_id for t in g.find_ready_tasks()}
+    assert "test" not in ready()
+    g.get_task("fix_build").status = TaskStatus.FAILED
+    assert "test" not in ready()
+    g.get_task("fix_build").status = TaskStatus.SUCCEEDED
+    assert "test" in ready()
+    g.supersede_task("fix_build")  # dropped without a replacement: no longer blocks
+    assert "test" in ready()

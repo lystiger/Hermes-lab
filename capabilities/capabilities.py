@@ -62,6 +62,7 @@ DEFAULT_CAPABILITY_PROFILES: Dict[str, List[str]] = {
         "testing.unit",
     ],
     "claude": [
+        "implementation",
         "review.code",
         "review.architecture",
         "review.concurrency",
@@ -334,12 +335,15 @@ class CapabilityRegistry:
         )
 
 
-def create_default_capability_registry() -> CapabilityRegistry:
-    """Factory creating a pre-populated CapabilityRegistry with default agent profiles."""
+def create_default_capability_registry(exclude: Sequence[str] = ()) -> CapabilityRegistry:
+    """Factory creating a pre-populated CapabilityRegistry with default agent profiles, minus `exclude`."""
     from personas.persona import resolve_agent_profile
 
+    excluded = {a.strip().lower() for a in exclude}
     registry = CapabilityRegistry()
     for agent_id, caps in DEFAULT_CAPABILITY_PROFILES.items():
+        if agent_id in excluded:
+            continue
         profile = resolve_agent_profile(agent_id)
         profile.capabilities = list(caps)
         registry.register_actor(profile)

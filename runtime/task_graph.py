@@ -261,6 +261,24 @@ class TaskGraph:
         task.supersede_reason = reason
         task.completed_at = datetime.now(timezone.utc).isoformat()
 
+    def _dependency_done(self, task_id: str) -> bool:
+        """A dependency is done when it SUCCEEDED, or was SUPERSEDED and its replacement is done.
+        A superseded task without a replacement was dropped from the plan and no longer blocks."""
+        seen = set()
+        while task_id and task_id not in seen:
+            seen.add(task_id)
+            dep = self._tasks.get(task_id)
+            if not dep:
+                return False
+            if dep.status == TaskStatus.SUCCEEDED:
+                return True
+            if dep.status != TaskStatus.SUPERSEDED:
+                return False
+            if not dep.superseded_by:
+                return True
+            task_id = dep.superseded_by
+        return False
+
     def find_ready_tasks(self) -> List[TaskNode]:
         """
         Determines all tasks eligible for immediate execution.
@@ -275,8 +293,7 @@ class TaskGraph:
             elif task.status == TaskStatus.PENDING:
                 dependencies_satisfied = True
                 for dep_id in task.dependencies:
-                    dep = self._tasks.get(dep_id)
-                    if not dep or dep.status not in {TaskStatus.SUCCEEDED, TaskStatus.SUPERSEDED}:
+                    if not self._dependency_done(dep_id):
                         dependencies_satisfied = False
                         break
                 if dependencies_satisfied:

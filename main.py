@@ -518,6 +518,8 @@ class CreateGoalJobPayload(BaseModel):
     # Exact commands agents may run; Antigravity denies anything else in headless mode.
     allowedCommands: List[str] = Field(default_factory=list, max_length=50)
     taskTimeoutSeconds: int = Field(default=1200, ge=60, le=7200)
+    # Agents this job must not use (e.g. agy-based agents, which need an exact command allowlist).
+    excludeAgents: List[str] = Field(default_factory=list, max_length=10)
 
 
 GOAL_REPOS_ROOT = Path(os.environ.get("HERMES_GOAL_REPOS_ROOT", Path.home() / "Projects"))
@@ -551,6 +553,7 @@ async def create_goal_job(payload: CreateGoalJobPayload):
             target_subdir=payload.targetSubdir,
             permissions={"commands": payload.allowedCommands} if payload.allowedCommands else None,
             task_timeout_seconds=payload.taskTimeoutSeconds,
+            exclude_agents=payload.excludeAgents or None,
         ) | {"targetRepo": str(repo), "plannerModel": payload.plannerModel, "plannerEffort": payload.plannerEffort}
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))

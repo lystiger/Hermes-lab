@@ -19,6 +19,7 @@ from runtime.engine import ReactiveJobEngine
 from runtime.job_state import JobRecord, JobState
 from runtime.task_graph import TaskNode
 from runtime.target_subdir import normalize_target_subdir
+from capabilities.capabilities import create_default_capability_registry
 from runtime.hermes_adapter import (
     HermesActorAdapter,
     HermesVerifierAdapter,
@@ -457,6 +458,7 @@ class JobLauncher:
         target_subdir: str = "",
         permissions: Optional[Dict[str, Any]] = None,
         task_timeout_seconds: int = 300,
+        exclude_agents: Optional[List[str]] = None,
     ) -> Dict[str, Any]:
         """
         Launches an initial-planned engineering job from a natural language goal and target repository.
@@ -539,6 +541,8 @@ class JobLauncher:
             planner=planner_adapter,
             limits=runtime_limits,
             event_bridge=event_bridge,
+            # Excluded agents are neither offered to the planner nor dispatched by the scheduler.
+            **({"capability_registry": create_default_capability_registry(exclude=exclude_agents)} if exclude_agents else {}),
         )
 
         # Register engine with JobService BEFORE execution begins

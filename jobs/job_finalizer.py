@@ -151,6 +151,7 @@ def finalize_completed_job(engine: Any, repo: Path, worktree_root: Path, run_dir
     removed = clean_job_worktrees(repo, worktree_root, engine.job.job_id)
     pruned = prune_merged_job_branches(repo, keep=engine.job.branch)
     result = {"prUrl": pr_url, "runLog": str(record) if record else None, "worktreesRemoved": removed, "pruned": pruned}
+    run_dir.mkdir(parents=True, exist_ok=True)  # a dry run never created it
     (run_dir / "finalize.json").write_text(json.dumps(result, indent=2), encoding="utf-8")
     logger.info("Finalized job %s: %s", engine.job.job_id, result)
     return result

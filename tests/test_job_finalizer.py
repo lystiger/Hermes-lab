@@ -87,9 +87,9 @@ def test_a_dry_run_is_only_cleaned_up(tmp_path, monkeypatch):
     git(repo, "worktree", "add", "-q", "-b", f"job/{job}/integration", str(wt_root / "integration"))
     lysstack = tmp_path / "LysStack"
     (lysstack / "operating_system").mkdir(parents=True)
-    run_dir = tmp_path / "runs" / job
-    run_dir.mkdir(parents=True)
+    run_dir = tmp_path / "runs" / job  # a dry run never creates its run dir
     result = finalize_completed_job(fake_engine(job), repo, wt_root, run_dir, lysstack_root=lysstack, review=False)
+    assert (run_dir / "finalize.json").exists()
     assert result["prUrl"] is None and result["runLog"] is None and result["worktreesRemoved"] == 1
     assert not (lysstack / "operating_system" / "run-log.md").exists()
     assert "job/run_dry/integration" not in git(repo, "ls-remote", "--heads", "origin")

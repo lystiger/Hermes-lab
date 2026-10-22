@@ -836,5 +836,7 @@ export interface RunReview {
   totalTokens: number;
   /** null when Hermes could not open the pull request (no remote, gh missing, or turned off). */
   prUrl: string | null;
+  /** OPEN, MERGED or CLOSED as GitHub reports it; null when unknown. Only OPEN still waits for review. */
+  prState: 'OPEN' | 'MERGED' | 'CLOSED' | null;
   finishedAt: string | null;
 }

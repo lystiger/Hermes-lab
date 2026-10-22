@@ -19,7 +19,11 @@ import type { TraceEvent } from '../api/types';
  */
 export const FloorRoute: React.FC = () => {
   const { jobs, loading, error, updatedAt, refetch } = useJobs();
-  const activeJobs = useMemo(() => jobs.filter((j) => ACTIVE_JOB_STATUSES.includes(j.status)), [jobs]);
+  // A job paused until an agent usage limit resets is still mid-run, so it stays on the floor.
+  const activeJobs = useMemo(
+    () => jobs.filter((j) => ACTIVE_JOB_STATUSES.includes(j.status) || j.status === 'WAITING_FOR_CAPACITY'),
+    [jobs]
+  );
 
   const counts: HeaderCount[] = [{ label: 'ACTIVE JOBS', value: activeJobs.length, tone: 'var(--lys-status-success)' }];
 

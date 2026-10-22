@@ -211,6 +211,7 @@ export class MockHermesApi implements HermesApi {
       costUsd: 0.0465,
       totalTokens: 1_310_000,
       prUrl: 'https://github.com/lystiger/Hermes-lab/pull/23',
+      prState: 'OPEN',
       finishedAt: new Date(Date.now() - 3 * 3_600_000).toISOString()
     }];
   }

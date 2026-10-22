@@ -41,12 +41,12 @@ describe('M7d real job statuses', () => {
       .toMatchObject({ id: 'OTHER:FUTURE_STATUS', label: 'Other · FUTURE_STATUS' });
   });
 
-  it('shows EXECUTING in Overview active execution', async () => {
+  it('shows an EXECUTING job under Running now on the Overview', async () => {
     installLiveHermes({ jobs: [{ ...LIVE_JOB_SUMMARY, status: 'EXECUTING' }] });
     render(<MemoryRouter><OverviewRoute /></MemoryRouter>);
-    const card = await screen.findByLabelText('Active execution');
-    expect(await within(card).findByText('EXECUTING')).toBeInTheDocument();
-    expect(within(card).queryByText('No active execution')).not.toBeInTheDocument();
+    const section = await screen.findByRole('region', { name: 'Running now' });
+    expect(await within(section).findByText('executing')).toBeInTheDocument();
+    expect(within(section).queryByText('No run in progress.')).not.toBeInTheDocument();
   });
 });
 

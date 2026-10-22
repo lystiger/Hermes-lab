@@ -2,7 +2,6 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import { act, render, screen, within } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { EventsRoute } from '../routes/events';
-import { OverviewRoute } from '../routes/index';
 import { useConsoleStore, sortNewestFirst } from '../stores/useConsoleStore';
 import { traceSourceName } from '../api/actors';
 import { TraceEvent } from '../api/types';
@@ -33,7 +32,7 @@ describe('event order: newest first everywhere', () => {
     expect(useConsoleStore.getState().allEvents.map((e) => e.id)).toEqual(['c', 'late', 'a']);
   });
 
-  it('the Events log lists rows newest first, and the overview trace does too', () => {
+  it('the Events log lists rows newest first', () => {
     useConsoleStore.getState().setInitialEvents([ev('old', 1), ev('mid', 2), ev('new', 3)]);
     const { unmount } = render(
       <MemoryRouter>
@@ -44,14 +43,6 @@ describe('event order: newest first everywhere', () => {
     expect(rows[0]).toHaveTextContent('detail new');
     expect(rows[2]).toHaveTextContent('detail old');
     unmount();
-
-    const overview = render(
-      <MemoryRouter>
-        <OverviewRoute />
-      </MemoryRouter>
-    );
-    expect(overview.container.textContent!.indexOf('detail new')).toBeLessThan(overview.container.textContent!.indexOf('detail old'));
-    overview.unmount();
   });
 
   it('the new-events pill still counts arrivals while the list is frozen in the new order', () => {

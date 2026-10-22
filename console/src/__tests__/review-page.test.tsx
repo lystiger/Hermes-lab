@@ -17,7 +17,7 @@ const review: RunReview = {
     { id: 'recheck_verify_1', role: 'verifier', agent: 'codex', status: 'SUCCEEDED' }
   ],
   verdict: { task: 'recheck_verify_1', summary: 'All checks pass.', findings: ['flaky test reran green'] },
-  costUsd: 0.0465, totalTokens: 1_310_000, prUrl: 'https://github.com/o/r/pull/23', finishedAt: '2026-10-22T14:00:00Z'
+  costUsd: 0.0465, totalTokens: 1_310_000, prUrl: 'https://github.com/o/r/pull/23', prState: 'OPEN', finishedAt: '2026-10-22T14:00:00Z'
 };
 
 afterEach(() => { cleanup(); vi.clearAllMocks(); });

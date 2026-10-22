@@ -339,6 +339,7 @@ export function mapRunReview(raw: any): RunReview {
     costUsd: nullableNumber(pick(raw, 'costUsd', 'cost_usd')),
     totalTokens: nullableNumber(pick(raw, 'totalTokens', 'total_tokens')) ?? 0,
     prUrl: (pick(raw, 'prUrl', 'pr_url') as string | null | undefined) ?? null,
+    prState: (['OPEN', 'MERGED', 'CLOSED'] as const).find((s) => s === String(pick(raw, 'prState', 'pr_state') ?? '').toUpperCase()) ?? null,
     finishedAt: (pick(raw, 'finalizedAt', 'finishedAt') as string | null | undefined) ?? null
   };
 }

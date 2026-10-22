@@ -16,7 +16,7 @@ import { EMPTY_EXECUTION_VIEW } from '../stores/executionReducer';
 
 const invented = ['#142', 'VehicleStateStore', 'moveinmate', '$4.12', '58%', 'SIMULATED', '~37 min', 'v0.1.0', 'raise cap', 'alert(', 'Phase 4'];
 const routes = [
-  ['/', OverviewRoute, ['No active execution', 'No jobs', 'No events']],
+  ['/', OverviewRoute, ['Nothing needs you right now.', 'No run in progress.']],
   ['/queue', QueueRoute, ['No jobs', 'No recoverable jobs']],
   ['/agents', AgentsListRoute, ['No agents']],
   ['/usage', UsageRoute, ['No agent limits']],

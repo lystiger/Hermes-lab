@@ -35,6 +35,7 @@ class PlanValidator:
         repo_dir: Optional[Path] = None,
         available_capabilities: Optional[List[str]] = None,
         limits: Optional[RuntimeLimits] = None,
+        agent_capabilities: Optional[Dict[str, List[str]]] = None,
     ) -> PlanValidationResult:
         errors: List[str] = []
         warnings: List[str] = []
@@ -85,6 +86,13 @@ class PlanValidator:
                         # Match exact or prefix (e.g. 'code.python' matches 'code.python')
                         if cap not in avail_set and not any(cap.startswith(a) or a.startswith(cap) for a in avail_set):
                             errors.append(f"Task '{tid}' requires unsupported/unknown capability '{cap}'.")
+            # One agent runs each task, so some agent must hold every capability the task needs.
+            if t.required_capabilities and agent_capabilities:
+                needed = {c.strip() for c in t.required_capabilities}
+                if not any(needed <= set(caps) for caps in agent_capabilities.values()):
+                    errors.append(
+                        f"Task '{tid}' needs {sorted(needed)} together, but no single agent has all of them."
+                    )
 
             # Non-trivial task completion evidence (acceptance criteria or verification)
             has_verification = bool(t.verification or t.acceptance_criteria)

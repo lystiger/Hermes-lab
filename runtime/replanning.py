@@ -79,6 +79,8 @@ class ReplanRequest:
     target_repo: Optional[Any] = None
     constraints: List[str] = field(default_factory=list)
     available_capabilities: Optional[List[str]] = None
+    # Capabilities per agent: each task runs on one agent, so its capabilities must all belong to one of them.
+    agent_capabilities: Optional[Dict[str, List[str]]] = None
     evidence: Optional[Any] = None
 
 

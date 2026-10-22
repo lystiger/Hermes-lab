@@ -268,6 +268,9 @@ class ReactiveJobEngine:
             avail_caps = []
             if hasattr(self.capability_registry, "list_available_capabilities"):
                 avail_caps = self.capability_registry.list_available_capabilities()
+            agent_caps = None
+            if hasattr(self.capability_registry, "_actors") and hasattr(self.capability_registry, "get_actor_capabilities"):
+                agent_caps = {a: self.capability_registry.get_actor_capabilities(a) for a in self.capability_registry._actors}
 
             replan_req = ReplanRequest(
                 job_id=self.job.job_id,
@@ -282,6 +285,7 @@ class ReactiveJobEngine:
                 target_repo=target_repo,
                 constraints=constraints,
                 available_capabilities=avail_caps,
+                agent_capabilities=agent_caps,
             )
             plan_res = await self.planner.plan(replan_req)
             self.bounded_replanner.apply_mutations(self.graph, plan_res, self.job.job_id)

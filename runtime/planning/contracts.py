@@ -133,6 +133,7 @@ class PlanningRequest:
     constraints: List[str] = field(default_factory=list)
     supplied_context: Dict[str, Any] = field(default_factory=dict)
     available_capabilities: Optional[List[str]] = None
+    agent_capabilities: Optional[Dict[str, List[str]]] = None
     limits: RuntimeLimits = field(default_factory=RuntimeLimits)
     evidence: Optional[RepositoryEvidence] = None
 

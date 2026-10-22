@@ -111,3 +111,30 @@ def test_planning_prompt_lists_the_available_capabilities():
     prompt = GroundedPlanner()._build_planning_prompt(request, RepositoryEvidence(summary="s"))
     assert "# AVAILABLE CAPABILITIES" in prompt
     assert "- frontend.react\n- testing.unit" in prompt
+
+
+def test_planning_prompt_groups_capabilities_by_agent():
+    from runtime.planning.planner import GroundedPlanner
+    from runtime.planning.contracts import PlanningRequest
+    from runtime.planning.reconnaissance import RepositoryEvidence
+
+    request = PlanningRequest(job_id="j", goal="g", target_repo=".", available_capabilities=["a", "b", "c"],
+                              agent_capabilities={"claude": ["review.code", "code.typescript"], "codex": ["verification"]})
+    prompt = GroundedPlanner()._build_planning_prompt(request, RepositoryEvidence(summary="s"))
+    assert "# AGENTS AND THEIR CAPABILITIES" in prompt
+    assert "- claude: code.typescript, review.code\n- codex: verification" in prompt
+
+
+def test_validator_rejects_a_task_no_single_agent_can_run(tmp_path):
+    from runtime.planning.contracts import StructuredPlan
+    from runtime.planning.validator import PlanValidator
+
+    repo = make_repo(tmp_path / "repo")
+    plan = StructuredPlan.from_dict(json.loads(plan_json("g")) | {"job_id": "j"})
+    agents = {"builder_agent": ["repo.read", "code.python"], "checker": ["verification"]}
+    caps = ["repo.read", "code.python", "verification"]
+    assert PlanValidator.validate(plan, repo_dir=repo, available_capabilities=caps, agent_capabilities=agents).is_valid
+    split = {"reader": ["repo.read"], "coder": ["code.python"], "checker": ["verification"]}
+    result = PlanValidator.validate(plan, repo_dir=repo, available_capabilities=caps, agent_capabilities=split)
+    assert not result.is_valid
+    assert any("no single agent has all of them" in e for e in result.errors)

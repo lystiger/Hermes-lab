@@ -66,6 +66,7 @@ DEFAULT_CAPABILITY_PROFILES: Dict[str, List[str]] = {
         "review.architecture",
         "review.concurrency",
         "code.python",
+        "code.typescript",
         "frontend.react",
         "documentation",
         "git.inspect",

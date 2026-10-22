@@ -172,6 +172,7 @@ class GroundedPlanner(PlannerAdapter):
             plan=plan,
             repo_dir=repo_dir,
             available_capabilities=request.available_capabilities,
+            agent_capabilities=request.agent_capabilities,
             limits=self.limits,
         )
 
@@ -224,6 +225,7 @@ class GroundedPlanner(PlannerAdapter):
             repo_dir = getattr(request, "target_repo", None) or self.target_repo or Path.cwd()
             constraints = getattr(request, "constraints", [])
             avail_caps = getattr(request, "available_capabilities", None)
+            agent_caps = getattr(request, "agent_capabilities", None)
 
             plan_req = PlanningRequest(
                 job_id=request.job_id,
@@ -231,6 +233,7 @@ class GroundedPlanner(PlannerAdapter):
                 target_repo=repo_dir,
                 constraints=constraints,
                 available_capabilities=avail_caps,
+                agent_capabilities=agent_caps,
                 limits=self.limits,
             )
 
@@ -270,8 +273,16 @@ class GroundedPlanner(PlannerAdapter):
             prompt_parts.append("# CONSTRAINTS\n" + "\n".join(f"- {c}" for c in request.constraints) + "\n")
 
         prompt_parts.append("# REPOSITORY RECONNAISSANCE EVIDENCE\n" + evidence.render_for_prompt() + "\n")
+        agents = getattr(request, "agent_capabilities", None)
         caps = getattr(request, "available_capabilities", None)
-        if caps:
+        if agents:
+            # Each task runs on one agent, so its required_capabilities must all be held by a single agent.
+            prompt_parts.append(
+                "# AGENTS AND THEIR CAPABILITIES\nEach task is run by exactly one agent, so every task's "
+                "required_capabilities must all belong to one of these agents (use these exact strings):\n"
+                + "\n".join(f"- {a}: {', '.join(sorted(c))}" for a, c in sorted(agents.items())) + "\n"
+            )
+        elif caps:
             # The validator rejects any capability outside this list, so the model must choose from it.
             prompt_parts.append(
                 "# AVAILABLE CAPABILITIES\nThese are the only capabilities the current agents have. Every "

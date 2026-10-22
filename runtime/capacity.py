@@ -266,6 +266,28 @@ class ProviderFailureClassifier:
     the authoritative ProviderFailureClass taxonomy.
     """
 
+    @staticmethod
+    def seconds_until_reset(text: str, now: Optional[datetime] = None) -> Optional[float]:
+        """Seconds until a reset written as 'resets 7:10pm (Area/City)' (or '19:10'), or None."""
+        m = re.search(r"resets\s+(\d{1,2})(?::(\d{2}))?\s*(am|pm)?(?:\s*\(([^)]+)\))?", text, re.IGNORECASE)
+        if not m:
+            return None
+        hour, minute, ampm, zone = int(m.group(1)), int(m.group(2) or 0), (m.group(3) or "").lower(), m.group(4)
+        if ampm == "pm" and hour < 12:
+            hour += 12
+        elif ampm == "am" and hour == 12:
+            hour = 0
+        try:
+            from zoneinfo import ZoneInfo
+            tz = ZoneInfo(zone) if zone else timezone.utc
+        except Exception:
+            tz = timezone.utc
+        local_now = (now or datetime.now(timezone.utc)).astimezone(tz)
+        target = local_now.replace(hour=hour % 24, minute=minute, second=0, microsecond=0)
+        if target <= local_now:
+            target += timedelta(days=1)
+        return (target - local_now).total_seconds()
+
     @classmethod
     def classify(
         cls,
@@ -313,6 +335,12 @@ class ProviderFailureClassifier:
             if "quota" in err_str or "credit balance" in err_str or "insufficient_quota" in err_str:
                 return ProviderFailureClass.TOKEN_QUOTA_EXHAUSTED, retry_after
             return ProviderFailureClass.RATE_LIMITED, retry_after
+
+        # Subscription CLIs (Claude Code) report a usage window, e.g. "usage_limit_reached You've hit your
+        # session limit · resets 7:10pm (Asia/Ho_Chi_Minh)". The window has a known reset time.
+        if "usage_limit_reached" in err_str or "hit your session limit" in err_str or "usage limit reached" in err_str \
+                or "hit your weekly limit" in err_str or "hit your usage limit" in err_str:
+            return ProviderFailureClass.TOKEN_QUOTA_EXHAUSTED, retry_after or cls.seconds_until_reset(str(error))
 
         if "quota exceeded" in err_str or "exceeded your quota" in err_str or "insufficient quota" in err_str or "billing" in err_str or "payment required" in err_str:
             return ProviderFailureClass.TOKEN_QUOTA_EXHAUSTED, retry_after

@@ -1,3 +1,4 @@
+import json
 import time
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
@@ -45,6 +46,18 @@ def argv_safe_prompt(prompt):
         return "Instructions:\n" + prompt
     return prompt
 
+
+
+def reported_provider_error(stdout):
+    """The provider error an agent CLI printed as its JSON result (e.g. Claude's usage limit), or None."""
+    try:
+        data = json.loads((stdout or "").strip())
+    except (ValueError, TypeError):
+        return None
+    if not isinstance(data, dict) or not (data.get("is_error") or data.get("api_error")):
+        return None
+    parts = [str(data[k]) for k in ("api_error", "result") if data.get(k)]
+    return " ".join(parts) or None
 
 class AgentAdapter(ABC):
     """Small boundary around one agent CLI and its result contract."""
@@ -175,9 +188,12 @@ class AgentAdapter(ABC):
                 # The adapter decides whether denials exhausted the task or violated scope.
                 # A recovered denial must not relabel an unrelated nonzero process exit.
                 self.validate_result(result, context)
+            # Some CLIs report provider errors (usage limits, rate limits) on stdout, not stderr.
+            provider_error = reported_provider_error(result.stdout)
             raise SprintRunnerError(
                 "FAILED_AGENT_EXECUTION",
-                f"Agent {self.name} exited with code {result.returncode}:\n{stderr}",
+                f"Agent {self.name} exited with code {result.returncode}:\n{stderr}"
+                + (f"\nProvider error: {provider_error}" if provider_error else ""),
             )
 
         try:

@@ -553,8 +553,8 @@ class ReactiveJobEngine:
                 await self._transition_job(JobState.EXECUTING, reason="Provider capacity restored")
                 await self.event_bridge.emit_job_capacity_restored(self.job, reason="Provider capacity restored")
                 return True
-            # Briefly yield
-            await asyncio.sleep(0.01)
+            # Sleep until the earliest provider reset, at most 5s: a usage window can take hours to reset.
+            await asyncio.sleep(self._capacity_wait_seconds())
             return True
 
         # 2. State: EXECUTING
@@ -865,6 +865,14 @@ class ReactiveJobEngine:
                 await asyncio.to_thread(adapter.release_job, self.job.job_id)
             except Exception as exc:  # noqa: BLE001 - never mask the job outcome
                 logger.error("Job-end release failed for %s: %s", type(adapter).__name__, exc)
+
+    def _capacity_wait_seconds(self) -> float:
+        registry = getattr(self.scheduler, "capacity_registry", None)
+        resets = list(getattr(registry, "_provider_reset_at", {}).values())
+        if not resets:
+            return 5.0
+        until = min(resets) - datetime.now(timezone.utc)
+        return min(5.0, max(0.01, until.total_seconds()))
 
     async def _repair_failed_verdict(self, task: TaskNode, exec_res: TaskExecutionResult) -> bool:
         """

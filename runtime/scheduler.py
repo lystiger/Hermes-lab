@@ -461,6 +461,9 @@ class ReactiveScheduler:
                 ):
                     # Provider/capacity failure -> update registries
                     self.circuit_registry.record_failure(actor_id)
+                    if failure_class == ProviderFailureClass.TOKEN_QUOTA_EXHAUSTED and not retry_after:
+                        # An unknown reset must not mark the provider exhausted forever; check again later.
+                        retry_after = 900.0
                     self.capacity_registry.record_provider_failure(
                         provider_id=provider_id,
                         failure_class=failure_class,
@@ -492,9 +495,12 @@ class ReactiveScheduler:
                     else:
                         if failure_class in (
                             ProviderFailureClass.RATE_LIMITED,
+                            ProviderFailureClass.TOKEN_QUOTA_EXHAUSTED,
                             ProviderFailureClass.PROVIDER_OUTAGE,
                             ProviderFailureClass.NETWORK,
                         ):
+                            # Waiting for capacity is not the task's fault: give back the attempt it used.
+                            task.attempt = max(0, task.attempt - 1)
                             if self.event_bridge:
                                 await self.event_bridge.emit_task_reroute_failed(
                                     task_id=task.task_id,

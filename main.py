@@ -513,6 +513,11 @@ class CreateGoalJobPayload(BaseModel):
     skipAgentExec: bool = False
     plannerModel: str = "claude-opus-5-5"
     plannerEffort: Optional[str] = "medium"
+    # Agents run in this subfolder of the repository (e.g. "console").
+    targetSubdir: str = Field(default="", max_length=200)
+    # Exact commands agents may run; Antigravity denies anything else in headless mode.
+    allowedCommands: List[str] = Field(default_factory=list, max_length=50)
+    taskTimeoutSeconds: int = Field(default=1200, ge=60, le=7200)
 
 
 GOAL_REPOS_ROOT = Path(os.environ.get("HERMES_GOAL_REPOS_ROOT", Path.home() / "Projects"))
@@ -543,6 +548,9 @@ async def create_goal_job(payload: CreateGoalJobPayload):
             model_client=client,
             # The plan must come from the model; a heuristic plan would not prove the planner ran.
             allow_heuristic_fallback=False,
+            target_subdir=payload.targetSubdir,
+            permissions={"commands": payload.allowedCommands} if payload.allowedCommands else None,
+            task_timeout_seconds=payload.taskTimeoutSeconds,
         ) | {"targetRepo": str(repo), "plannerModel": payload.plannerModel, "plannerEffort": payload.plannerEffort}
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))

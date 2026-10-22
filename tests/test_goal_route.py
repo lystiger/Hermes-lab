@@ -94,12 +94,15 @@ def test_goal_route_returns_the_job_and_plans_in_the_background(tmp_path, monkey
         return {"jobId": "run_x", "goal": kwargs["goal"], "status": "CREATED", "mode": "goal_planned"}
 
     monkeypatch.setattr(main.job_launcher, "launch_goal_background", fake_background)
-    response = TestClient(main.app).post("/jobs/goal", json={"goal": "Build it", "targetRepo": "Repo", "dryRun": True})
+    response = TestClient(main.app).post("/jobs/goal", json={"goal": "Build it", "targetRepo": "Repo", "dryRun": True,
+                                                              "targetSubdir": "console", "allowedCommands": ["npm test"]})
     assert response.status_code == 202
     body = response.json()
     assert body["jobId"] == "run_x" and body["plannerModel"] == "claude-opus-5-5" and body["plannerEffort"] == "medium"
     assert started["target_repo"] == (root / "Repo").resolve()
     assert started["allow_heuristic_fallback"] is False and started["dry_run"] is True
+    assert started["target_subdir"] == "console" and started["permissions"] == {"commands": ["npm test"]}
+    assert started["task_timeout_seconds"] == 1200
 
 
 def test_planning_prompt_lists_the_available_capabilities():

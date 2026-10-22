@@ -285,3 +285,39 @@ def test_sprint_runner_selects_new_backend_without_runner_changes(tmp_path):
         "cancel_event",
         "cancel_grace_seconds",
     }
+
+
+def _run_planned_task(tmp_path, metadata, **adapter_kwargs):
+    repo = _git_repo(tmp_path / "repo")
+    seen = {}
+
+    class RecordingEcho(EchoAdapter):
+        def validate_result(self, result, context):
+            seen["phase"] = dict(context.phase)
+
+    adapter = HermesActorAdapter(
+        target_repo=repo, worktree_root=tmp_path / "worktrees", run_dir=tmp_path / "run",
+        agent_registry=AgentRegistry({EchoAdapter.name: RecordingEcho}),
+        backend_registry=BackendRegistry({FakeSessionfulBackend.name: FakeSessionfulBackend}),
+        job_id="job_contract", **adapter_kwargs,
+    )
+    task = TaskNode(task_id="T1", job_id="job_contract", description="noop", assigned_actor="echo",
+                    metadata={"execution_backend": "fake-sessionful", **metadata})
+    run = AgentRun(run_id="run_1", job_id="job_contract", task_id="T1", actor_id="echo")
+    return asyncio.run(adapter.execute_task(task, run)), seen
+
+
+def test_a_planned_builder_that_changes_nothing_fails(tmp_path):
+    result, _ = _run_planned_task(tmp_path, {"role": "builder"})
+    assert result.status == "failed"
+    assert "FAILED_NO_CHANGES" in result.error
+
+
+def test_job_permissions_and_timeout_reach_tasks_that_carry_none(tmp_path):
+    result, seen = _run_planned_task(
+        tmp_path, {"role": "hardener"},
+        default_permissions={"commands": ["npm run typecheck"]}, default_timeout_seconds=900,
+    )
+    assert result.status == "succeeded", result.error
+    assert seen["phase"]["permissions"] == {"commands": ["npm run typecheck"]}
+    assert FakeSessionfulBackend.instances[0].requests[0].timeout_seconds == 900

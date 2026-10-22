@@ -182,8 +182,14 @@ class HermesActorAdapter(ActorAdapter):
         observation_registry: Any = None,
         event_bridge: Any = None,
         target_subdir: str = "",
+        default_permissions: Optional[Dict[str, Any]] = None,
+        default_timeout_seconds: int = 300,
     ):
         self.control_root = Path.cwd().resolve()
+        # Job-level agent permissions (e.g. an Antigravity command allowlist) for tasks that carry none,
+        # such as goal-planned tasks, which have no sprint-spec phase.
+        self.default_permissions = default_permissions or {}
+        self.default_timeout_seconds = default_timeout_seconds
         self.target_repo = Path(target_repo).resolve() if target_repo else self.control_root
         self.worktree_root = Path(worktree_root).resolve() if worktree_root else self.target_repo / ".worktrees"
         self.run_dir = Path(run_dir).resolve() if run_dir else Path.home() / "hermes-runs" / f"run_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
@@ -926,6 +932,11 @@ class HermesActorAdapter(ActorAdapter):
                     "agent": actor_id,
                     "role": role,
                     "cmd_options": task.metadata.get("options", {}),
+                    "permissions": (
+                        task.metadata.get("permissions")
+                        or (task.metadata.get("phase") or {}).get("permissions")
+                        or self.default_permissions
+                    ),
                     "fail_on_permission_denial": task.metadata.get("fail_on_permission_denial", False),
                     "permission_denial_ceiling": task.metadata.get("permission_denial_ceiling", 20),
                     **({"priority": task.metadata["priority"]} if "priority" in task.metadata else {}),
@@ -936,7 +947,7 @@ class HermesActorAdapter(ActorAdapter):
                 options=task.metadata.get("options", {}),
                 stdout_file=stdout_file,
                 stderr_file=stderr_file,
-                timeout_seconds=task.metadata.get("timeout_seconds", 300),
+                timeout_seconds=task.metadata.get("timeout_seconds", self.default_timeout_seconds),
                 backend=backend,
             )
 
@@ -1014,8 +1025,13 @@ class HermesActorAdapter(ActorAdapter):
             # Validate role constraints
             changed_files = self.inspect_changed_files(worktree_path)
             mutations = self._exclude_handoff(changed_files, task)
-            if role == "verifier" and mutations:
-                raise RuntimeError(f"Verifier task '{task.task_id}' modified {len(mutations)} files; verifier role forbids mutations.")
+            if role in ("verifier", "security") and mutations:
+                raise RuntimeError(f"{role.capitalize()} task '{task.task_id}' modified {len(mutations)} files; the {role} role forbids mutations.")
+            # A task planned as a builder that changed nothing did not do its work, whatever the agent
+            # reported. Tasks with no explicit role keep the legacy default and are not held to this.
+            explicit_role = task.metadata.get("role") or task.metadata.get("execution_role")
+            if explicit_role == "builder" and not mutations and not (self.dry_run or self.skip_agent_exec):
+                raise RuntimeError(f"FAILED_NO_CHANGES: builder task '{task.task_id}' produced no file changes.")
 
             # Commit changes and merge into integration worktree with fence checks
             commit_sha = self._commit_and_integrate_changes(worktree_path, task, role, context)

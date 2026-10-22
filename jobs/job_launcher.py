@@ -454,6 +454,9 @@ class JobLauncher:
         start_background: bool = True,
         mode: str = "goal_planned",
         allow_heuristic_fallback: bool = True,
+        target_subdir: str = "",
+        permissions: Optional[Dict[str, Any]] = None,
+        task_timeout_seconds: int = 300,
     ) -> Dict[str, Any]:
         """
         Launches an initial-planned engineering job from a natural language goal and target repository.
@@ -479,9 +482,12 @@ class JobLauncher:
         runtime_limits = limits or RuntimeLimits()
 
         # Instantiate GroundedPlanner for dynamic repository-grounded goal decomposition
+        subdir = normalize_target_subdir(target_subdir)
+        # Agents work inside the subfolder, so the planner reads and cites paths from there too.
+        planning_root = resolved_target_repo / subdir if subdir else resolved_target_repo
         planner_adapter = GroundedPlanner(
             model_client=model_client,
-            target_repo=resolved_target_repo,
+            target_repo=planning_root,
             limits=runtime_limits,
             event_bridge=event_bridge,
             allow_heuristic_fallback=allow_heuristic_fallback,
@@ -499,6 +505,9 @@ class JobLauncher:
             base_ref="main",
             target_branch=f"job/{job_id}/integration",
             event_bridge=event_bridge,
+            target_subdir=subdir,
+            default_permissions=permissions,
+            default_timeout_seconds=task_timeout_seconds,
         )
 
         verifier_adapter = HermesVerifierAdapter(

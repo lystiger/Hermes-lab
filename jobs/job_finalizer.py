@@ -14,6 +14,7 @@ import logging
 import os
 import shutil
 import subprocess
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -167,8 +168,30 @@ def finalize_completed_job(engine: Any, repo: Path, worktree_root: Path, run_dir
     return result
 
 
-def list_reviews(runs_root: Path, limit: int = 50) -> List[Dict[str, Any]]:
-    """Finalized goal-planned jobs, newest first, from each job's finalize.json. Dry runs are left out."""
+# PR state per URL with when it was read. OPEN is re-read after PR_STATE_TTL seconds; MERGED and CLOSED are
+# final and are also written back into the job's finalize.json.
+_pr_states: Dict[str, tuple] = {}
+PR_STATE_TTL = 60.0
+FINAL_PR_STATES = ("MERGED", "CLOSED")
+
+
+def pr_state(url: str) -> Optional[str]:
+    """OPEN, MERGED or CLOSED for a PR URL, or None when gh cannot tell."""
+    cached = _pr_states.get(url)
+    if cached and (cached[0] in FINAL_PR_STATES or time.monotonic() - cached[1] < PR_STATE_TTL):
+        return cached[0]
+    if not shutil.which("gh"):
+        return None
+    res = subprocess.run(["gh", "pr", "view", url, "--json", "state", "-q", ".state"], capture_output=True, text=True, timeout=30)
+    state = res.stdout.strip().upper() if res.returncode == 0 and res.stdout.strip() else None
+    if state:
+        _pr_states[url] = (state, time.monotonic())
+    return state
+
+
+def list_reviews(runs_root: Path, limit: int = 50, with_pr_state: bool = True) -> List[Dict[str, Any]]:
+    """Finalized goal-planned jobs, newest first, from each job's finalize.json. Dry runs are left out.
+    Each carries prState (OPEN, MERGED, CLOSED, or None when unknown)."""
     reviews = []
     for path in sorted(runs_root.glob("*/finalize.json"), key=lambda p: p.stat().st_mtime, reverse=True):
         try:
@@ -177,8 +200,17 @@ def list_reviews(runs_root: Path, limit: int = 50) -> List[Dict[str, Any]]:
             continue
         if data.get("dryRun") or not isinstance(data.get("review"), dict):
             continue
-        reviews.append({**data["review"], "prUrl": data.get("prUrl"), "finalizedAt": data.get("finalizedAt"),
-                        "runLog": data.get("runLog")})
+        state = data.get("prState")
+        if with_pr_state and data.get("prUrl") and state not in FINAL_PR_STATES:
+            state = pr_state(data["prUrl"]) or state
+            if state in FINAL_PR_STATES:
+                data["prState"] = state
+                try:
+                    path.write_text(json.dumps(data, indent=2), encoding="utf-8")
+                except OSError:
+                    pass
+        reviews.append({**data["review"], "prUrl": data.get("prUrl"), "prState": state,
+                        "finalizedAt": data.get("finalizedAt"), "runLog": data.get("runLog")})
         if len(reviews) >= limit:
             break
     return reviews

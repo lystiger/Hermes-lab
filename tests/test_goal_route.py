@@ -100,3 +100,14 @@ def test_goal_route_returns_the_job_and_plans_in_the_background(tmp_path, monkey
     assert body["jobId"] == "run_x" and body["plannerModel"] == "claude-opus-5-5" and body["plannerEffort"] == "high"
     assert started["target_repo"] == (root / "Repo").resolve()
     assert started["allow_heuristic_fallback"] is False and started["dry_run"] is True
+
+
+def test_planning_prompt_lists_the_available_capabilities():
+    from runtime.planning.planner import GroundedPlanner
+    from runtime.planning.contracts import PlanningRequest
+    from runtime.planning.reconnaissance import RepositoryEvidence
+
+    request = PlanningRequest(job_id="j", goal="g", target_repo=".", available_capabilities=["frontend.react", "testing.unit"])
+    prompt = GroundedPlanner()._build_planning_prompt(request, RepositoryEvidence(summary="s"))
+    assert "# AVAILABLE CAPABILITIES" in prompt
+    assert "- frontend.react\n- testing.unit" in prompt

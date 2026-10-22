@@ -270,6 +270,14 @@ class GroundedPlanner(PlannerAdapter):
             prompt_parts.append("# CONSTRAINTS\n" + "\n".join(f"- {c}" for c in request.constraints) + "\n")
 
         prompt_parts.append("# REPOSITORY RECONNAISSANCE EVIDENCE\n" + evidence.render_for_prompt() + "\n")
+        caps = getattr(request, "available_capabilities", None)
+        if caps:
+            # The validator rejects any capability outside this list, so the model must choose from it.
+            prompt_parts.append(
+                "# AVAILABLE CAPABILITIES\nThese are the only capabilities the current agents have. Every "
+                "required_capabilities entry must be one of these exact strings:\n"
+                + "\n".join(f"- {c}" for c in sorted(caps)) + "\n"
+            )
         prompt_parts.append("# STRUCTURED PLAN OUTPUT CONTRACT\n" + PLAN_JSON_SCHEMA_PROMPT)
         return "\n\n".join(prompt_parts)
 

@@ -80,7 +80,9 @@ except ImportError:
 
 
 class HermesSprintRunner:
-    PHASE_ROLES = {"builder", "hardener", "verifier"}
+    PHASE_ROLES = {"builder", "hardener", "verifier", "security"}
+    # Read-only roles report a verdict and never change, commit or merge product files.
+    READ_ONLY_ROLES = {"verifier", "security"}
     DEFAULT_CONTEXT_MAX_BYTES = 256 * 1024
 
     def __init__(
@@ -1437,12 +1439,12 @@ class HermesSprintRunner:
 
         changed_files = self.inspect_changed_files(wt_dir)
         max_limit = self.limits.get("max_changed_files", 15)
-        if role == "verifier" and changed_files:
+        if role in self.READ_ONLY_ROLES and changed_files:
             raise SprintRunnerError(
                 "FAILED_FORBIDDEN_CHANGES",
-                f"Verifier phase '{phase_name}' modified {len(changed_files)} target files.",
+                f"{role.capitalize()} phase '{phase_name}' modified {len(changed_files)} target files.",
             )
-        if role != "verifier" and len(changed_files) > max_limit:
+        if role not in self.READ_ONLY_ROLES and len(changed_files) > max_limit:
             raise SprintRunnerError(
                 "FAILED_EXCESSIVE_FILES",
                 f"Worktree {wt_dir.name} changed {len(changed_files)} files, exceeding limit of {max_limit}.",
@@ -1452,7 +1454,7 @@ class HermesSprintRunner:
                 "FAILED_NO_CHANGES",
                 f"Worktree {wt_dir.name} produced NO file changes.",
             )
-        if role != "verifier" and phase.get("owned_paths") is not None:
+        if role not in self.READ_ONLY_ROLES and phase.get("owned_paths") is not None:
             self._enforce_phase_ownership(phase, changed_files)
 
         self.validate_python_syntax(wt_dir)
@@ -1472,7 +1474,7 @@ class HermesSprintRunner:
         if changed_files is None:
             changed_files = self._validate_phase_changes(phase)
 
-        should_integrate = bool(changed_files) and role != "verifier"
+        should_integrate = bool(changed_files) and role not in self.READ_ONLY_ROLES
         commit_sha = None
         if should_integrate:
             self.logger.info(f"Controller staging changes in {wt_dir.name}")
@@ -1510,7 +1512,7 @@ class HermesSprintRunner:
         intent = (
             "review_request" if role == "builder" else (
                 "verification_request" if role == "hardener" else (
-                    "verification_result" if role == "verifier" else "handoff"
+                    "verification_result" if role in self.READ_ONLY_ROLES else "handoff"
                 )
             )
         )
@@ -1546,6 +1548,8 @@ class HermesSprintRunner:
             msg_text = f"{phase_name} ({role}) review and hardening completed. Commit {commit_sha[:7] if commit_sha else 'n/a'}. Ready for verification."
         elif role == "verifier":
             msg_text = f"{phase_name} ({role}) verification completed."
+        elif role == "security":
+            msg_text = f"{phase_name} ({role}) security review completed."
         else:
             msg_text = f"{phase_name} completed successfully."
 
@@ -1560,7 +1564,7 @@ class HermesSprintRunner:
         self._record_message(
             from_actor=from_actor,
             to_actors=[to_actor],
-            kind="handoff" if role != "verifier" else "verification_result",
+            kind="handoff" if role not in self.READ_ONLY_ROLES else "verification_result",
             text=msg_text,
             intent=intent,
             conversation_id=conv_id,
@@ -2298,10 +2302,10 @@ class HermesSprintRunner:
                 )
 
         for p in self.run_summary["phases"]:
-            if p.get("role") == "verifier" and p.get("runtime_metadata", {}).get("verdict") == "failed":
+            if p.get("role") in self.READ_ONLY_ROLES and p.get("runtime_metadata", {}).get("verdict") == "failed":
                 raise SprintRunnerError(
                     "FAILED_VERIFIER_VERDICT",
-                    f"Verifier phase '{p['phase']}' reported a failed verdict.",
+                    f"{p['role'].capitalize()} phase '{p['phase']}' reported a failed verdict.",
                 )
 
         if self.verification_steps:

@@ -53,10 +53,10 @@ class CodexAdapter(AgentAdapter):
 
         parsed = self.parse_verification_output(cleaned, result.stderr or "")
         if parsed is None or "verdict" not in parsed:
-            if role == "verifier":
+            if role in ("verifier", "security"):
                 raise SprintRunnerError(
                     "FAILED_CODEX_INVALID_VERDICT",
-                    "Codex verifier did not emit a valid verification contract with an explicit verdict",
+                    f"Codex {role} did not emit a valid verification contract with an explicit verdict",
                 )
             return
 

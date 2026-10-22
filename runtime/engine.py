@@ -6,7 +6,7 @@ from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Union
 from runtime.job_state import JobRecord, JobState, TERMINAL_JOB_STATES
 from runtime.task_graph import TaskGraph, TaskNode, TaskStatus
 from runtime.observations import Observation, ObservationRegistry, default_observation_registry
-from runtime.execution import ExecutionManager, ActorAdapter, AgentRunStatus
+from runtime.execution import ExecutionManager, ActorAdapter, AgentRunStatus, TaskExecutionResult
 from runtime.verification import (
     VerificationResult,
     VerificationStatus,
@@ -670,6 +670,11 @@ class ReactiveJobEngine:
                                 )
                                 continue
 
+                            # A verifier or security task that found fixable problems sends the work back:
+                            # repair task, then a fresh check of the same scope, until it passes or the cap.
+                            if await self._repair_failed_verdict(task_node, exec_res):
+                                continue
+
                             # Check if execution result explicitly requests replan
                             if exec_res.metadata.get("trigger_replan"):
                                 explicit_replan_details.append(
@@ -860,6 +865,85 @@ class ReactiveJobEngine:
                 await asyncio.to_thread(adapter.release_job, self.job.job_id)
             except Exception as exc:  # noqa: BLE001 - never mask the job outcome
                 logger.error("Job-end release failed for %s: %s", type(adapter).__name__, exc)
+
+    async def _repair_failed_verdict(self, task: TaskNode, exec_res: TaskExecutionResult) -> bool:
+        """
+        Handles a failed, repairable verdict from a verifier or security task. Adds a builder repair task
+        carrying the findings, then a re-check of the same scope that depends on it, and supersedes the
+        failed check so its dependents wait for the re-check. Returns True when the result was handled.
+        At max_repairs_per_job the job is blocked with the last findings.
+        """
+        # Opt-in per planner: planners that turn failed checks into repair work themselves keep doing so.
+        if not getattr(self.planner, "repairs_failed_verdicts", False):
+            return False
+        meta = exec_res.metadata or {}
+        role = (task.metadata or {}).get("role") or (task.metadata or {}).get("execution_role")
+        if (
+            exec_res.status != "failed"
+            or role not in ("verifier", "security")
+            or str(meta.get("verdict", "")).lower() not in ("failed", "fail")
+            or not meta.get("repairable")
+        ):
+            return False
+
+        summary = meta.get("verification_summary") or exec_res.error or "verification failed"
+        findings = [str(f) for f in (meta.get("findings") or [])]
+        if self.job.repair_count >= self.limits.max_repairs_per_job:
+            await self._transition_job(
+                JobState.BLOCKED,
+                reason=f"Verification failed after {self.limits.max_repairs_per_job} repair cycles: {summary}",
+            )
+            return True
+
+        self.job.repair_count += 1
+        cycle = self.job.repair_count
+        root = task.metadata.get("repair_root") or task.task_id
+        scope = task.metadata.get("original_description") or task.description
+        finding_lines = "\n".join(f"- {f}" for f in findings) or f"- {summary}"
+        base_meta = {k: v for k, v in (task.metadata or {}).items()
+                     if k not in ("role", "execution_role", "verification", "prior_findings")}
+
+        repair = TaskNode(
+            task_id=f"repair_{root}_{cycle}",
+            job_id=self.job.job_id,
+            # Only the findings: the repair agent fixes what was reported, not the whole feature again.
+            description=(
+                f"An independent {role} checked the work and found problems. Fix exactly these, changing "
+                f"only what is needed, and keep every required check passing:\n{finding_lines}\n\n"
+                f"What was being checked: {scope}"
+            ),
+            required_capabilities=["implementation"],
+            dependencies=[],
+            metadata={**base_meta, "role": "builder", "execution_role": "builder",
+                      "repair_of": task.task_id, "findings": findings},
+            max_attempts=min(2, self.limits.max_task_attempts),
+        )
+        recheck = TaskNode(
+            task_id=f"recheck_{root}_{cycle}",
+            job_id=self.job.job_id,
+            # The re-check confirms the findings are resolved and runs the checks, rather than a full review.
+            description=(
+                f"{scope}\n\nThis is re-check {cycle} after a repair. Confirm each earlier finding is resolved "
+                f"and run the required checks; do not re-review unrelated code. Earlier findings:\n{finding_lines}"
+            ),
+            required_capabilities=list(task.required_capabilities),
+            dependencies=[repair.task_id],
+            assigned_actor=task.assigned_actor,
+            metadata={**(task.metadata or {}), "repair_root": root, "original_description": scope,
+                      "prior_findings": findings},
+            max_attempts=task.max_attempts,
+        )
+        self.graph.add_task(repair)
+        self.graph.add_task(recheck)
+        self.graph.supersede_task(task.task_id, superseded_by=recheck.task_id,
+                                  reason=f"{role} found fixable problems (repair cycle {cycle})")
+        await self.event_bridge.emit_task_created(repair, reason="verdict_repair")
+        await self.event_bridge.emit_task_created(recheck, reason="verdict_recheck")
+        if hasattr(self.event_bridge, "emit_task_superseded"):
+            await self.event_bridge.emit_task_superseded(task.task_id, self.job.job_id, superseded_by=recheck.task_id,
+                                                         reason=f"repair cycle {cycle}")
+        logger.info("Job %s: %s %s failed (%s); repair cycle %d", self.job.job_id, role, task.task_id, summary, cycle)
+        return True
 
     async def run_until_complete(self, max_steps: int = 100) -> JobRecord:
         """

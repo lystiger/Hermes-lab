@@ -67,6 +67,10 @@ class GroundedPlanner(PlannerAdapter):
     and produces a validated, structured TaskGraph DAG before execution.
     """
 
+    # A failed, repairable verifier or security verdict becomes repair work in the engine
+    # (repair task, then a re-check) instead of a retry of the same check.
+    repairs_failed_verdicts = True
+
     def __init__(
         self,
         model_client: Optional[Callable] = None,

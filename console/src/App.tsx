@@ -11,6 +11,7 @@ import ExecutionRoute from './routes/execution';
 import SettingsRoute from './routes/settings';
 import CommsRoute from './routes/comms';
 import DesignRoute from './routes/design';
+import { FloorRoute } from './routes/floor';
 
 export const App: React.FC = () => {
   return (
@@ -25,6 +26,7 @@ export const App: React.FC = () => {
         <Route path="execution" element={<ExecutionRoute />} />
         <Route path="comms" element={<CommsRoute />} />
         <Route path="design" element={<DesignRoute />} />
+        <Route path="floor" element={<FloorRoute />} />
         <Route path="settings" element={<SettingsRoute />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Route>

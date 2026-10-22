@@ -1,4 +1,5 @@
 import json
+import inspect
 import logging
 import re
 from pathlib import Path
@@ -131,7 +132,6 @@ class GroundedPlanner(PlannerAdapter):
         planning_mode = "model_generated"
         if self.model_client:
             prompt = self._build_planning_prompt(request, evidence)
-            import inspect
             if inspect.iscoroutinefunction(self.model_client):
                 raw_response = await self.model_client(prompt)
             else:
@@ -167,14 +167,33 @@ class GroundedPlanner(PlannerAdapter):
         plan.goal = request.goal
         plan.planning_mode = planning_mode
 
-        # 4. Deterministic validation
-        val_res: PlanValidationResult = self.validator.validate(
-            plan=plan,
-            repo_dir=repo_dir,
-            available_capabilities=request.available_capabilities,
-            agent_capabilities=request.agent_capabilities,
-            limits=self.limits,
-        )
+        # 4. Deterministic validation, with bounded repair: a model plan that fails is sent back once
+        # (max_plan_repair_attempts) with the validator's errors, instead of discarding the whole job.
+        val_res: PlanValidationResult = self._validate(plan, repo_dir, request)
+        repairs = 0
+        while not val_res.is_valid and self.model_client and planning_mode == "model_generated" \
+                and repairs < self.limits.max_plan_repair_attempts:
+            repairs += 1
+            logger.info("Plan for job %s failed validation; repair attempt %d: %s", request.job_id, repairs, val_res.errors)
+            repair_prompt = (
+                self._build_planning_prompt(request, evidence)
+                + "\n\n# YOUR PREVIOUS PLAN\n" + json.dumps(raw_plan_dict)
+                + "\n\n# VALIDATION ERRORS TO FIX\n" + "\n".join(f"- {e}" for e in val_res.errors)
+                + "\n\nReturn the complete corrected plan as JSON, following the same contract."
+            )
+            if inspect.iscoroutinefunction(self.model_client):
+                repaired = await self.model_client(repair_prompt)
+            else:
+                repaired = self.model_client(repair_prompt)
+            repaired_dict = self._parse_json_response(repaired)
+            if not repaired_dict or not isinstance(repaired_dict, dict):
+                break
+            raw_plan_dict = repaired_dict
+            plan = StructuredPlan.from_dict(raw_plan_dict)
+            plan.job_id = request.job_id
+            plan.goal = request.goal
+            plan.planning_mode = planning_mode
+            val_res = self._validate(plan, repo_dir, request)
 
         if not val_res.is_valid:
             logger.warning("Plan validation failed for job %s: %s", request.job_id, val_res.errors)
@@ -264,6 +283,15 @@ class GroundedPlanner(PlannerAdapter):
 
         # Non-initial replan -> delegate to ProductionPlannerAdapter
         return await self._replanner_delegate.plan(request)
+
+    def _validate(self, plan: StructuredPlan, repo_dir: Path, request: PlanningRequest) -> PlanValidationResult:
+        return self.validator.validate(
+            plan=plan,
+            repo_dir=repo_dir,
+            available_capabilities=request.available_capabilities,
+            agent_capabilities=request.agent_capabilities,
+            limits=self.limits,
+        )
 
     def _build_planning_prompt(self, request: PlanningRequest, evidence: RepositoryEvidence) -> str:
         prompt_parts = [

@@ -97,7 +97,7 @@ def test_goal_route_returns_the_job_and_plans_in_the_background(tmp_path, monkey
     response = TestClient(main.app).post("/jobs/goal", json={"goal": "Build it", "targetRepo": "Repo", "dryRun": True})
     assert response.status_code == 202
     body = response.json()
-    assert body["jobId"] == "run_x" and body["plannerModel"] == "claude-opus-5-5" and body["plannerEffort"] == "high"
+    assert body["jobId"] == "run_x" and body["plannerModel"] == "claude-opus-5-5" and body["plannerEffort"] == "medium"
     assert started["target_repo"] == (root / "Repo").resolve()
     assert started["allow_heuristic_fallback"] is False and started["dry_run"] is True
 
@@ -138,3 +138,74 @@ def test_validator_rejects_a_task_no_single_agent_can_run(tmp_path):
     result = PlanValidator.validate(plan, repo_dir=repo, available_capabilities=caps, agent_capabilities=split)
     assert not result.is_valid
     assert any("no single agent has all of them" in e for e in result.errors)
+
+
+def test_validator_accepts_a_module_style_reference(tmp_path):
+    from runtime.planning.contracts import StructuredPlan
+    from runtime.planning.validator import PlanValidator
+
+    repo = make_repo(tmp_path / "repo")
+    raw = json.loads(plan_json("g")) | {"job_id": "j"}
+    for t in raw["tasks"]:
+        t["evidence_refs"] = ["app/api"]  # app/api.py on disk, named the way an import would
+    assert PlanValidator.validate(StructuredPlan.from_dict(raw), repo_dir=repo).is_valid
+    raw["tasks"][0]["evidence_refs"] = ["app/missing"]
+    assert not PlanValidator.validate(StructuredPlan.from_dict(raw), repo_dir=repo).is_valid
+
+
+@pytest.mark.anyio
+async def test_planner_repairs_a_plan_that_fails_validation(tmp_path):
+    from runtime.planning.contracts import PlanningRequest
+    from runtime.planning.planner import GroundedPlanner
+
+    repo = make_repo(tmp_path / "repo")
+    good = plan_json("g")
+    bad = json.loads(good)
+    bad["tasks"][0]["required_capabilities"] = ["ui.made-up"]
+    prompts = []
+
+    async def model(prompt):
+        prompts.append(prompt)
+        return json.dumps(bad) if len(prompts) == 1 else good
+
+    request = PlanningRequest(job_id="j", goal="g", target_repo=repo,
+                              available_capabilities=["repo.read", "code.python", "verification"])
+    plan = await GroundedPlanner(model_client=model, target_repo=repo).generate_initial_plan(request)
+    assert len(prompts) == 2
+    assert "# VALIDATION ERRORS TO FIX" in prompts[1] and "ui.made-up" in prompts[1]
+    assert [t.task_id for t in plan.tasks] == ["build_api", "harden_api", "verify_api"]
+
+
+def test_validator_accepts_a_module_style_reference(tmp_path):
+    from runtime.planning.contracts import StructuredPlan
+    from runtime.planning.validator import PlanValidator
+
+    repo = make_repo(tmp_path / "repo")
+    raw = json.loads(plan_json("g")) | {"job_id": "j"}
+    for t in raw["tasks"]:
+        t["evidence_refs"] = ["app/api"]
+    assert PlanValidator.validate(StructuredPlan.from_dict(raw), repo_dir=repo).is_valid
+    raw["tasks"][0]["evidence_refs"] = ["app/missing"]
+    assert not PlanValidator.validate(StructuredPlan.from_dict(raw), repo_dir=repo).is_valid
+
+
+@pytest.mark.anyio
+async def test_planner_repairs_a_plan_that_fails_validation(tmp_path):
+    from runtime.planning.contracts import PlanningRequest
+    from runtime.planning.planner import GroundedPlanner
+
+    repo = make_repo(tmp_path / "repo")
+    good = plan_json("g")
+    bad = json.loads(good)
+    bad["tasks"][0]["required_capabilities"] = ["ui.made-up"]
+    prompts = []
+
+    async def model(prompt):
+        prompts.append(prompt)
+        return json.dumps(bad) if len(prompts) == 1 else good
+
+    request = PlanningRequest(job_id="j", goal="g", target_repo=repo,
+                              available_capabilities=["repo.read", "code.python", "verification"])
+    plan = await GroundedPlanner(model_client=model, target_repo=repo).generate_initial_plan(request)
+    assert len(prompts) == 2 and "ui.made-up" in prompts[1]
+    assert [t.task_id for t in plan.tasks] == ["build_api", "harden_api", "verify_api"]

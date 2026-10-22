@@ -16,7 +16,7 @@ PLANNER_SYSTEM_PROMPT = (
 )
 
 
-def claude_planner_client(model="claude-opus-5-5", effort="high", provider=None):
+def claude_planner_client(model="claude-opus-5-5", effort="medium", provider=None):
     """Returns an async model_client for GroundedPlanner. Raises ValueError for an unknown model or effort."""
     if model not in CLAUDE_MODELS:
         raise ValueError(f"planner model must be one of {', '.join(CLAUDE_MODELS)}")

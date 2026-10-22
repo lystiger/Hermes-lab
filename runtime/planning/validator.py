@@ -28,6 +28,17 @@ class PlanValidator:
     evidence groundedness, verification strategies, and runtime bounds.
     """
 
+    # A reference may name a module the way imports do: 'src/hooks/useNow' for useNow.ts or useNow/index.tsx.
+    MODULE_SUFFIXES = (".ts", ".tsx", ".js", ".jsx", ".mjs", ".py", ".json", ".md")
+
+    @classmethod
+    def _ref_exists(cls, path: Path) -> bool:
+        if path.exists():
+            return True
+        if any(path.with_name(path.name + s).exists() for s in cls.MODULE_SUFFIXES):
+            return True
+        return any((path / f"index{s}").exists() for s in cls.MODULE_SUFFIXES)
+
     @classmethod
     def validate(
         cls,
@@ -106,7 +117,7 @@ class PlanValidator:
                     if not ref_clean or ref_clean.lower() == "new_component":
                         continue
                     full_p = repo_dir / ref_clean
-                    if not full_p.exists() and t.evidence_status != "new_component":
+                    if not cls._ref_exists(full_p) and t.evidence_status != "new_component":
                         errors.append(
                             f"Task '{tid}' references non-existent repository path '{ref_clean}' "
                             f"without declaring evidence_status='new_component' (hallucinated path)."

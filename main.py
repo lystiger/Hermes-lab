@@ -512,7 +512,7 @@ class CreateGoalJobPayload(BaseModel):
     dryRun: bool = False
     skipAgentExec: bool = False
     plannerModel: str = "claude-opus-5-5"
-    plannerEffort: Optional[str] = "high"
+    plannerEffort: Optional[str] = "medium"
 
 
 GOAL_REPOS_ROOT = Path(os.environ.get("HERMES_GOAL_REPOS_ROOT", Path.home() / "Projects"))

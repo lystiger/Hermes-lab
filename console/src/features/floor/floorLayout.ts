@@ -93,3 +93,29 @@ function elapsedOf(row: Pick<TimelineRow, 'startMs' | 'endMs'>, nowMs: number): 
   const end = row.endMs ?? nowMs;
   return Math.max(0, end - row.startMs);
 }
+
+/**
+ * The newest event for one phase of the given jobs, or null. An event names its phase by `phaseId` or
+ * `taskId`, on the event or in its metadata. An event that names no phase falls back to the phase's
+ * spec order, and only for `phase.*` kinds, so one job's order never matches another job's phase.
+ */
+export function latestPhaseEvent(phase: Pick<FloorPhase, 'key' | 'order'>, jobIds: string[], events: TraceEvent[]): TraceEvent | null {
+  let best: TraceEvent | null = null;
+  for (const e of events) {
+    const jobId = e.jobId ?? e.metadata?.jobId;
+    if (!jobId || !jobIds.includes(jobId) || !belongsToPhase(e, phase)) continue;
+    if (!best || e.rawTs > best.rawTs) best = e;
+  }
+  return best;
+}
+
+function belongsToPhase(e: TraceEvent, phase: Pick<FloorPhase, 'key' | 'order'>): boolean {
+  const named = [e.taskId, e.metadata?.phaseId, e.metadata?.taskId].find((id): id is string => typeof id === 'string' && id.length > 0);
+  if (named !== undefined) return named === phase.key;
+  return e.kind.startsWith('phase.') && e.metadata?.order === phase.order;
+}
+
+/** True when an event reports a failure. The same rule `cardStateOf` uses for an UNKNOWN phase. */
+export function isFailureEvent(event: Pick<TraceEvent, 'kind'> | null | undefined): boolean {
+  return event !== null && event !== undefined && /fail/i.test(event.kind);
+}

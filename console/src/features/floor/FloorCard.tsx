@@ -1,8 +1,8 @@
 import React from 'react';
-import { ActorRef } from '../../api/types';
+import { ActorRef, TraceEvent } from '../../api/types';
 import { Card } from '../../components/Card';
 import { UNKNOWN } from '../../api/unknown';
-import { FloorCard as FloorCardState, FloorCardState as State, FloorPhase } from './floorLayout';
+import { FloorCard as FloorCardState, FloorCardState as State, FloorPhase, isFailureEvent } from './floorLayout';
 import { formatDuration, phaseLabel } from '../jobs/runTimeline';
 
 const STATE_LABEL: Record<State, string> = {
@@ -26,18 +26,30 @@ interface FloorCardProps {
   card: FloorCardState;
   /** The agent running the phase, resolved from the registry. Its accent colours the mark. */
   agent: ActorRef | null;
+  /** The newest event for this phase. It drives the live line, the running highlight and the failed colour. */
+  latestEvent: TraceEvent | null;
   /** One line of what the phase is doing right now. */
   liveLine: string;
 }
 
 /** One phase on the live floor. Read-only: the agent is an initial mark, not an image. */
-export const FloorCard: React.FC<FloorCardProps> = ({ phase, card, agent, liveLine }) => {
+export const FloorCard: React.FC<FloorCardProps> = ({ phase, card, agent, latestEvent, liveLine }) => {
   const accent = agent?.accentColor;
   const role = phase.role || phaseLabel(phase.name);
-  const tone = STATE_TONE[card.state];
+  // A running card is highlighted, and a failed card turns red, only once an event for it has arrived.
+  // Both are plain class and colour changes on the render that receives that event. No animation runs.
+  const failedNow = card.state === 'failed' && isFailureEvent(latestEvent);
+  const highlighted = card.state === 'running' && latestEvent !== null;
+  const tone = card.state === 'failed' && !failedNow ? STATE_TONE.other : STATE_TONE[card.state];
 
   return (
-    <Card accent={tone} as="article" label={`${role}, ${STATE_LABEL[card.state]}`} bodyClassName="p-3 flex flex-col gap-2 min-w-0">
+    <Card
+      accent={tone}
+      as="article"
+      label={`${role}, ${STATE_LABEL[card.state]}`}
+      className={`transition-colors ${highlighted ? 'shadow-[inset_0_0_0_1px_var(--lys-status-success)]' : ''}`}
+      bodyClassName="p-3 flex flex-col gap-2 min-w-0"
+    >
       <div className="flex items-start gap-2.5 min-w-0">
         <span
           aria-hidden="true"

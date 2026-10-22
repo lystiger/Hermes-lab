@@ -34,6 +34,7 @@ beforeEach(async () => {
   }
   vi.spyOn(hermesApi, 'getTelemetry').mockResolvedValue({ runningJobsCount: 0, queuedJobsCount: 0, blockedJobsCount: 0, failed24hCount: 0, sampleSize: 0, tokensToday: '—', estSpendToday: '—', sprintBudgetUsedPct: null });
   vi.spyOn(hermesApi, 'getCapacityTelemetry').mockResolvedValue({ providers: [], summary: null, jobsTracked: 0, timestamp: '2026-10-19T00:00:00Z' });
+  vi.spyOn(hermesApi, 'getAgentModels').mockResolvedValue({});
   vi.spyOn(hermesApi, 'getAgentLimits').mockResolvedValue({ timestamp: '2026-10-19T00:00:00Z', agents: [] });
   vi.spyOn(hermesApi, 'getSettings').mockResolvedValue({ runtime: [], policy: [] });
   vi.spyOn(hermesApi, 'getExecutionSnapshot').mockResolvedValue({ backends: [], resources: [], openrig: null, takenAt: 0 });

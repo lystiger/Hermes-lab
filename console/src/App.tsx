@@ -3,6 +3,7 @@ import { Routes, Route, Navigate } from 'react-router-dom';
 import { Layout } from './components/Layout';
 import OverviewRoute from './routes/index';
 import QueueRoute from './routes/queue';
+import FloorPage from './routes/floor/index';
 import AgentsListRoute from './routes/agents/index';
 import AgentDetailRoute from './routes/agents/$agentId';
 import UsageRoute from './routes/usage';
@@ -18,6 +19,7 @@ export const App: React.FC = () => {
       <Route path="/" element={<Layout />}>
         <Route index element={<OverviewRoute />} />
         <Route path="queue" element={<QueueRoute />} />
+        <Route path="floor" element={<FloorPage />} />
         <Route path="agents" element={<AgentsListRoute />} />
         <Route path="agents/:agentId" element={<AgentDetailRoute />} />
         <Route path="usage" element={<UsageRoute />} />

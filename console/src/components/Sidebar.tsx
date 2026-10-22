@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { NavLink } from 'react-router-dom';
-import { Activity, Cpu, Gauge, LayoutDashboard, ListChecks, MessageSquare, Palette, PanelLeftClose, PanelLeftOpen, ScrollText, Settings, Users, type LucideIcon } from 'lucide-react';
+import { Activity, Cpu, Gauge, LayoutDashboard, ListChecks, MessageSquare, Palette, PanelLeftClose, PanelLeftOpen, Radio, ScrollText, Settings, Users, type LucideIcon } from 'lucide-react';
 import { Icon } from './Icon';
 import { useConsoleStore } from '../stores/useConsoleStore';
 import { useExecutionStore } from '../stores/useExecutionStore';
@@ -24,6 +24,7 @@ interface NavItem {
 const NAV_ITEMS: NavItem[] = [
   { to: '/', label: 'Overview', icon: LayoutDashboard },
   { to: '/queue', label: 'Queue', icon: ListChecks },
+  { to: '/floor', label: 'Live floor', icon: Radio },
   { to: '/agents', label: 'Agents', icon: Users },
   { to: '/usage', label: 'Usage', icon: Gauge },
   { to: '/events', label: 'Events', icon: ScrollText },

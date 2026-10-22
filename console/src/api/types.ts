@@ -250,6 +250,8 @@ export interface JobPhase {
   changedFilesCount?: number;
   detail?: string;
   meta?: string;
+  /** Keys of the phases this one waits on. Passed through from Hermes unmapped; absent when Hermes sends none. */
+  dependencies?: string[];
 }
 
 export interface Job {

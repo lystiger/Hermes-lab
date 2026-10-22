@@ -22,6 +22,7 @@ import json
 import logging
 import os
 from pathlib import Path, PureWindowsPath
+import shutil
 import subprocess
 import sys
 import threading
@@ -184,12 +185,15 @@ class HermesActorAdapter(ActorAdapter):
         target_subdir: str = "",
         default_permissions: Optional[Dict[str, Any]] = None,
         default_timeout_seconds: int = 300,
+        default_agent_options: Optional[Dict[str, Any]] = None,
     ):
         self.control_root = Path.cwd().resolve()
         # Job-level agent permissions (e.g. an Antigravity command allowlist) for tasks that carry none,
         # such as goal-planned tasks, which have no sprint-spec phase.
         self.default_permissions = default_permissions or {}
         self.default_timeout_seconds = default_timeout_seconds
+        # Job-level agent options (e.g. max_turns) under each task's own options.
+        self.default_agent_options = default_agent_options or {}
         self.target_repo = Path(target_repo).resolve() if target_repo else self.control_root
         self.worktree_root = Path(worktree_root).resolve() if worktree_root else self.target_repo / ".worktrees"
         self.run_dir = Path(run_dir).resolve() if run_dir else Path.home() / "hermes-runs" / f"run_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
@@ -368,6 +372,31 @@ class HermesActorAdapter(ActorAdapter):
             return Path(res.stdout.strip()).resolve() == path.resolve()
         except OSError:
             return False
+
+    def _seed_dependencies(self, worktree_path: Path) -> None:
+        """
+        Gives a fresh task worktree the target checkout's node_modules when both lockfiles are identical,
+        so each agent does not spend turns (and a full download) on npm ci. The copy is copy-on-write where
+        the filesystem supports it. Anything that does not match is left for the agent to install.
+        """
+        if self.dry_run or self.skip_agent_exec:
+            return
+        dest_root = subdir_path(worktree_path, self.target_subdir)
+        src_root = subdir_path(self.target_repo, self.target_subdir)
+        dest, src = dest_root / "node_modules", src_root / "node_modules"
+        if dest.exists() or not src.is_dir():
+            return
+        try:
+            if (dest_root / "package-lock.json").read_bytes() != (src_root / "package-lock.json").read_bytes():
+                return
+        except OSError:
+            return
+        res = subprocess.run(["cp", "-r", "--reflink=auto", str(src), str(dest)], capture_output=True, text=True, timeout=600)
+        if res.returncode != 0:
+            logger.warning("Could not seed node_modules into %s: %s", dest_root, res.stderr.strip()[:200])
+            shutil.rmtree(dest, ignore_errors=True)
+        else:
+            logger.info("Seeded node_modules into %s from %s", dest_root, src_root)
 
     def ensure_integration_worktree(self) -> Path:
         """
@@ -890,6 +919,7 @@ class HermesActorAdapter(ActorAdapter):
             # job's worktree cannot be checked out in another.
             branch_name = task.metadata.get("branch") or f"task/{task.job_id}/{task.task_id}"
             worktree_path = self._ensure_worktree(self.worktree_root / wt_name, branch=branch_name, base_branch=self.target_branch)
+            self._seed_dependencies(worktree_path)
 
             # Make dependent task start from latest integration HEAD
             self.sync_task_worktree_from_integration(worktree_path)
@@ -941,7 +971,7 @@ class HermesActorAdapter(ActorAdapter):
                     "name": task.task_id,
                     "agent": actor_id,
                     "role": role,
-                    "cmd_options": task.metadata.get("options", {}),
+                    "cmd_options": {**self.default_agent_options, **task.metadata.get("options", {})},
                     "permissions": (
                         task.metadata.get("permissions")
                         or (task.metadata.get("phase") or {}).get("permissions")
@@ -954,7 +984,7 @@ class HermesActorAdapter(ActorAdapter):
                 },
                 worktree=subdir_path(worktree_path, self.target_subdir),
                 prompt=effective_prompt,
-                options=task.metadata.get("options", {}),
+                options={**self.default_agent_options, **task.metadata.get("options", {})},
                 stdout_file=stdout_file,
                 stderr_file=stderr_file,
                 timeout_seconds=task.metadata.get("timeout_seconds", self.default_timeout_seconds),

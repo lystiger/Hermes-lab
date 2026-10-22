@@ -511,7 +511,7 @@ class CreateGoalJobPayload(BaseModel):
     constraints: List[str] = Field(default_factory=list, max_length=20)
     dryRun: bool = False
     skipAgentExec: bool = False
-    plannerModel: str = "claude-opus-5-5"
+    plannerModel: str = "claude-haiku-5-5"
     plannerEffort: Optional[str] = "medium"
     # Agents run in this subfolder of the repository (e.g. "console").
     targetSubdir: str = Field(default="", max_length=200)
@@ -520,6 +520,8 @@ class CreateGoalJobPayload(BaseModel):
     taskTimeoutSeconds: int = Field(default=1200, ge=60, le=7200)
     # Agents this job must not use (e.g. agy-based agents, which need an exact command allowlist).
     excludeAgents: List[str] = Field(default_factory=list, max_length=10)
+    # Turn cap per agent run. Every turn re-reads the conversation, so turns drive token use.
+    agentMaxTurns: int = Field(default=20, ge=3, le=60)
 
 
 GOAL_REPOS_ROOT = Path(os.environ.get("HERMES_GOAL_REPOS_ROOT", Path.home() / "Projects"))
@@ -554,6 +556,7 @@ async def create_goal_job(payload: CreateGoalJobPayload):
             permissions={"commands": payload.allowedCommands} if payload.allowedCommands else None,
             task_timeout_seconds=payload.taskTimeoutSeconds,
             exclude_agents=payload.excludeAgents or None,
+            agent_max_turns=payload.agentMaxTurns,
         ) | {"targetRepo": str(repo), "plannerModel": payload.plannerModel, "plannerEffort": payload.plannerEffort}
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))

@@ -99,7 +99,7 @@ def test_goal_route_returns_the_job_and_plans_in_the_background(tmp_path, monkey
                                                               "excludeAgents": ["antigravity"]})
     assert response.status_code == 202
     body = response.json()
-    assert body["jobId"] == "run_x" and body["plannerModel"] == "claude-opus-5-5" and body["plannerEffort"] == "medium"
+    assert body["jobId"] == "run_x" and body["plannerModel"] == "claude-haiku-5-5" and body["plannerEffort"] == "medium"
     assert started["target_repo"] == (root / "Repo").resolve()
     assert started["allow_heuristic_fallback"] is False and started["dry_run"] is True
     assert started["target_subdir"] == "console" and started["permissions"] == {"commands": ["npm test"]}

@@ -459,6 +459,7 @@ class JobLauncher:
         permissions: Optional[Dict[str, Any]] = None,
         task_timeout_seconds: int = 300,
         exclude_agents: Optional[List[str]] = None,
+        agent_max_turns: Optional[int] = None,
     ) -> Dict[str, Any]:
         """
         Launches an initial-planned engineering job from a natural language goal and target repository.
@@ -510,6 +511,7 @@ class JobLauncher:
             target_subdir=subdir,
             default_permissions=permissions,
             default_timeout_seconds=task_timeout_seconds,
+            default_agent_options={"max_turns": agent_max_turns} if agent_max_turns else None,
         )
 
         verifier_adapter = HermesVerifierAdapter(

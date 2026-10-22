@@ -344,3 +344,49 @@ def test_two_jobs_can_run_a_task_with_the_same_id(tmp_path):
                         metadata={"execution_backend": "fake-sessionful", "role": "hardener"})
         results.append(asyncio.run(adapter.execute_task(task, AgentRun(run_id=f"r_{job}", job_id=job, task_id="T1", actor_id="echo"))))
     assert [r.status for r in results] == ["succeeded", "succeeded"], [r.error for r in results]
+
+
+def _repo_with_deps(path):
+    repo = _git_repo(path)
+    (repo / ".gitignore").write_text("node_modules/\n")
+    (repo / "package-lock.json").write_text('{"lockfileVersion": 3}\n')
+    subprocess.run(["git", "add", "."], cwd=repo, check=True, capture_output=True)
+    subprocess.run(["git", "commit", "-m", "lock"], cwd=repo, check=True, capture_output=True)
+    (repo / "node_modules" / "left-pad").mkdir(parents=True)
+    (repo / "node_modules" / "left-pad" / "index.js").write_text("module.exports = 1\n")
+    return repo
+
+
+def _run_in(repo, tmp_path, **adapter_kwargs):
+    seen = {}
+
+    class RecordingEcho(EchoAdapter):
+        def validate_result(self, result, context):
+            seen["phase"] = dict(context.phase)
+            seen["has_deps"] = (context.worktree / "node_modules" / "left-pad" / "index.js").exists()
+
+    adapter = HermesActorAdapter(
+        target_repo=repo, worktree_root=tmp_path / "wt", run_dir=tmp_path / "run",
+        agent_registry=AgentRegistry({EchoAdapter.name: RecordingEcho}),
+        backend_registry=BackendRegistry({FakeSessionfulBackend.name: FakeSessionfulBackend}),
+        job_id="job_deps", **adapter_kwargs,
+    )
+    task = TaskNode(task_id="T1", job_id="job_deps", description="noop", assigned_actor="echo",
+                    metadata={"execution_backend": "fake-sessionful", "role": "hardener"})
+    result = asyncio.run(adapter.execute_task(task, AgentRun(run_id="r", job_id="job_deps", task_id="T1", actor_id="echo")))
+    return result, seen
+
+
+def test_a_task_worktree_gets_dependencies_when_the_lockfile_matches(tmp_path):
+    result, seen = _run_in(_repo_with_deps(tmp_path / "repo"), tmp_path, default_agent_options={"max_turns": 20})
+    assert result.status == "succeeded", result.error
+    assert seen["has_deps"] is True
+    assert seen["phase"]["cmd_options"]["max_turns"] == 20
+
+
+def test_dependencies_are_not_copied_when_the_lockfile_differs(tmp_path):
+    repo = _repo_with_deps(tmp_path / "repo")
+    (repo / "package-lock.json").write_text('{"lockfileVersion": 3, "changed": true}\n')
+    result, seen = _run_in(repo, tmp_path)
+    assert result.status == "succeeded", result.error
+    assert seen["has_deps"] is False

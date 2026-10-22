@@ -1,5 +1,5 @@
 import React from 'react';
-import { Job, TraceEvent } from '../../api/types';
+import { Job } from '../../api/types';
 import { useAgents, useJob } from '../../api/hooks';
 import { resolveActorPresentation } from '../../api/actors';
 import { useConsoleStore } from '../../stores/useConsoleStore';
@@ -9,7 +9,7 @@ import { Card } from '../../components/Card';
 import { CopyId } from '../../components/CopyId';
 import { EmptyState, ErrorState, LoadingState, UNKNOWN } from '../../components/DataStates';
 import { FloorCard } from './FloorCard';
-import { FloorPhase, floorCardState, floorLevels } from './floorLayout';
+import { FloorPhase, floorCardState, floorLevels, latestPhaseEvent } from './floorLayout';
 
 /**
  * One active job on the live floor: its phases in one column per dependency level. The job's detail is loaded
@@ -37,11 +37,7 @@ export const ActiveJobFloor: React.FC<{ job: Job }> = ({ job }) => {
   }));
   const levels = floorLevels(phases);
 
-  // The newest event for this job, from the live stream. It is the fallback line for a running phase.
-  const latest = allEvents.reduce<TraceEvent | null>(
-    (best, e) => (e.jobId === job.id || e.jobId === job.sprintId ? (!best || e.rawTs > best.rawTs ? e : best) : best),
-    null
-  );
+  const jobIds = [job.id, job.sprintId].filter((id): id is string => !!id);
 
   return (
     <Card label={`Job ${detail.title}`}>
@@ -62,12 +58,13 @@ export const ActiveJobFloor: React.FC<{ job: Job }> = ({ job }) => {
                   Level {idx + 1} · {column.length}
                 </div>
                 {column.map((phase) => {
-                  const card = floorCardState(phase, latest, nowMs);
+                  const latestEvent = latestPhaseEvent(phase, jobIds, allEvents);
+                  const card = floorCardState(phase, latestEvent, nowMs);
                   const agent = phase.agentId ? resolveActorPresentation(phase.agentId, agents) : null;
                   const phaseDetail = phaseById.get(phase.key)?.detail;
-                  const liveLine = phaseDetail || (card.state === 'running' && latest ? latest.detail || latest.kind : UNKNOWN);
+                  const liveLine = latestEvent?.detail || latestEvent?.kind || phaseDetail || UNKNOWN;
                   return (
-                    <FloorCard key={phase.key} phase={phase} card={card} agent={agent} liveLine={liveLine} />
+                    <FloorCard key={phase.key} phase={phase} card={card} agent={agent} latestEvent={latestEvent} liveLine={liveLine} />
                   );
                 })}
               </section>

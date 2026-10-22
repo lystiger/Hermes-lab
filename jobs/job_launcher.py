@@ -92,12 +92,36 @@ class JobLauncher:
             return set()
         return {f.stem for f in self.sprints_dir.glob("*.json")}
 
+    async def _finalize_if_completed(self, engine: ReactiveJobEngine) -> None:
+        """A completed goal-planned job opens its PR, records the run in LysStack and cleans its worktrees."""
+        meta = engine.job.metadata or {}
+        if engine.job.state != JobState.COMPLETED or meta.get("launch_mode") != "goal_planned":
+            return
+        from jobs.job_finalizer import finalize_completed_job
+
+        job_id = engine.job.job_id
+        try:
+            result = await asyncio.to_thread(
+                finalize_completed_job, engine, Path(meta["target_repo"]), Path(meta["worktree_root"]),
+                Path(meta["runs_root"]) / job_id,
+            )
+        except Exception as exc:
+            logger.exception("Finalizing job %s failed: %s", job_id, exc)
+            return
+        if engine.event_bridge:
+            await engine.event_bridge.persist_and_publish(
+                source_id="hermes", source_kind="runtime", kind="job.review_requested",
+                detail=f"Ready for review: {result.get('prUrl') or engine.job.branch}",
+                job_id=job_id, metadata=result,
+            )
+
     def _start_engine_background(self, engine: ReactiveJobEngine) -> None:
         job_id = engine.job.job_id
 
         async def _run_loop():
             try:
                 await engine.run_until_complete()
+                await self._finalize_if_completed(engine)
             except Exception as exc:
                 logger.exception("Reactive engine %s encountered runtime exception: %s", job_id, exc)
             finally:

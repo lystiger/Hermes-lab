@@ -167,6 +167,7 @@ async def ingest_internal_event(payload: InternalEventPayload):
         kind=payload.kind,
         detail=payload.detail,
         metadata=payload.metadata,
+        job_id=payload.jobId,
     )
 
     # 2. Update active job state reducer (Phase 4)

@@ -328,3 +328,19 @@ def test_agent_prompts_tell_agents_not_to_run_git(tmp_path):
                                  run_dir=tmp_path / "run", job_id="job_contract")
     prompt = adapter.build_effective_prompt("Build the page")
     assert "Build the page" in prompt and "Never run git" in prompt
+
+
+def test_two_jobs_can_run_a_task_with_the_same_id(tmp_path):
+    repo = _git_repo(tmp_path / "repo")
+    results = []
+    for job in ("job_a", "job_b"):
+        adapter = HermesActorAdapter(
+            target_repo=repo, worktree_root=tmp_path / job, run_dir=tmp_path / f"run_{job}",
+            agent_registry=AgentRegistry({EchoAdapter.name: EchoAdapter}),
+            backend_registry=BackendRegistry({FakeSessionfulBackend.name: FakeSessionfulBackend}), job_id=job,
+            target_branch=f"job/{job}/integration",
+        )
+        task = TaskNode(task_id="T1", job_id=job, description="noop", assigned_actor="echo",
+                        metadata={"execution_backend": "fake-sessionful", "role": "hardener"})
+        results.append(asyncio.run(adapter.execute_task(task, AgentRun(run_id=f"r_{job}", job_id=job, task_id="T1", actor_id="echo"))))
+    assert [r.status for r in results] == ["succeeded", "succeeded"], [r.error for r in results]

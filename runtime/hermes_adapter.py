@@ -886,7 +886,9 @@ class HermesActorAdapter(ActorAdapter):
 
             # Setup task worktree
             wt_name = task.metadata.get("worktree_dir") or task.task_id
-            branch_name = task.metadata.get("branch") or f"task/{task.task_id}"
+            # Scoped by job: two jobs may plan a task with the same id, and a branch checked out in one
+            # job's worktree cannot be checked out in another.
+            branch_name = task.metadata.get("branch") or f"task/{task.job_id}/{task.task_id}"
             worktree_path = self._ensure_worktree(self.worktree_root / wt_name, branch=branch_name, base_branch=self.target_branch)
 
             # Make dependent task start from latest integration HEAD

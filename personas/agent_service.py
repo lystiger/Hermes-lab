@@ -19,7 +19,9 @@ except ImportError:
         default_registry = None
 
 
-# Known presentation & role metadata for standard adapters (enrichment only)
+# Known presentation metadata for standard adapters (enrichment only). "role" is the
+# agent's focus, not an assignment: sprint roles (builder, hardener, verifier, ...) are set
+# per phase in the sprint spec, and any agent can play any of them.
 KNOWN_AGENT_METADATA: Dict[str, Dict[str, Any]] = {
     "gemini": {
         "displayName": "Gemini",

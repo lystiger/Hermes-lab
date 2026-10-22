@@ -429,12 +429,14 @@ class JobService:
             if task_nodes:
                 phases = []
                 for idx, t in enumerate(task_nodes, start=1):
+                    meta = t.metadata or {}
                     phases.append(
                         JobPhaseDTO(
                             id=t.task_id,
                             name=t.description,
-                            order=idx,
-                            role=t.assigned_actor or "builder",
+                            # The role and order come from the plan or spec, never from the agent that runs it.
+                            order=meta["order"] if isinstance(meta.get("order"), int) else idx,
+                            role=meta.get("role") or meta.get("execution_role") or "builder",
                             agentId=t.assigned_actor or "unknown",
                             status=t.status.value,
                             attempt=t.attempt,

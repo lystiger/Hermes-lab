@@ -5,6 +5,7 @@ import threading
 import time
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any, Dict, List, Optional, Literal
 
 from fastapi import FastAPI, Request, Query, Header, HTTPException, status
@@ -502,6 +503,49 @@ async def create_job(payload: CreateJobPayload):
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=str(exc),
         )
+
+
+class CreateGoalJobPayload(BaseModel):
+    goal: str = Field(..., min_length=1, max_length=20000)
+    targetRepo: str = Field(..., min_length=1, max_length=500)
+    constraints: List[str] = Field(default_factory=list, max_length=20)
+    dryRun: bool = False
+    skipAgentExec: bool = False
+    plannerModel: str = "claude-opus-5-5"
+    plannerEffort: Optional[str] = "high"
+
+
+GOAL_REPOS_ROOT = Path(os.environ.get("HERMES_GOAL_REPOS_ROOT", Path.home() / "Projects"))
+
+
+@app.post("/jobs/goal", status_code=status.HTTP_202_ACCEPTED)
+async def create_goal_job(payload: CreateGoalJobPayload):
+    """
+    Starts a goal-planned job: the planner model decomposes the goal into tasks, choosing each task's
+    role and dependencies, and the runtime assigns agents by capability. Returns before planning ends.
+    The target must be a Git repository directly under the configured projects root.
+    """
+    from runtime.planning.claude_client import claude_planner_client
+
+    root = GOAL_REPOS_ROOT.resolve()
+    repo = (root / payload.targetRepo).resolve() if not Path(payload.targetRepo).is_absolute() else Path(payload.targetRepo).resolve()
+    if repo.parent != root or not (repo / ".git").exists():
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,
+                            detail=f"targetRepo must be a Git repository directly under {root}")
+    try:
+        client = claude_planner_client(payload.plannerModel, payload.plannerEffort)
+        return job_launcher.launch_goal_background(
+            goal=payload.goal,
+            target_repo=repo,
+            constraints=payload.constraints,
+            dry_run=payload.dryRun,
+            skip_agent_exec=payload.skipAgentExec,
+            model_client=client,
+            # The plan must come from the model; a heuristic plan would not prove the planner ran.
+            allow_heuristic_fallback=False,
+        ) | {"targetRepo": str(repo), "plannerModel": payload.plannerModel, "plannerEffort": payload.plannerEffort}
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
 
 
 @app.post("/jobs/{job_id}/cancel")

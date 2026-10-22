@@ -559,6 +559,27 @@ class JobLauncher:
             "mode": mode,
         }
 
+    def launch_goal_background(self, goal: str, target_repo: Union[Path, str], **kwargs) -> Dict[str, Any]:
+        """
+        Registers a goal-planned job and returns at once; planning and execution continue on the running loop.
+        Planning a large goal can take minutes, so an HTTP caller gets the job id before the plan exists.
+        """
+        res = self.launch_goal(goal=goal, target_repo=target_repo, start_background=False, **kwargs)
+        job_id = res["jobId"]
+        engine = job_service.get_engine(job_id)
+
+        async def _plan_then_run():
+            try:
+                await engine.initialize_and_plan(initial_tasks=None)
+            except Exception as exc:
+                logger.exception("Goal-planned job %s failed to plan: %s", job_id, exc)
+                return
+            self._start_engine_background(engine)
+
+        task = asyncio.get_running_loop().create_task(_plan_then_run(), name=f"goal-plan-{job_id}")
+        self._active_async_tasks[job_id] = task
+        return res
+
     async def launch_goal_async(
         self,
         goal: str,

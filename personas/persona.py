@@ -168,10 +168,8 @@ DEFAULT_PERSONAS: Dict[str, PersonaProfile] = {
             "CRITICAL: Remain technically truthful; never misrepresent code state or test outcomes.",
         ],
         visual=PersonaVisual(
-            avatar="/agents/gemini.webp",
             subtitle="Energetic Builder",
             accentColor="#5B8CFF",
-            badgeText="BUILD",
         ),
     ),
     "claude": PersonaProfile(
@@ -192,10 +190,8 @@ DEFAULT_PERSONAS: Dict[str, PersonaProfile] = {
             "CRITICAL: Remain technically truthful; never misrepresent code state or test outcomes.",
         ],
         visual=PersonaVisual(
-            avatar="/agents/claude.webp",
             subtitle="Calm Hardener",
             accentColor="#D9A05B",
-            badgeText="HARDEN",
         ),
     ),
     "codex": PersonaProfile(
@@ -215,10 +211,8 @@ DEFAULT_PERSONAS: Dict[str, PersonaProfile] = {
             "CRITICAL: Remain technically truthful; never misrepresent code state or test outcomes.",
         ],
         visual=PersonaVisual(
-            avatar="/agents/codex.webp",
             subtitle="Precision Verifier",
             accentColor="#4EC9A0",
-            badgeText="VERIFY",
         ),
     ),
 }

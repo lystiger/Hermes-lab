@@ -29,7 +29,6 @@ KNOWN_AGENT_METADATA: Dict[str, Dict[str, Any]] = {
         "role": "Implementation · scaffolding · migrations",
         "capabilities": ["build", "scaffolding", "migrations", "refactoring"],
         "accentColor": "#5B8CFF",
-        "sigil": "BUILD",
         "code": "G-01",
     },
     "claude": {
@@ -38,7 +37,6 @@ KNOWN_AGENT_METADATA: Dict[str, Dict[str, Any]] = {
         "role": "Architecture · review · hardening · docs",
         "capabilities": ["architecture", "security-review", "hardening", "documentation"],
         "accentColor": "#D9A05B",
-        "sigil": "HARDEN",
         "code": "C-02",
     },
     "codex": {
@@ -47,7 +45,6 @@ KNOWN_AGENT_METADATA: Dict[str, Dict[str, Any]] = {
         "role": "Verification · tests · static analysis · regressions",
         "capabilities": ["verification", "unit-tests", "static-analysis", "regression-testing"],
         "accentColor": "#4EC9A0",
-        "sigil": "VERIFY",
         "code": "X-03",
     }
 }
@@ -141,7 +138,6 @@ class AgentService:
                 role=role,
                 capabilities=capabilities,
                 status=status,
-                phase=meta.get("sigil"),
                 currentTask=current_task,
                 persona=agent_profile.persona.to_dict() if agent_profile.persona else None,
                 presentation=AgentPresentationDTO(

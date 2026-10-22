@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { NavLink } from 'react-router-dom';
-import { Activity, GitPullRequest, Cpu, Gauge, LayoutDashboard, LayoutGrid, ListChecks, MessageSquare, Palette, PanelLeftClose, PanelLeftOpen, ScrollText, Settings, Users, type LucideIcon } from 'lucide-react';
+import { Activity, GitPullRequest, Cpu, Gauge, LayoutDashboard, LayoutGrid, ListChecks, MessageSquare, PanelLeftClose, PanelLeftOpen, ScrollText, Settings, Users, type LucideIcon } from 'lucide-react';
 import { Icon } from './Icon';
 import { useConsoleStore } from '../stores/useConsoleStore';
 import { useExecutionStore } from '../stores/useExecutionStore';
@@ -21,18 +21,33 @@ interface NavItem {
 
 // Jobs that have not reached a terminal state: the work the queue still holds.
 
-const NAV_ITEMS: NavItem[] = [
-  { to: '/', label: 'Overview', icon: LayoutDashboard },
-  { to: '/queue', label: 'Queue', icon: ListChecks },
-  { to: '/agents', label: 'Agents', icon: Users },
-  { to: '/usage', label: 'Usage', icon: Gauge },
-  { to: '/events', label: 'Events', icon: ScrollText },
-  { to: '/execution', label: 'Execution', icon: Cpu },
-  { to: '/comms', label: 'Comms', icon: MessageSquare },
-  { to: '/design', label: 'Design', icon: Palette },
-  { to: '/floor', label: 'Floor', icon: LayoutGrid },
-  { to: '/review', label: 'Review', icon: GitPullRequest },
-  { to: '/settings', label: 'Settings', icon: Settings }
+/** Pages grouped by what the operator is doing: running work, asking for work, agents, and the system. */
+const NAV_GROUPS: { label: string; items: NavItem[] }[] = [
+  {
+    label: 'Run',
+    items: [
+      { to: '/', label: 'Overview', icon: LayoutDashboard },
+      { to: '/floor', label: 'Floor', icon: LayoutGrid },
+      { to: '/review', label: 'Review', icon: GitPullRequest },
+      { to: '/queue', label: 'Queue', icon: ListChecks }
+    ]
+  },
+  { label: 'Ask', items: [{ to: '/comms', label: 'Comms', icon: MessageSquare }] },
+  {
+    label: 'Agents',
+    items: [
+      { to: '/agents', label: 'Agents', icon: Users },
+      { to: '/usage', label: 'Usage', icon: Gauge }
+    ]
+  },
+  {
+    label: 'System',
+    items: [
+      { to: '/events', label: 'Events', icon: ScrollText },
+      { to: '/execution', label: 'Execution', icon: Cpu },
+      { to: '/settings', label: 'Settings', icon: Settings }
+    ]
+  }
 ];
 
 const CONNECTION_LABEL: Record<ConnectionStatus, { text: string; color: string }> = {
@@ -90,7 +105,7 @@ export const Sidebar: React.FC = () => {
     '/events': connectionStatus === 'CONNECTED' ? { badge: 'live', badgeColor: 'var(--lys-status-success)' } : undefined,
     '/execution': activeCount > 0 ? { badge: String(activeCount), badgeColor: 'var(--lys-status-success)' } : undefined
   };
-  const navItems = NAV_ITEMS.map((item) => ({ ...item, ...badges[item.to] }));
+  const navGroups = NAV_GROUPS.map((g) => ({ ...g, items: g.items.map((item) => ({ ...item, ...badges[item.to] })) }));
 
   // "Available" means the herdr executable is on PATH. It does not mean a running sandbox.
   const herdrStatus = herdr
@@ -135,31 +150,38 @@ export const Sidebar: React.FC = () => {
       </div>
 
       {/* Nav List */}
-      <nav aria-label="Pages" className="flex flex-col gap-0.5 mt-1">
-        {navItems.map((item) => (
-          <NavLink
-            key={item.to}
-            to={item.to}
-            end={item.to === '/'}
-            title={collapsed ? item.label : undefined}
-            aria-label={collapsed ? item.label : undefined}
-            className={({ isActive }) => `
-              flex items-center ${collapsed ? 'justify-center' : 'justify-between'} gap-2 px-3 py-2 text-[13px] transition-colors border-l-2
-              ${isActive
-                ? 'border-lys-gold bg-lys-surface-1 text-lys-primary'
-                : 'border-transparent text-lys-muted hover:bg-lys-surface-1 hover:text-lys-primary'}
-            `}
-          >
-            <span className="flex items-center gap-2.5 min-w-0">
-              <Icon icon={item.icon} size={16} />
-              {!collapsed && <span className="truncate" title={item.label}>{item.label}</span>}
-            </span>
-            {item.badge && !collapsed && (
-              <span style={{ color: item.badgeColor || 'var(--lys-text-faint)' }} className="text-[11px] lys-metric shrink-0">
-                {item.badge}
-              </span>
+      <nav aria-label="Pages" className="flex flex-col gap-3 mt-1">
+        {navGroups.map((group) => (
+          <div key={group.label} role="group" aria-label={group.label} className="flex flex-col gap-0.5">
+            {!collapsed && (
+              <span className="px-3 pb-1 text-[10px] font-medium tracking-wider uppercase text-lys-faint">{group.label}</span>
             )}
-          </NavLink>
+            {group.items.map((item) => (
+              <NavLink
+                key={item.to}
+                to={item.to}
+                end={item.to === '/'}
+                title={collapsed ? item.label : undefined}
+                aria-label={collapsed ? item.label : undefined}
+                className={({ isActive }) => `
+                  flex items-center ${collapsed ? 'justify-center' : 'justify-between'} gap-2 px-3 py-2 text-[13px] transition-colors border-l-2
+                  ${isActive
+                    ? 'border-lys-gold bg-lys-surface-1 text-lys-primary'
+                    : 'border-transparent text-lys-muted hover:bg-lys-surface-1 hover:text-lys-primary'}
+                `}
+              >
+                <span className="flex items-center gap-2.5 min-w-0">
+                  <Icon icon={item.icon} size={16} />
+                  {!collapsed && <span className="truncate" title={item.label}>{item.label}</span>}
+                </span>
+                {item.badge && !collapsed && (
+                  <span style={{ color: item.badgeColor || 'var(--lys-text-faint)' }} className="text-[11px] lys-metric shrink-0">
+                    {item.badge}
+                  </span>
+                )}
+              </NavLink>
+            ))}
+          </div>
         ))}
       </nav>
 

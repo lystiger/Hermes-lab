@@ -1,9 +1,7 @@
 import React from 'react';
 import { useConsoleStore } from '../stores/useConsoleStore';
-import { useJobs, usePipeline, useRecoverableJobs, useTelemetry } from '../api/hooks';
-import { resolveActorPresentation } from '../api/actors';
-import { useAgents } from '../api/hooks';
-import { ErrorState, Freshness, LoadingState, StaleNotice } from '../components/DataStates';
+import { useJobs, useRecoverableJobs, useTelemetry } from '../api/hooks';
+import { ErrorState, Freshness, LoadingState } from '../components/DataStates';
 import { Card } from '../components/Card';
 import { CopyId } from '../components/CopyId';
 import { PageHeader, HeaderCount } from '../components/PageHeader';
@@ -18,9 +16,7 @@ const NOT_REPORTED: NotReportedItem[] = [
 export const QueueRoute: React.FC = () => {
   const { setActiveModalJobId } = useConsoleStore();
   const { jobs, loading: jobsLoading, error: jobsError, stale, updatedAt: jobsUpdatedAt, refetch: refetchJobs } = useJobs();
-  const { pipeline, error: pipelineError, refetch: refetchPipeline } = usePipeline();
   const { telemetry } = useTelemetry();
-  const { agents } = useAgents();
 
   const counts: HeaderCount[] = telemetry
     ? [
@@ -36,42 +32,12 @@ export const QueueRoute: React.FC = () => {
       <PageHeader
         updatedAt={jobsUpdatedAt}
         title="Queue"
-        subtitle="Mission board"
+        subtitle="Backlog and history"
         counts={counts}
         notReported={NOT_REPORTED}
       />
 
       <div className="flex-1 flex flex-col gap-6 p-6">
-        {pipeline.length > 0 && (
-          <Card accent="var(--lys-accent-gold)" label="Execution order">
-            <div className="p-5 flex flex-col gap-2">
-              <div className="flex items-center justify-between">
-                <span className="text-[11px] font-medium tracking-wider uppercase text-lys-faint">Execution order · active jobs</span>
-              </div>
-              {Boolean(pipelineError) && <StaleNotice label="Execution order" error={pipelineError} onRetry={refetchPipeline} />}
-              <ol className="flex flex-col gap-1.5">
-                {pipeline.map((p, idx) => {
-                  const actor = p.agentId ? resolveActorPresentation(p.agentId, agents) : null;
-                  return (
-                    <li key={p.id || idx}>
-                      <button
-                        type="button"
-                        onClick={() => p.jobId && setActiveModalJobId(p.jobId)}
-                        className="w-full flex flex-wrap items-center gap-3 px-3 py-2 bg-lys-surface-2 hover:bg-lys-surface-interactive text-left text-[13px] cursor-pointer"
-                      >
-                        <span className="w-6 text-lys-faint text-[11px]">{String(idx + 1).padStart(2, '0')}</span>
-                        <span className="w-28 text-lys-primary font-semibold">{p.phase}</span>
-                        {p.note && <span className="text-[10px] tracking-wider uppercase text-lys-faint">{p.note}</span>}
-                        <span className="text-lys-muted">{p.agentName || actor?.displayName || '—'}</span>
-                        <span className="ml-auto text-[10px] tracking-wider uppercase text-lys-secondary">{p.state}</span>
-                      </button>
-                    </li>
-                  );
-                })}
-              </ol>
-            </div>
-          </Card>
-        )}
 
         {jobsLoading && jobs.length === 0 && <LoadingState label="Loading jobs…" />}
         <MissionBoard

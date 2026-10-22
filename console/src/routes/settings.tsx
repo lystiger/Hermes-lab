@@ -1,6 +1,6 @@
 import React from 'react';
 import { PageHeader } from '../components/PageHeader';
-import { useNavigate } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { useConsoleStore } from '../stores/useConsoleStore';
 import { prefersReducedMotion } from '../theme/motion';
 import { useAgents, useSettings } from '../api/hooks';
@@ -82,6 +82,17 @@ export const SettingsRoute: React.FC = () => {
           </div>
         </div>
       </div>
+
+      <section aria-label="Projects" className="p-5 border-b border-lys-subtle">
+        <div className="font-sans text-[11px] tracking-wider text-lys-faint mb-3">PROJECTS</div>
+        <Link
+          to="/design"
+          className="inline-flex items-center gap-2 px-3 py-2 text-[12px] border border-lys-default text-lys-primary hover:bg-lys-surface-interactive transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2"
+        >
+          Unigreen design boards
+        </Link>
+        <p className="mt-2 text-[11px] text-lys-faint">Choose the design direction; the choice is recorded in LysStack for review.</p>
+      </section>
 
       <div className="p-5 font-sans text-[11px] text-lys-faint leading-relaxed">
         Operators come from Hermes (GET /agents).

@@ -792,7 +792,6 @@ class HermesSprintRunner:
             if not has_paths:
                 self._invalid_ownership(phase, "parallel_group requires owned_paths")
             groups.setdefault(group, []).append(phase)
-        # parallel_group is validated only; phases still run sequentially.
         for group, members in groups.items():
             for i, first in enumerate(members):
                 for second in members[i + 1:]:
@@ -1583,6 +1582,7 @@ class HermesSprintRunner:
                     "phase": phase_name,
                     "role": role,
                     "agent": agent,
+                    "order": phase_index,
                     "commitSha": commit_sha,
                     "changedFilesCount": len(changed_files),
                 },
@@ -1616,6 +1616,7 @@ class HermesSprintRunner:
                         "phase": phase_name,
                         "role": role,
                         "agent": agent,
+                        "order": phase_index,
                         "error": err_msg,
                     },
                 )

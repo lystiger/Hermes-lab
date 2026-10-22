@@ -19,6 +19,17 @@ class JobStateReducer:
     def bind_service(self, service):
         self._service = service
 
+    @staticmethod
+    def _find_phase(job: JobDetailDTO, phase_name: str, meta: Dict[str, Any]) -> Optional[JobPhaseDTO]:
+        """A phase is identified by its spec order, then its exact id or name. Never by role:
+        a sprint may run several phases with the same role (e.g. two hardeners)."""
+        order = meta.get("order")
+        if isinstance(order, int):
+            by_order = next((p for p in job.phases if p.order == order), None)
+            if by_order:
+                return by_order
+        return next((p for p in job.phases if p.id == phase_name or p.name == phase_name), None)
+
     def apply(
         self,
         kind: str,
@@ -147,7 +158,6 @@ class JobStateReducer:
                 target_phase = next((p for p in job.phases if p.id == task_id), None)
                 if target_phase:
                     target_phase.agentId = actor_id
-                    target_phase.role = actor_id
 
         elif kind == "task.started" or kind == "phase.started":
             if not job:
@@ -170,9 +180,9 @@ class JobStateReducer:
             if agent_id not in job.assignedAgentIds:
                 job.assignedAgentIds.append(agent_id)
 
-            target_phase = next((p for p in job.phases if p.id == phase_name or p.name == phase_name or p.role == phase_role), None)
+            target_phase = self._find_phase(job, phase_name, meta)
             if not target_phase:
-                idx = len(job.phases) + 1
+                idx = meta["order"] if isinstance(meta.get("order"), int) else len(job.phases) + 1
                 target_phase = JobPhaseDTO(
                     id=f"phase-{idx}-{phase_name}",
                     name=phase_name,
@@ -183,9 +193,12 @@ class JobStateReducer:
                     startedAt=now_iso,
                 )
                 job.phases.append(target_phase)
+                job.phases.sort(key=lambda p: p.order)
             else:
                 target_phase.status = "RUNNING"
                 target_phase.startedAt = target_phase.startedAt or now_iso
+                if meta.get("role"):
+                    target_phase.role = phase_role
                 if agent_id != "unknown":
                     target_phase.agentId = agent_id
 
@@ -197,7 +210,7 @@ class JobStateReducer:
         elif kind == "task.completed" or kind == "phase.completed":
             if job:
                 phase_name = meta.get("phase") or meta.get("name") or meta.get("taskId") or detail
-                target_phase = next((p for p in job.phases if p.id == phase_name or p.name == phase_name or phase_name in p.name), None)
+                target_phase = self._find_phase(job, phase_name, meta)
                 if target_phase:
                     target_phase.status = "SUCCEEDED"
                     target_phase.completedAt = now_iso
@@ -213,7 +226,7 @@ class JobStateReducer:
         elif kind == "task.failed" or kind == "phase.failed":
             if job:
                 phase_name = meta.get("phase") or meta.get("name") or meta.get("taskId") or detail
-                target_phase = next((p for p in job.phases if p.id == phase_name or p.name == phase_name or phase_name in p.name), None)
+                target_phase = self._find_phase(job, phase_name, meta)
                 if target_phase:
                     target_phase.status = "FAILED"
                     target_phase.completedAt = now_iso

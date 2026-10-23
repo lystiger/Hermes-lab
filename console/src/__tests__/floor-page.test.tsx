@@ -1,8 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, render, screen, within } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import type { JobPhase } from '../api/types';
 
-const hooks = vi.hoisted(() => ({ useAgents: vi.fn(), useJob: vi.fn(), useJobs: vi.fn() }));
+const hooks = vi.hoisted(() => ({ useAgents: vi.fn(), useJob: vi.fn(), useJobs: vi.fn(), useJobTelemetry: vi.fn((): { telemetry: unknown } => ({ telemetry: null })) }));
 vi.mock('../api/hooks', () => hooks);
 
 import { FloorRoute } from '../routes/floor';
@@ -57,5 +57,19 @@ describe('Floor page cards', () => {
     expect(within(cards[2]).getByText('55s')).toBeInTheDocument();
     expect(within(cards[3]).getByText('—', { selector: '.font-mono-code' })).toBeInTheDocument();
     expect(hooks.useJob).toHaveBeenCalledWith('job-1');
+  });
+
+  it('switches between the card and timeline views of a job, and shows its spend', () => {
+    hooks.useJobTelemetry.mockReturnValue({ telemetry: { costUsd: 0.0125, totalTokens: 52_000, tasks: [] } });
+    render(<FloorRoute />);
+    expect(screen.getByText('$0.0125 · 52.0k tokens')).toBeInTheDocument();
+    const cards = screen.getByRole('button', { name: 'Cards' });
+    const timeline = screen.getByRole('button', { name: 'Timeline' });
+    expect(cards).toHaveAttribute('aria-pressed', 'true');
+
+    fireEvent.click(timeline);
+    expect(timeline).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByLabelText('Run timeline')).toBeInTheDocument();
+    expect(screen.queryByRole('article')).not.toBeInTheDocument();
   });
 });

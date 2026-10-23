@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { NavLink } from 'react-router-dom';
-import { Activity, Cpu, Gauge, LayoutDashboard, LayoutGrid, ListChecks, MessageSquare, Palette, PanelLeftClose, PanelLeftOpen, ScrollText, Settings, Users, type LucideIcon } from 'lucide-react';
+import { Activity, Gauge, LayoutDashboard, PanelLeftClose, PanelLeftOpen, Users, type LucideIcon, GitPullRequestArrow, ListTodo, Logs, MessagesSquare, Radar, Server, SlidersHorizontal } from 'lucide-react';
 import { Icon } from './Icon';
 import { useConsoleStore } from '../stores/useConsoleStore';
 import { useExecutionStore } from '../stores/useExecutionStore';
@@ -21,17 +21,36 @@ interface NavItem {
 
 // Jobs that have not reached a terminal state: the work the queue still holds.
 
-const NAV_ITEMS: NavItem[] = [
-  { to: '/', label: 'Overview', icon: LayoutDashboard },
-  { to: '/queue', label: 'Queue', icon: ListChecks },
-  { to: '/agents', label: 'Agents', icon: Users },
-  { to: '/usage', label: 'Usage', icon: Gauge },
-  { to: '/events', label: 'Events', icon: ScrollText },
-  { to: '/execution', label: 'Execution', icon: Cpu },
-  { to: '/comms', label: 'Comms', icon: MessageSquare },
-  { to: '/design', label: 'Design', icon: Palette },
-  { to: '/floor', label: 'Floor', icon: LayoutGrid },
-  { to: '/settings', label: 'Settings', icon: Settings }
+/**
+ * Three main areas: Overview (the state of the work), Live (what is happening now) and System (agents and
+ * runtime). Icons are outline glyphs of similar weight, each centred in the same 20px box so the column aligns.
+ */
+const NAV_GROUPS: { label: string; items: NavItem[] }[] = [
+  {
+    label: 'Overview',
+    items: [
+      { to: '/', label: 'Dashboard', icon: LayoutDashboard },
+      { to: '/queue', label: 'Queue', icon: ListTodo },
+      { to: '/review', label: 'Review', icon: GitPullRequestArrow }
+    ]
+  },
+  {
+    label: 'Live',
+    items: [
+      { to: '/floor', label: 'Floor', icon: Radar },
+      { to: '/events', label: 'Events', icon: Logs },
+      { to: '/comms', label: 'Comms', icon: MessagesSquare }
+    ]
+  },
+  {
+    label: 'System',
+    items: [
+      { to: '/agents', label: 'Agents', icon: Users },
+      { to: '/usage', label: 'Usage', icon: Gauge },
+      { to: '/execution', label: 'Execution', icon: Server },
+      { to: '/settings', label: 'Settings', icon: SlidersHorizontal }
+    ]
+  }
 ];
 
 const CONNECTION_LABEL: Record<ConnectionStatus, { text: string; color: string }> = {
@@ -89,7 +108,7 @@ export const Sidebar: React.FC = () => {
     '/events': connectionStatus === 'CONNECTED' ? { badge: 'live', badgeColor: 'var(--lys-status-success)' } : undefined,
     '/execution': activeCount > 0 ? { badge: String(activeCount), badgeColor: 'var(--lys-status-success)' } : undefined
   };
-  const navItems = NAV_ITEMS.map((item) => ({ ...item, ...badges[item.to] }));
+  const navGroups = NAV_GROUPS.map((g) => ({ ...g, items: g.items.map((item) => ({ ...item, ...badges[item.to] })) }));
 
   // "Available" means the herdr executable is on PATH. It does not mean a running sandbox.
   const herdrStatus = herdr
@@ -134,31 +153,42 @@ export const Sidebar: React.FC = () => {
       </div>
 
       {/* Nav List */}
-      <nav aria-label="Pages" className="flex flex-col gap-0.5 mt-1">
-        {navItems.map((item) => (
-          <NavLink
-            key={item.to}
-            to={item.to}
-            end={item.to === '/'}
-            title={collapsed ? item.label : undefined}
-            aria-label={collapsed ? item.label : undefined}
-            className={({ isActive }) => `
-              flex items-center ${collapsed ? 'justify-center' : 'justify-between'} gap-2 px-3 py-2 text-[13px] transition-colors border-l-2
-              ${isActive
-                ? 'border-lys-gold bg-lys-surface-1 text-lys-primary'
-                : 'border-transparent text-lys-muted hover:bg-lys-surface-1 hover:text-lys-primary'}
-            `}
-          >
-            <span className="flex items-center gap-2.5 min-w-0">
-              <Icon icon={item.icon} size={16} />
-              {!collapsed && <span className="truncate" title={item.label}>{item.label}</span>}
-            </span>
-            {item.badge && !collapsed && (
-              <span style={{ color: item.badgeColor || 'var(--lys-text-faint)' }} className="text-[11px] lys-metric shrink-0">
-                {item.badge}
-              </span>
+      <nav aria-label="Pages" className="flex flex-col gap-3 mt-1">
+        {navGroups.map((group, index) => (
+          <div key={group.label} role="group" aria-label={group.label} className="flex flex-col gap-0.5">
+            {collapsed ? (
+              index > 0 && <hr aria-hidden="true" className="mx-3 mb-2 border-lys-subtle" />
+            ) : (
+              <span className="px-3 pb-1 text-[10px] font-medium tracking-wider uppercase text-lys-faint">{group.label}</span>
             )}
-          </NavLink>
+            {group.items.map((item) => (
+              <NavLink
+                key={item.to}
+                to={item.to}
+                end={item.to === '/'}
+                title={collapsed ? item.label : undefined}
+                aria-label={collapsed ? item.label : undefined}
+                className={({ isActive }) => `
+                  flex items-center ${collapsed ? 'justify-center' : 'justify-between'} gap-2 px-3 py-2 text-[13px] transition-colors border-l-2
+                  ${isActive
+                    ? 'border-lys-gold bg-lys-surface-1 text-lys-primary'
+                    : 'border-transparent text-lys-muted hover:bg-lys-surface-1 hover:text-lys-primary'}
+                `}
+              >
+                <span className="flex items-center gap-2.5 min-w-0">
+                  <span className="inline-flex items-center justify-center w-5 h-5 shrink-0">
+                    <Icon icon={item.icon} size={16} />
+                  </span>
+                  {!collapsed && <span className="truncate" title={item.label}>{item.label}</span>}
+                </span>
+                {item.badge && !collapsed && (
+                  <span style={{ color: item.badgeColor || 'var(--lys-text-faint)' }} className="text-[11px] lys-metric shrink-0">
+                    {item.badge}
+                  </span>
+                )}
+              </NavLink>
+            ))}
+          </div>
         ))}
       </nav>
 

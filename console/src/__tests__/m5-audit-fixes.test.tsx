@@ -141,7 +141,7 @@ describe('M5 F1: selected identity and job data are keyed and sequenced', () => 
 
   it('telemetry is keyed by job: B failing never shows A totals', async () => {
     const spy = vi.spyOn(hermesApi, 'getJobTelemetry');
-    spy.mockResolvedValueOnce({ jobId: 'job-a', inputTokens: 1, outputTokens: 2, cachedTokens: 0, totalTokens: 3 });
+    spy.mockResolvedValueOnce({ jobId: 'job-a', inputTokens: 1, outputTokens: 2, cachedTokens: 0, totalTokens: 3, costUsd: null, tasks: [] });
     spy.mockRejectedValueOnce(new Error('Hermes /jobs/job-b/telemetry returned HTTP 500'));
 
     const { result, rerender } = renderHook(({ id }) => useJobTelemetry(id), { initialProps: { id: 'job-a' as string | null } });
@@ -155,7 +155,7 @@ describe('M5 F1: selected identity and job data are keyed and sequenced', () => 
 describe('M5 F2: a failed refresh after a good load is stale, with error and retry', () => {
   it('keeps the last token total, labels it stale, and offers retry', async () => {
     const spy = vi.spyOn(hermesApi, 'getJobTelemetry');
-    spy.mockResolvedValueOnce({ jobId: LIVE_JOB_ID, inputTokens: 1000, outputTokens: 500, cachedTokens: 0, totalTokens: 1500 });
+    spy.mockResolvedValueOnce({ jobId: LIVE_JOB_ID, inputTokens: 1000, outputTokens: 500, cachedTokens: 0, totalTokens: 1500, costUsd: null, tasks: [] });
     spy.mockRejectedValueOnce(new Error('Hermes /jobs/x/telemetry returned HTTP 500: Internal Server Error'));
 
     render(<JobTokens jobId={LIVE_JOB_ID} />);

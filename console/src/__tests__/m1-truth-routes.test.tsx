@@ -21,7 +21,7 @@ import { useConsoleStore } from '../stores/useConsoleStore';
 import { useExecutionStore } from '../stores/useExecutionStore';
 import { EMPTY_EXECUTION_VIEW } from '../stores/executionReducer';
 import { TraceEvent } from '../api/types';
-import { installLiveHermes, LIVE_JOB_ID } from './support/liveHermes';
+import { installLiveHermes, LIVE_JOB_ID, LIVE_JOB_SUMMARY } from './support/liveHermes';
 
 /** Figures and claims that no Hermes endpoint backs. None may appear on an HTTP-mode screen. */
 const FABRICATED = [
@@ -109,18 +109,18 @@ describe('M1 truth sweep: HTTP-mode screens render only real data', () => {
     installLiveHermes();
     const { container } = renderIn(<OverviewRoute />);
 
-    expect(await screen.findByText('No active execution')).toBeInTheDocument();
+    expect(await screen.findByText('Nothing needs you right now.')).toBeInTheDocument();
+    expect(screen.getByText('No run in progress.')).toBeInTheDocument();
     await waitFor(() => expect(metricValue('RUNNING')).toBe('0'));
     expect(metricValue('QUEUED')).toBe('0');
     expect(metricValue('BLOCKED')).toBe('0');
     expect(metricValue('FAILED 24H')).toBe('0');
     // Process total since runtime start, from the observed capacity report; never labelled as today.
     expect(metricValue('TOKENS')).toMatch(/^0/);
-    // Unknown spend and budget stay explicit in the compact summary, with reasons on hover.
-    expect(metricValue('SPEND')).toBe('—');
-    expect(metricValue('BUDGET')).toBe('—');
-    expect(screen.getByText('SPEND').parentElement).toHaveAttribute('title', 'Hermes reports no cost data');
-    expect(screen.getByText('BUDGET').parentElement).toHaveAttribute('title', 'Hermes exposes no sprint budget');
+    // Nothing is open for review, and unknown-only metrics (spend, budget) are not shown at all.
+    expect(metricValue('TO REVIEW')).toBe('0');
+    expect(screen.queryByText('SPEND')).not.toBeInTheDocument();
+    expect(screen.queryByText('BUDGET')).not.toBeInTheDocument();
     expect(screen.queryByText(/Unreported metrics/)).not.toBeInTheDocument();
     expectNoFabrication(container);
   });
@@ -131,11 +131,12 @@ describe('M1 truth sweep: HTTP-mode screens render only real data', () => {
     });
     const { container } = renderIn(<OverviewRoute />);
 
-    // The id appears in the active card and the queue shortlist; both must carry the real job.
-    expect((await screen.findAllByText('job-live-9')).length).toBeGreaterThan(0);
-    expect(screen.getAllByText('Real active job').length).toBeGreaterThan(0);
-    expect(screen.queryByText('No active execution')).not.toBeInTheDocument();
-    expect(screen.getByText(/elapsed/)).toBeInTheDocument();
+    // The running row carries the real job: its title, its id and an elapsed time from its own timestamps.
+    const running = await screen.findByRole('region', { name: 'Running now' });
+    expect(await within(running).findByText('job-live-9')).toBeInTheDocument();
+    expect(within(running).getByText('Real active job')).toBeInTheDocument();
+    expect(within(running).getByText(/^\d{2}:\d{2}$/)).toBeInTheDocument();
+    expect(screen.queryByText('No run in progress.')).not.toBeInTheDocument();
     expectNoFabrication(container);
   });
 
@@ -244,7 +245,9 @@ describe('M1 error and retry states', () => {
   });
 
   it('keeps the last loaded queue visible but labels it stale when a refresh fails', async () => {
-    const options: { failJobs?: boolean } = {};
+    const options: { failJobs?: boolean; jobs?: unknown[] } = {
+      jobs: [{ ...LIVE_JOB_SUMMARY, status: 'RUNNING', completedAt: null }]
+    };
     installLiveHermes(options);
     renderIn(<OverviewRoute />);
     expect((await screen.findAllByText(LIVE_JOB_ID)).length).toBeGreaterThan(0);

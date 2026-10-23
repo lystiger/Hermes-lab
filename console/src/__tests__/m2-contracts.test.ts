@@ -182,7 +182,7 @@ describe('M2 capacity telemetry DTO', () => {
 describe('M2 job telemetry, tasks, runs and observations', () => {
   it('maps the observed job telemetry shape, including all-zero usage', () => {
     const t = mapJobTokenTelemetry(LIVE_JOB_TELEMETRY, 'fallback');
-    expect(t).toEqual({ jobId: LIVE_JOB_TELEMETRY.job_id, inputTokens: 0, outputTokens: 0, cachedTokens: 0, totalTokens: 0 });
+    expect(t).toEqual({ jobId: LIVE_JOB_TELEMETRY.job_id, inputTokens: 0, outputTokens: 0, cachedTokens: 0, totalTokens: 0, costUsd: null, tasks: [] });
   });
 
   it('maps a task node from to_dict() camelCase and from snake_case keys, keeping nulls', () => {

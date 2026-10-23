@@ -124,7 +124,7 @@ describe('M7 icons: every icon-only control is labelled', () => {
     setNarrow(false);
     window.localStorage.setItem(SIDEBAR_STORAGE_KEY, '1');
     renderSidebar();
-    for (const label of ['Overview', 'Queue', 'Agents', 'Usage', 'Events', 'Execution', 'Settings']) {
+    for (const label of ['Dashboard', 'Queue', 'Review', 'Floor', 'Events', 'Comms', 'Agents', 'Usage', 'Execution', 'Settings']) {
       const link = screen.getByRole('link', { name: label });
       expect(link).toHaveAttribute('title', label);
     }

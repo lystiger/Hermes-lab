@@ -66,7 +66,7 @@ describe('floor card states', () => {
     ['FAILED', null, 'failed'], ['CANCELLED', 1000, 'failed'],
     ['COMPLETED', 1000, 'done'], ['SKIPPED', null, 'done'],
     ['QUEUED', null, 'queued'], ['BLOCKED', null, 'queued'],
-    ['UNKNOWN', null, 'queued'], ['IDLE', null, 'queued'],
+    ['UNKNOWN', null, 'queued'], ['IDLE', null, 'replaced'],
   ])('%s with elapsed %s maps to %s', (state, elapsed, expected) => {
     expect(cardState(state, elapsed)).toBe(expected);
   });

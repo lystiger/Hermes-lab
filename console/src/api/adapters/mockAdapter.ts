@@ -11,6 +11,7 @@ import {
   CapacityTelemetry,
   AgentLimitsReport,
   JobTokenTelemetry,
+  RunReview,
   TaskNode,
   AgentRun,
   JobObservation,
@@ -192,8 +193,31 @@ export class MockHermesApi implements HermesApi {
     };
   }
 
+  async getReviews(): Promise<RunReview[]> {
+    // MOCK: one finished run, shaped like GET /reviews, so the Review page has something to show offline.
+    return [{
+      jobId: 'run_mock_review',
+      goal: 'Add a read-only Live floor page at /floor that shows which agents are doing what right now.',
+      branch: 'job/run_mock_review/integration',
+      repairs: 1,
+      tasks: [
+        { id: 'floor_layout_helper', role: 'builder', agent: 'claude', status: 'SUCCEEDED' },
+        { id: 'floor_vitest_coverage', role: 'hardener', agent: 'codex', status: 'SUCCEEDED' },
+        { id: 'floor_final_verification', role: 'verifier', agent: 'codex', status: 'SUPERSEDED' },
+        { id: 'repair_floor_final_verification_1', role: 'builder', agent: 'claude', status: 'SUCCEEDED' },
+        { id: 'recheck_floor_final_verification_1', role: 'verifier', agent: 'codex', status: 'SUCCEEDED' }
+      ],
+      verdict: { task: 'recheck_floor_final_verification_1', summary: 'Typecheck, lint, tests and build pass.', findings: [] },
+      costUsd: 0.0465,
+      totalTokens: 1_310_000,
+      prUrl: 'https://github.com/lystiger/Hermes-lab/pull/23',
+      prState: 'OPEN',
+      finishedAt: new Date(Date.now() - 3 * 3_600_000).toISOString()
+    }];
+  }
+
   async getJobTelemetry(jobId: string): Promise<JobTokenTelemetry> {
-    return { jobId, inputTokens: 0, outputTokens: 0, cachedTokens: 0, totalTokens: 0 };
+    return { jobId, inputTokens: 0, outputTokens: 0, cachedTokens: 0, totalTokens: 0, costUsd: null, tasks: [] };
   }
 
   async getJobTasks(_jobId: string): Promise<TaskNode[]> {

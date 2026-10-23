@@ -93,3 +93,35 @@ def test_a_dry_run_is_only_cleaned_up(tmp_path, monkeypatch):
     assert result["prUrl"] is None and result["runLog"] is None and result["worktreesRemoved"] == 1
     assert not (lysstack / "operating_system" / "run-log.md").exists()
     assert "job/run_dry/integration" not in git(repo, "ls-remote", "--heads", "origin")
+
+
+def test_finalized_jobs_are_listed_for_review_and_dry_runs_are_not(tmp_path, monkeypatch):
+    from jobs.job_finalizer import list_reviews
+
+    monkeypatch.setenv("HERMES_AUTO_PR", "0")
+    repo = make_repo(tmp_path)
+    runs = tmp_path / "runs"
+    for job, review in (("run_real", True), ("run_dry", False)):
+        finalize_completed_job(fake_engine(job), repo, tmp_path / "wt" / job, runs / job,
+                               lysstack_root=tmp_path / "nowhere", review=review)
+    [item] = list_reviews(runs)
+    assert item["jobId"] == "run_real" and item["goal"] == "Add a tooltip" and item["repairs"] == 1
+    assert item["verdict"]["summary"] == "all checks pass" and item["prUrl"] is None
+    assert [t["id"] for t in item["tasks"]] == ["build", "verify"]
+
+
+def test_review_pr_state_is_read_and_a_final_state_is_kept(tmp_path, monkeypatch):
+    import json as _json
+    from jobs import job_finalizer
+    from jobs.job_finalizer import list_reviews
+
+    run = tmp_path / "runs" / "run_pr"
+    run.mkdir(parents=True)
+    (run / "finalize.json").write_text(_json.dumps({"prUrl": "https://x/pull/1", "review": {"jobId": "run_pr", "goal": "g"}}))
+    calls = []
+    monkeypatch.setattr(job_finalizer, "pr_state", lambda url: calls.append(url) or "MERGED")
+    [item] = list_reviews(tmp_path / "runs")
+    assert item["prState"] == "MERGED" and calls == ["https://x/pull/1"]
+    assert _json.loads((run / "finalize.json").read_text())["prState"] == "MERGED"
+    [again] = list_reviews(tmp_path / "runs")
+    assert again["prState"] == "MERGED" and calls == ["https://x/pull/1"]  # final: not asked again

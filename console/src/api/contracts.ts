@@ -17,6 +17,7 @@ import {
   CapacityTelemetry,
   AgentLimitsReport,
   JobTokenTelemetry,
+  RunReview,
   TaskNode,
   AgentRun,
   JobObservation,
@@ -41,6 +42,8 @@ export interface HermesApi {
   getCapacityTelemetry(): Promise<CapacityTelemetry>;
   getAgentLimits(): Promise<AgentLimitsReport>;
   getJobTelemetry(jobId: string): Promise<JobTokenTelemetry>;
+  /** Finished goal-planned runs for human review, newest first. */
+  getReviews(): Promise<RunReview[]>;
   getJobTasks(jobId: string): Promise<TaskNode[]>;
   getJobRuns(jobId: string): Promise<AgentRun[]>;
   getJobObservations(jobId: string): Promise<JobObservation[]>;

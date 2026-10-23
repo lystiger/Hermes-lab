@@ -12,6 +12,7 @@ import SettingsRoute from './routes/settings';
 import CommsRoute from './routes/comms';
 import DesignRoute from './routes/design';
 import { FloorRoute } from './routes/floor';
+import { ReviewRoute } from './routes/review';
 
 export const App: React.FC = () => {
   return (
@@ -27,6 +28,7 @@ export const App: React.FC = () => {
         <Route path="comms" element={<CommsRoute />} />
         <Route path="design" element={<DesignRoute />} />
         <Route path="floor" element={<FloorRoute />} />
+        <Route path="review" element={<ReviewRoute />} />
         <Route path="settings" element={<SettingsRoute />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Route>

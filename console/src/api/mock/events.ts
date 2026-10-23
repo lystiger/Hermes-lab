@@ -10,7 +10,7 @@ export interface RawMockEvent {
 
 export const RAW_SEED_EVENTS: RawMockEvent[] = [
   { a: 'hermes', k: 'job.started', d: 'Sprint #142 execution started', dur: '', t: 0 },
-  { a: 'gemini', k: 'phase.started', d: 'Starting phase build (builder) with agent gemini', dur: '', t: 0.4, m: { phase: 'build', role: 'builder', agent: 'gemini', order: 1 } },
+  { a: 'codex', k: 'phase.started', d: 'Starting phase scaffold (builder) with agent codex', dur: '', t: 0.4, m: { phase: 'scaffold', role: 'builder', agent: 'codex', order: 1 } },
   { a: 'gemini', k: 'tool.started', d: 'read_file src/state/store.py', dur: '', t: 1.1 },
   { a: 'gemini', k: 'tool.completed', d: 'read_file src/state/store.py', dur: '571 ms', t: 1.7 },
   { a: 'gemini', k: 'tool.started', d: 'write_file src/state/redis_store.py', dur: '', t: 3.0 },
@@ -19,8 +19,9 @@ export const RAW_SEED_EVENTS: RawMockEvent[] = [
   { a: 'gemini', k: 'tool.failed', d: 'redis connection refused (sandbox)', dur: '', t: 6.4 },
   { a: 'gemini', k: 'tool.started', d: 'run pytest tests/state/ -q · local container', dur: '', t: 6.9 },
   { a: 'gemini', k: 'tool.completed', d: '184 passed · 2 skipped', dur: '18.4 s', t: 25.3 },
-  { a: 'gemini', k: 'phase.completed', d: 'Phase build completed successfully', dur: '', t: 27.6, m: { phase: 'build', role: 'builder', agent: 'gemini', order: 1 } },
-  { a: 'claude', k: 'phase.started', d: 'Starting phase harden (hardener) with agent claude', dur: '', t: 27.9, m: { phase: 'harden', role: 'hardener', agent: 'claude', order: 2 } },
+  { a: 'codex', k: 'phase.completed', d: 'Phase scaffold completed successfully', dur: '', t: 27.6, m: { phase: 'scaffold', role: 'builder', agent: 'codex', order: 1 } },
+  { a: 'gemini', k: 'phase.started', d: 'Starting phase build-store (builder) with agent gemini', dur: '', t: 27.7, m: { phase: 'build-store', role: 'builder', agent: 'gemini', order: 2 } },
+  { a: 'claude', k: 'phase.started', d: 'Starting phase review-contract (hardener) with agent claude', dur: '', t: 27.9, m: { phase: 'review-contract', role: 'hardener', agent: 'claude', order: 3 } },
   { a: 'claude', k: 'tool.started', d: 'read_file src/state/redis_store.py', dur: '', t: 28.5 },
   { a: 'claude', k: 'tool.completed', d: 'read_file src/state/redis_store.py', dur: '708 ms', t: 29.2 },
   { a: 'hermes', k: 'provider.rate_limited', d: 'Codex weekly allowance at 78% (estimated)', dur: '', t: 30.1 },

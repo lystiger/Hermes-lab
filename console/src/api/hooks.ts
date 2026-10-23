@@ -249,6 +249,13 @@ export function useAgentLimits() {
   return { limits: data, loading, error, updatedAt, stale, refetch };
 }
 
+/** Finished goal-planned runs for review. Refetched on job activity, since a run is finalized when it completes. */
+export function useReviews() {
+  const { jobRuntimeVersion } = useConsoleStore();
+  const { data, loading, error, updatedAt, stale, refetch } = useResource('reviews', () => hermesApi.getReviews(), [jobRuntimeVersion]);
+  return { reviews: data ?? [], loading, error, updatedAt, stale, refetch };
+}
+
 /** Token telemetry for one job. Keyed by job, so another job's totals are never shown. */
 export function useJobTelemetry(jobId: string | null) {
   const { jobRuntimeVersion, agentRuntimeVersion } = useConsoleStore();

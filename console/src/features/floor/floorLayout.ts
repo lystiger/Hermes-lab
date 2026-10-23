@@ -53,8 +53,8 @@ export function floorColumns(rows: readonly TimelineRow[], deps: PhaseDependenci
     .map(([level, members]) => ({ level, rows: [...members].sort((a, b) => a.order - b.order) }));
 }
 
-/** Visual state of a job card: running, failed, done, or queued. */
-export type CardState = 'running' | 'failed' | 'done' | 'queued';
+/** Visual state of a job card: running, failed, done, queued, or replaced (superseded by a repair cycle). */
+export type CardState = 'running' | 'failed' | 'done' | 'queued' | 'replaced';
 
 /**
  * Maps a phase state to a card state. A claimed phase counts as running only once it has
@@ -73,6 +73,9 @@ export function cardState(state: PipelineStepState, elapsedMs: number | null): C
     case 'COMPLETED':
     case 'SKIPPED':
       return 'done';
+    // Hermes marks a superseded phase IDLE: a check that found problems and was replaced by a re-check.
+    case 'IDLE':
+      return 'replaced';
     default:
       return 'queued';
   }

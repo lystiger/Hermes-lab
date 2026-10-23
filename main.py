@@ -639,6 +639,17 @@ async def get_capacity_limits():
     return {"timestamp": now.isoformat().replace("+00:00", "Z"), "agents": load_agent_limits(DEFAULT_USAGE_DIRECTORY, now)}
 
 
+@app.get("/reviews")
+async def get_reviews(limit: int = Query(default=50, ge=1, le=200)):
+    """
+    Completed goal-planned jobs awaiting or past human review: goal, branch, PR link, tasks, the last
+    verdict and findings, repair cycles and cost. Read from each job's finalize.json.
+    """
+    from jobs.job_finalizer import list_reviews
+
+    return list_reviews(Path.home() / "hermes-runs", limit=limit)
+
+
 @app.get("/jobs/{job_id}/telemetry")
 async def get_job_telemetry(job_id: str):
     """

@@ -6,6 +6,8 @@ import {
   AgentLimitsReport,
   JobObservation,
   JobTokenTelemetry,
+  TaskUsage,
+  RunReview,
   ProviderTelemetry,
   TaskNode,
   TraceEvent,
@@ -230,7 +232,20 @@ export function mapJobTokenTelemetry(raw: any, fallbackJobId: string): JobTokenT
     inputTokens: nullableNumber(pick(t, 'input_tokens', 'inputTokens')) ?? 0,
     outputTokens: nullableNumber(pick(t, 'output_tokens', 'outputTokens')) ?? 0,
     cachedTokens: nullableNumber(pick(t, 'cached_tokens', 'cachedTokens')) ?? 0,
-    totalTokens: nullableNumber(pick(t, 'total_tokens', 'totalTokens')) ?? 0
+    totalTokens: nullableNumber(pick(t, 'total_tokens', 'totalTokens')) ?? 0,
+    costUsd: nullableNumber(pick(raw, 'costUsd', 'cost_usd')),
+    tasks: Array.isArray(pick(raw, 'tasks')) ? (pick(raw, 'tasks') as any[]).map(mapTaskUsage) : []
+  };
+}
+
+export function mapTaskUsage(raw: any): TaskUsage {
+  return {
+    taskId: String(pick(raw, 'task_id', 'taskId') ?? ''),
+    actorId: (pick(raw, 'actor_id', 'actorId') as string | undefined) ?? null,
+    attempt: nullableNumber(pick(raw, 'attempt')),
+    status: (pick(raw, 'status') as string | undefined) ?? null,
+    totalTokens: nullableNumber(pick(raw, 'total_tokens', 'totalTokens')) ?? 0,
+    costUsd: nullableNumber(pick(raw, 'cost_usd', 'costUsd'))
   };
 }
 
@@ -300,4 +315,31 @@ export function describeError(err: unknown): string {
     return JSON.stringify(err);
   }
   return String(err);
+}
+
+export function mapRunReview(raw: any): RunReview {
+  const verdict = pick(raw, 'verdict');
+  return {
+    jobId: String(pick(raw, 'jobId', 'job_id') ?? ''),
+    goal: String(pick(raw, 'goal') ?? ''),
+    branch: String(pick(raw, 'branch') ?? ''),
+    repairs: nullableNumber(pick(raw, 'repairs')) ?? 0,
+    tasks: Array.isArray(pick(raw, 'tasks'))
+      ? (pick(raw, 'tasks') as any[]).map((t) => ({
+          id: String(t?.id ?? ''), role: String(t?.role ?? '?'), agent: String(t?.agent ?? '-'), status: String(t?.status ?? '')
+        }))
+      : [],
+    verdict: verdict && typeof verdict === 'object'
+      ? {
+          task: String(verdict.task ?? ''),
+          summary: typeof verdict.summary === 'string' ? verdict.summary : null,
+          findings: Array.isArray(verdict.findings) ? verdict.findings.filter((f: unknown) => typeof f === 'string') : []
+        }
+      : null,
+    costUsd: nullableNumber(pick(raw, 'costUsd', 'cost_usd')),
+    totalTokens: nullableNumber(pick(raw, 'totalTokens', 'total_tokens')) ?? 0,
+    prUrl: (pick(raw, 'prUrl', 'pr_url') as string | null | undefined) ?? null,
+    prState: (['OPEN', 'MERGED', 'CLOSED'] as const).find((s) => s === String(pick(raw, 'prState', 'pr_state') ?? '').toUpperCase()) ?? null,
+    finishedAt: (pick(raw, 'finalizedAt', 'finishedAt') as string | null | undefined) ?? null
+  };
 }

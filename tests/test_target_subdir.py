@@ -82,3 +82,9 @@ class TestVerifierRunsInSubdir(unittest.IsolatedAsyncioTestCase):
             res = await self._verify(root, steps, "")
 
             self.assertEqual(res.status, VerificationStatus.PASSED)
+
+
+def test_subdir_path_returns_root_for_empty_and_joins_otherwise():
+    root = Path("/tmp/wt")
+    assert subdir_path(root, "") == root
+    assert subdir_path(root, "console") == root / "console"

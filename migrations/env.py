@@ -25,7 +25,7 @@ target_metadata = metadata
 
 
 def get_url():
-    db_url = os.environ.get("DATABASE_URL") or os.environ.get("HERMES_DATABASE_URL") or "postgresql+asyncpg://postgres:postgres@localhost:5432/hermes_lab"
+    db_url = os.environ.get("DATABASE_URL") or os.environ.get("HERMES_DATABASE_URL") or "postgresql+asyncpg://postgres:postgres@localhost:5433/hermes_lab"
     if db_url.startswith("postgresql://") and "+asyncpg" not in db_url:
         db_url = db_url.replace("postgresql://", "postgresql+asyncpg://", 1)
     return db_url

@@ -50,7 +50,7 @@ async def live_postgres_multi_store():
     Creates two independent PostgresRuntimeEventStore instances pointing to live PostgreSQL container.
     Gracefully skips if live PostgreSQL is not reachable.
     """
-    pg_url = os.environ.get("DATABASE_URL") or "postgresql+asyncpg://postgres:postgres@localhost:5432/hermes_lab_test"
+    pg_url = os.environ.get("DATABASE_URL") or "postgresql+asyncpg://postgres:postgres@localhost:5433/hermes_lab_test"
     if pg_url.startswith("postgresql://") and "+asyncpg" not in pg_url:
         pg_url = pg_url.replace("postgresql://", "postgresql+asyncpg://", 1)
 

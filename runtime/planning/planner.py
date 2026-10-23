@@ -57,6 +57,7 @@ Rules:
 3. Every implementation task must reference existing repository files in evidence_refs OR declare evidence_status='new_component'.
 4. Dependencies must form a valid directed acyclic graph (DAG) without circular references.
 5. The plan must contain a terminal verification or test strategy with execution_role='verifier'.
+6. Tasks without a dependency path between them run in parallel. Two tasks that will edit the same file must not: make the later one depend on the earlier.
 """
 
 

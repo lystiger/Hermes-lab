@@ -72,6 +72,14 @@ class WorktreeError(RuntimeError):
     """Raised when a Git worktree cannot be created, validated, or synchronized."""
 
 
+class MergeConflictError(RuntimeError):
+    """A task's commit conflicts with work another task merged first; files lists the conflicted paths."""
+
+    def __init__(self, message: str, files: List[str]):
+        super().__init__(message)
+        self.files = files
+
+
 class ContextSpecError(ValueError):
     """Raised when a sprint specification declares an unusable context bundle."""
 
@@ -607,9 +615,32 @@ class HermesActorAdapter(ActorAdapter):
                 self._verify_execution_fence(task, context)
                 logger.info("Merging task commit %s into integration worktree", commit_sha[:7])
                 merge_msg = f"merge({self.job_id}): merge {task.task_id} ({commit_sha[:7]})"
-                self.run_cmd(["git", "merge", "--no-ff", "-m", merge_msg, commit_sha], cwd=integration_dir)
+                # rerere off: a resolution recorded elsewhere must not be replayed into agent work unseen.
+                merge = self.run_cmd(["git", "-c", "rerere.enabled=false", "merge", "--no-ff", "-m", merge_msg,
+                                      commit_sha], cwd=integration_dir, check=False)
+                if merge.returncode != 0:
+                    self._abort_conflicted_merge(integration_dir, task, merge)
 
             return commit_sha
+
+    def _abort_conflicted_merge(self, integration_dir: Path, task: TaskNode, merge: subprocess.CompletedProcess) -> None:
+        """
+        Backs out a failed merge so integration stays clean for every other task, then fails this task.
+        Its retry starts from integration, which now holds the other task's work, so the agent redoes
+        its change on top of it.
+        """
+        unmerged = self.run_cmd(["git", "diff", "--name-only", "--diff-filter=U"], cwd=integration_dir, check=False)
+        files = [f for f in unmerged.stdout.splitlines() if f.strip()]
+        self.run_cmd(["git", "merge", "--abort"], cwd=integration_dir, check=False)
+        if not files:
+            detail = merge.stderr.strip() or merge.stdout.strip() or f"exit code {merge.returncode}"
+            raise RuntimeError(f"Git merge of {task.task_id} into integration failed: {detail}")
+        raise MergeConflictError(
+            f"Merge conflict: another task changed the same lines first in {', '.join(files)}. This attempt "
+            "was discarded. The retry starts from the current code, which includes that task's changes: "
+            "make your change on top of them and keep what the other task added.",
+            files,
+        )
 
     def _commit_worktree_changes(self, worktree_path: Path, task: TaskNode) -> List[str]:
         """Compatibility helper returning changed files committed."""
@@ -1244,6 +1275,15 @@ class HermesActorAdapter(ActorAdapter):
                 error=f"{exc.code}: {exc.message}",
                 exit_reason=exc.code.lower(),
                 metadata={"actor": actor_id, "fail_closed": True, "runner_error_code": exc.code},
+            )
+
+        except MergeConflictError as exc:
+            logger.warning("Task %s conflicts with merged work in %s; it will retry on top of it", task.task_id, exc.files)
+            return TaskExecutionResult(
+                status="failed",
+                error=str(exc),
+                exit_reason="merge_conflict",
+                metadata={"actor": actor_id, "conflicted_files": exc.files},
             )
 
         except Exception as exc:

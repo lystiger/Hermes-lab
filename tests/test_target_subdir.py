@@ -31,6 +31,12 @@ class TestNormalizeTargetSubdir(unittest.TestCase):
         self.assertEqual(subdir_path(root, "console"), root / "console")
 
 
+def test_subdir_path_returns_root_or_joined_subdir():
+    root = Path("/tmp/wt")
+    assert subdir_path(root, "") == root
+    assert subdir_path(root, "console") == root / "console"
+
+
 class TestVerifierRunsInSubdir(unittest.IsolatedAsyncioTestCase):
     async def _verify(self, root, steps, target_subdir):
         adapter = HermesVerifierAdapter(

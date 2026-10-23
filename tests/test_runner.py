@@ -406,7 +406,7 @@ class TestAgentRegistryAndCommands(unittest.TestCase):
         self.assertEqual(command[:14], [
             "claude", "-p", "do work", "--model", "sonnet", "--max-turns", "12",
             "--permission-mode", "dontAsk", "--output-format", "json",
-            "--allowedTools", "Bash,Edit,Write", "--disallowedTools",
+            "--allowedTools", "Bash,Edit,Write,Skill", "--disallowedTools",
         ])
         denials = command[14].split(",")
         self.assertIn("Bash(git commit)", denials)

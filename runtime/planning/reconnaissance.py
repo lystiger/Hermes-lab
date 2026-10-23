@@ -249,6 +249,14 @@ class RepositoryReconnaissance:
                 score += len(matched_kws) * 4
                 reasons.append(f"path matches keywords: {', '.join(matched_kws)}")
 
+            # The project's own instructions for agents: its rules and the commands that check work.
+            if rel_path == "AGENTS.md":
+                score += 100
+                reasons.append("project instructions for agents")
+            elif rel_lower.startswith("skills/") and rel_lower.endswith("/skill.md"):
+                score += 8
+                reasons.append("project skill")
+
             # Core architecture paths
             if any(p in rel_lower for p in ("api", "route", "model", "schema", "service", "controller", "app")):
                 score += 3

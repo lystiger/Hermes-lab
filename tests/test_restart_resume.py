@@ -16,6 +16,7 @@ from runtime.recovery import restore_provider_limits
 from runtime.storage import config as storage_config
 from runtime.storage.in_memory_store import InMemoryRuntimeEventStore
 from runtime.storage.schema_registry import StoredRuntimeEvent
+from runtime.task_graph import TaskNode
 from tests.test_goal_route import make_repo, plan_json
 
 
@@ -197,3 +198,66 @@ def test_an_unchanged_job_says_so(tmp_path):
     path = adapter._ensure_worktree(tmp_path / "wt" / "v", branch="task/v", base_branch="main")
     assert "has not changed any file yet" in adapter._job_changes_section(path)
     subprocess.run(["git", "worktree", "remove", "--force", str(path)], cwd=repo, capture_output=True)
+
+
+def test_agent_prompts_carry_the_role_not_a_persona(tmp_path):
+    adapter = HermesActorAdapter(target_repo=tmp_path, worktree_root=tmp_path / "wt", run_dir=tmp_path / "run")
+    task = TaskNode(task_id="v", job_id="j", description="Check it", metadata={"role": "verifier"})
+
+    prompt = adapter.build_effective_prompt("Check it", current_agent="codex", role="verifier", task=task)
+
+    assert "AGENT IDENTITY" not in prompt and "Speaking Style" not in prompt
+    assert "Your role in this task: verifier." in prompt and "Do not modify any file" in prompt
+
+
+def test_the_planner_always_reads_the_projects_agent_instructions(tmp_path):
+    from runtime.planning.reconnaissance import RepositoryReconnaissance
+
+    (tmp_path / "AGENTS.md").write_text("# Rules\nRun ./scripts/verify before finishing.\n")
+    (tmp_path / "skills" / "n8n-workflow").mkdir(parents=True)
+    (tmp_path / "skills" / "n8n-workflow" / "SKILL.md").write_text("# n8n workflows\n")
+    for i in range(40):
+        (tmp_path / f"api_route_model_{i}.py").write_text("x = 1\n")
+
+    evidence = RepositoryReconnaissance.collect(tmp_path, "Add a Discord notifier", limits=RuntimeLimits(max_evidence_files=5))
+
+    paths = [f.path for f in evidence.files]
+    assert paths[0] == "AGENTS.md" and "skills/n8n-workflow/SKILL.md" in paths
+
+
+def declare_checks(root, *checks):
+    import json as _json
+    (root / "hermes.json").write_text(_json.dumps({"checks": list(checks)}))
+
+
+def test_hermes_runs_the_projects_checks_for_a_verifier(tmp_path):
+    repo = make_repo(tmp_path / "repo")
+    adapter = HermesActorAdapter(target_repo=repo, worktree_root=tmp_path / "wt", run_dir=tmp_path / "run")
+    path = adapter._ensure_worktree(tmp_path / "wt" / "v", branch="task/v", base_branch="main")
+    declare_checks(path, {"name": "unit", "command": "echo 23 passed"}, {"name": "import", "command": "echo docker says no >&2; exit 3"})
+
+    section = adapter._project_checks_section(path)
+
+    assert "[PASS] unit" in section and "23 passed" in section
+    assert "[FAIL] import" in section and "exit 3" in section and "docker says no" in section
+    assert "Treat these results as proven" in section
+    subprocess.run(["git", "worktree", "remove", "--force", str(path)], cwd=repo, capture_output=True)
+
+
+def test_a_project_without_declared_checks_adds_nothing(tmp_path):
+    adapter = HermesActorAdapter(target_repo=tmp_path, worktree_root=tmp_path / "wt", run_dir=tmp_path / "run")
+    assert adapter._project_checks_section(tmp_path) == ""
+
+
+@pytest.mark.anyio
+async def test_the_final_gate_runs_declared_checks_when_none_are_configured(tmp_path):
+    from runtime.hermes_adapter import HermesVerifierAdapter
+
+    (tmp_path / "integration").mkdir()
+    declare_checks(tmp_path / "integration", {"name": "check", "command": "exit 1"})
+    verifier = HermesVerifierAdapter(verification_steps=[], working_dir=tmp_path, worktree_root=tmp_path)
+
+    from types import SimpleNamespace
+    result = await verifier.verify(job=SimpleNamespace(job_id="j"), graph=None, artifacts=[])
+
+    assert result.status.value != "passed" and result.checks[0].name == "check"

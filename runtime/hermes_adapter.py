@@ -382,6 +382,7 @@ class HermesActorAdapter(ActorAdapter):
         """
         if self.dry_run or self.skip_agent_exec:
             return
+        self._link_virtualenvs(worktree_path)
         dest_root = subdir_path(worktree_path, self.target_subdir)
         src_root = subdir_path(self.target_repo, self.target_subdir)
         dest, src = dest_root / "node_modules", src_root / "node_modules"
@@ -398,6 +399,22 @@ class HermesActorAdapter(ActorAdapter):
             shutil.rmtree(dest, ignore_errors=True)
         else:
             logger.info("Seeded node_modules into %s from %s", dest_root, src_root)
+
+    def _venv_paths(self) -> List[str]:
+        """Worktree-relative places a target .venv is linked (repository root and the target subfolder)."""
+        return list(dict.fromkeys([".venv", *([f"{self.target_subdir}/.venv"] if self.target_subdir else [])]))
+
+    def _link_virtualenvs(self, worktree_path: Path) -> None:
+        """
+        Links the target checkout's .venv into a task worktree, so an agent can run the project's
+        Python tests. Git ignores .venv, so a worktree never has one. The link is shared, not copied:
+        a virtualenv's scripts hold absolute paths and break when moved. Hermes never commits it.
+        """
+        for rel in self._venv_paths():
+            src, dest = self.target_repo / rel, worktree_path / rel
+            if src.is_dir() and not dest.exists() and not dest.is_symlink() and dest.parent.is_dir():
+                dest.symlink_to(src.resolve(), target_is_directory=True)
+                logger.info("Linked %s into %s", rel, worktree_path.name)
 
     def ensure_integration_worktree(self) -> Path:
         """
@@ -508,7 +525,10 @@ class HermesActorAdapter(ActorAdapter):
         if not self._is_worktree_root(worktree_path):
             return []
         res = self.run_cmd(["git", "status", "--porcelain", "--untracked-files=all"], cwd=worktree_path, check=False)
-        return [line.strip() for line in res.stdout.splitlines() if line.strip()]
+        # A linked .venv shows as an untracked file (.gitignore's ".venv/" matches only directories).
+        venvs = set(self._venv_paths())
+        return [line.strip() for line in res.stdout.splitlines()
+                if line.strip() and line.strip().split(maxsplit=1)[-1] not in venvs]
 
     @staticmethod
     def _handoff_path(task: TaskNode) -> Optional[str]:
@@ -529,7 +549,7 @@ class HermesActorAdapter(ActorAdapter):
         trip the verifier-role mutation check.
         """
         for py_file in worktree_path.rglob("*.py"):
-            if any(part in (".git", "__pycache__") for part in py_file.parts):
+            if any(part in (".git", "__pycache__", ".venv", "venv", "node_modules") for part in py_file.parts):
                 continue
             try:
                 source = py_file.read_text(encoding="utf-8")
@@ -570,6 +590,7 @@ class HermesActorAdapter(ActorAdapter):
             logger.info("Staging and committing %d files in %s: %s", len(changed_files), worktree_path.name, commit_msg)
             handoff = self._handoff_path(task)
             exclude = [f":(exclude,glob){handoff}"] if handoff else []
+            exclude += [f":(exclude){venv}" for venv in self._venv_paths()]
             self.run_cmd(["git", "add", ".", *exclude], cwd=worktree_path)
 
             # 2. Verify execution fence before creating commit

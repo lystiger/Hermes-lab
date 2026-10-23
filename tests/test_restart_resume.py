@@ -157,3 +157,21 @@ def test_a_reused_worktree_drops_files_an_interrupted_attempt_left(tmp_path):
 def test_the_engine_step_cap_comes_from_the_limits():
     assert RuntimeLimits().max_engine_steps == 500
     assert RuntimeLimits.from_dict({"maxEngineSteps": 900}).max_engine_steps == 900
+
+
+def test_a_task_worktree_gets_the_repos_venv_but_never_commits_it(tmp_path):
+    repo = make_repo(tmp_path / "repo")
+    (repo / ".gitignore").write_text(".venv/\n")
+    (repo / ".venv" / "bin").mkdir(parents=True)
+    subprocess.run(["git", "add", ".gitignore"], cwd=repo, check=True)
+    subprocess.run(["git", "commit", "-qm", "ignore venv"], cwd=repo, check=True)
+    adapter = HermesActorAdapter(target_repo=repo, worktree_root=tmp_path / "wt", run_dir=tmp_path / "run")
+    path = adapter._ensure_worktree(tmp_path / "wt" / "t", branch="task/t", base_branch="main")
+
+    adapter._seed_dependencies(path)
+
+    assert (path / ".venv").is_symlink() and (path / ".venv" / "bin").is_dir()
+    assert adapter.inspect_changed_files(path) == []
+    (path / "app" / "new.py").write_text("x = 1\n")
+    assert adapter.inspect_changed_files(path) == ["?? app/new.py"]
+    subprocess.run(["git", "worktree", "remove", "--force", str(path)], cwd=repo, capture_output=True)

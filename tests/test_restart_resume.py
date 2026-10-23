@@ -175,3 +175,25 @@ def test_a_task_worktree_gets_the_repos_venv_but_never_commits_it(tmp_path):
     (path / "app" / "new.py").write_text("x = 1\n")
     assert adapter.inspect_changed_files(path) == ["?? app/new.py"]
     subprocess.run(["git", "worktree", "remove", "--force", str(path)], cwd=repo, capture_output=True)
+
+
+def test_a_verifier_is_told_what_the_job_changed(tmp_path):
+    repo = make_repo(tmp_path / "repo")
+    adapter = HermesActorAdapter(target_repo=repo, worktree_root=tmp_path / "wt", run_dir=tmp_path / "run")
+    path = adapter._ensure_worktree(tmp_path / "wt" / "v", branch="task/v", base_branch="main")
+    (path / "app" / "api.py").write_text("def route():\n    return 2\n")
+    subprocess.run(["git", "commit", "-qam", "change"], cwd=path, check=True)
+
+    section = adapter._job_changes_section(path)
+
+    assert "M\tapp/api.py" in section and "+    return 2" in section
+    assert "do not\nneed" not in section and "no git operations" in section
+    subprocess.run(["git", "worktree", "remove", "--force", str(path)], cwd=repo, capture_output=True)
+
+
+def test_an_unchanged_job_says_so(tmp_path):
+    repo = make_repo(tmp_path / "repo")
+    adapter = HermesActorAdapter(target_repo=repo, worktree_root=tmp_path / "wt", run_dir=tmp_path / "run")
+    path = adapter._ensure_worktree(tmp_path / "wt" / "v", branch="task/v", base_branch="main")
+    assert "has not changed any file yet" in adapter._job_changes_section(path)
+    subprocess.run(["git", "worktree", "remove", "--force", str(path)], cwd=repo, capture_output=True)

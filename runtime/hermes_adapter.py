@@ -665,6 +665,34 @@ class HermesActorAdapter(ActorAdapter):
             lines.append("--- END CONTINUITY CONTEXT ---")
         return "\n\n".join(lines) if lines else ""
 
+    MAX_DIFF_CHARS = 30000
+
+    def _job_changes_section(self, worktree_path: Path) -> str:
+        """
+        What this job changed so far (the worktree holds every merged task), for a verifier or security
+        reviewer: they may not run git, so without this they cannot check which files changed.
+        """
+        if not self._is_git_repo(self.target_repo):
+            return ""
+        spec = f"{self.base_ref}...HEAD"
+        names = self.run_cmd(["git", "diff", "--name-status", spec], cwd=worktree_path, check=False)
+        diff = self.run_cmd(["git", "diff", spec], cwd=worktree_path, check=False)
+        if names.returncode != 0 or diff.returncode != 0:
+            return ""
+        files = names.stdout.strip() or "(none: this job has not changed any file yet)"
+        body = diff.stdout
+        if len(body) > self.MAX_DIFF_CHARS:
+            body = body[:self.MAX_DIFF_CHARS] + f"\n... (diff cut at {self.MAX_DIFF_CHARS} characters; read the files for the rest)"
+        return (
+            "\n\n--- WHAT THIS JOB CHANGED (from Hermes) ---\n"
+            f"Every file this job changed compared with {self.base_ref}, computed by Hermes. This is the complete "
+            "list: use it to check which files changed. Hermes enforces the no-git rule itself, so you do not "
+            "need to confirm that no git operations were performed.\n\n"
+            f"Changed files (git status letter, path):\n{files}\n\n"
+            f"Diff:\n{body.strip() or '(empty)'}\n"
+            "--- END WHAT THIS JOB CHANGED ---"
+        )
+
     def build_effective_prompt(
         self,
         base_prompt: str,
@@ -958,6 +986,8 @@ class HermesActorAdapter(ActorAdapter):
                 if p_path.exists():
                     base_prompt = p_path.read_text(encoding="utf-8")
             base_prompt += self._fallback_failure_section(task)
+            if role in ("verifier", "security"):
+                base_prompt += self._job_changes_section(worktree_path)
 
             # Gather task observations and prior failure telemetry for continuity
             obs_reg = getattr(self, "observation_registry", None)

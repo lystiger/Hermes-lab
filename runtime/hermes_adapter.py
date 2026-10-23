@@ -72,6 +72,14 @@ class WorktreeError(RuntimeError):
     """Raised when a Git worktree cannot be created, validated, or synchronized."""
 
 
+class MergeConflictError(RuntimeError):
+    """A task's commit conflicts with work another task merged first; files lists the conflicted paths."""
+
+    def __init__(self, message: str, files: List[str]):
+        super().__init__(message)
+        self.files = files
+
+
 class ContextSpecError(ValueError):
     """Raised when a sprint specification declares an unusable context bundle."""
 
@@ -382,6 +390,7 @@ class HermesActorAdapter(ActorAdapter):
         """
         if self.dry_run or self.skip_agent_exec:
             return
+        self._link_virtualenvs(worktree_path)
         dest_root = subdir_path(worktree_path, self.target_subdir)
         src_root = subdir_path(self.target_repo, self.target_subdir)
         dest, src = dest_root / "node_modules", src_root / "node_modules"
@@ -398,6 +407,22 @@ class HermesActorAdapter(ActorAdapter):
             shutil.rmtree(dest, ignore_errors=True)
         else:
             logger.info("Seeded node_modules into %s from %s", dest_root, src_root)
+
+    def _venv_paths(self) -> List[str]:
+        """Worktree-relative places a target .venv is linked (repository root and the target subfolder)."""
+        return list(dict.fromkeys([".venv", *([f"{self.target_subdir}/.venv"] if self.target_subdir else [])]))
+
+    def _link_virtualenvs(self, worktree_path: Path) -> None:
+        """
+        Links the target checkout's .venv into a task worktree, so an agent can run the project's
+        Python tests. Git ignores .venv, so a worktree never has one. The link is shared, not copied:
+        a virtualenv's scripts hold absolute paths and break when moved. Hermes never commits it.
+        """
+        for rel in self._venv_paths():
+            src, dest = self.target_repo / rel, worktree_path / rel
+            if src.is_dir() and not dest.exists() and not dest.is_symlink() and dest.parent.is_dir():
+                dest.symlink_to(src.resolve(), target_is_directory=True)
+                logger.info("Linked %s into %s", rel, worktree_path.name)
 
     def ensure_integration_worktree(self) -> Path:
         """
@@ -447,8 +472,10 @@ class HermesActorAdapter(ActorAdapter):
                     # Check for dirty uncommitted changes and clean them
                     dirty = subprocess.run(["git", "status", "--porcelain"], cwd=str(path), capture_output=True, text=True)
                     if dirty.stdout.strip():
+                        # An interrupted attempt leaves new files too; a retry starts from the last commit.
                         logger.warning("Resetting dirty uncommitted changes in worktree at %s", path.name)
                         self.run_cmd(["git", "reset", "--hard", "HEAD"], cwd=path)
+                        self.run_cmd(["git", "clean", "-fd"], cwd=path)
                     return path
                 if any(path.iterdir()):
                     raise WorktreeError(
@@ -506,7 +533,10 @@ class HermesActorAdapter(ActorAdapter):
         if not self._is_worktree_root(worktree_path):
             return []
         res = self.run_cmd(["git", "status", "--porcelain", "--untracked-files=all"], cwd=worktree_path, check=False)
-        return [line.strip() for line in res.stdout.splitlines() if line.strip()]
+        # A linked .venv shows as an untracked file (.gitignore's ".venv/" matches only directories).
+        venvs = set(self._venv_paths())
+        return [line.strip() for line in res.stdout.splitlines()
+                if line.strip() and line.strip().split(maxsplit=1)[-1] not in venvs]
 
     @staticmethod
     def _handoff_path(task: TaskNode) -> Optional[str]:
@@ -527,7 +557,7 @@ class HermesActorAdapter(ActorAdapter):
         trip the verifier-role mutation check.
         """
         for py_file in worktree_path.rglob("*.py"):
-            if any(part in (".git", "__pycache__") for part in py_file.parts):
+            if any(part in (".git", "__pycache__", ".venv", "venv", "node_modules") for part in py_file.parts):
                 continue
             try:
                 source = py_file.read_text(encoding="utf-8")
@@ -568,6 +598,7 @@ class HermesActorAdapter(ActorAdapter):
             logger.info("Staging and committing %d files in %s: %s", len(changed_files), worktree_path.name, commit_msg)
             handoff = self._handoff_path(task)
             exclude = [f":(exclude,glob){handoff}"] if handoff else []
+            exclude += [f":(exclude){venv}" for venv in self._venv_paths()]
             self.run_cmd(["git", "add", ".", *exclude], cwd=worktree_path)
 
             # 2. Verify execution fence before creating commit
@@ -584,9 +615,32 @@ class HermesActorAdapter(ActorAdapter):
                 self._verify_execution_fence(task, context)
                 logger.info("Merging task commit %s into integration worktree", commit_sha[:7])
                 merge_msg = f"merge({self.job_id}): merge {task.task_id} ({commit_sha[:7]})"
-                self.run_cmd(["git", "merge", "--no-ff", "-m", merge_msg, commit_sha], cwd=integration_dir)
+                # rerere off: a resolution recorded elsewhere must not be replayed into agent work unseen.
+                merge = self.run_cmd(["git", "-c", "rerere.enabled=false", "merge", "--no-ff", "-m", merge_msg,
+                                      commit_sha], cwd=integration_dir, check=False)
+                if merge.returncode != 0:
+                    self._abort_conflicted_merge(integration_dir, task, merge)
 
             return commit_sha
+
+    def _abort_conflicted_merge(self, integration_dir: Path, task: TaskNode, merge: subprocess.CompletedProcess) -> None:
+        """
+        Backs out a failed merge so integration stays clean for every other task, then fails this task.
+        Its retry starts from integration, which now holds the other task's work, so the agent redoes
+        its change on top of it.
+        """
+        unmerged = self.run_cmd(["git", "diff", "--name-only", "--diff-filter=U"], cwd=integration_dir, check=False)
+        files = [f for f in unmerged.stdout.splitlines() if f.strip()]
+        self.run_cmd(["git", "merge", "--abort"], cwd=integration_dir, check=False)
+        if not files:
+            detail = merge.stderr.strip() or merge.stdout.strip() or f"exit code {merge.returncode}"
+            raise RuntimeError(f"Git merge of {task.task_id} into integration failed: {detail}")
+        raise MergeConflictError(
+            f"Merge conflict: another task changed the same lines first in {', '.join(files)}. This attempt "
+            "was discarded. The retry starts from the current code, which includes that task's changes: "
+            "make your change on top of them and keep what the other task added.",
+            files,
+        )
 
     def _commit_worktree_changes(self, worktree_path: Path, task: TaskNode) -> List[str]:
         """Compatibility helper returning changed files committed."""
@@ -641,6 +695,34 @@ class HermesActorAdapter(ActorAdapter):
                     lines.append(f"- Run {f.get('run_id')}: status={f.get('status')}, exit_reason={f.get('exit_reason')}")
             lines.append("--- END CONTINUITY CONTEXT ---")
         return "\n\n".join(lines) if lines else ""
+
+    MAX_DIFF_CHARS = 30000
+
+    def _job_changes_section(self, worktree_path: Path) -> str:
+        """
+        What this job changed so far (the worktree holds every merged task), for a verifier or security
+        reviewer: they may not run git, so without this they cannot check which files changed.
+        """
+        if not self._is_git_repo(self.target_repo):
+            return ""
+        spec = f"{self.base_ref}...HEAD"
+        names = self.run_cmd(["git", "diff", "--name-status", spec], cwd=worktree_path, check=False)
+        diff = self.run_cmd(["git", "diff", spec], cwd=worktree_path, check=False)
+        if names.returncode != 0 or diff.returncode != 0:
+            return ""
+        files = names.stdout.strip() or "(none: this job has not changed any file yet)"
+        body = diff.stdout
+        if len(body) > self.MAX_DIFF_CHARS:
+            body = body[:self.MAX_DIFF_CHARS] + f"\n... (diff cut at {self.MAX_DIFF_CHARS} characters; read the files for the rest)"
+        return (
+            "\n\n--- WHAT THIS JOB CHANGED (from Hermes) ---\n"
+            f"Every file this job changed compared with {self.base_ref}, computed by Hermes. This is the complete "
+            "list: use it to check which files changed. Hermes enforces the no-git rule itself, so you do not "
+            "need to confirm that no git operations were performed.\n\n"
+            f"Changed files (git status letter, path):\n{files}\n\n"
+            f"Diff:\n{body.strip() or '(empty)'}\n"
+            "--- END WHAT THIS JOB CHANGED ---"
+        )
 
     def build_effective_prompt(
         self,
@@ -935,6 +1017,8 @@ class HermesActorAdapter(ActorAdapter):
                 if p_path.exists():
                     base_prompt = p_path.read_text(encoding="utf-8")
             base_prompt += self._fallback_failure_section(task)
+            if role in ("verifier", "security"):
+                base_prompt += self._job_changes_section(worktree_path)
 
             # Gather task observations and prior failure telemetry for continuity
             obs_reg = getattr(self, "observation_registry", None)
@@ -1191,6 +1275,15 @@ class HermesActorAdapter(ActorAdapter):
                 error=f"{exc.code}: {exc.message}",
                 exit_reason=exc.code.lower(),
                 metadata={"actor": actor_id, "fail_closed": True, "runner_error_code": exc.code},
+            )
+
+        except MergeConflictError as exc:
+            logger.warning("Task %s conflicts with merged work in %s; it will retry on top of it", task.task_id, exc.files)
+            return TaskExecutionResult(
+                status="failed",
+                error=str(exc),
+                exit_reason="merge_conflict",
+                metadata={"actor": actor_id, "conflicted_files": exc.files},
             )
 
         except Exception as exc:

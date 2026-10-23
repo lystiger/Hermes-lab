@@ -48,6 +48,11 @@ async def lifespan(app: FastAPI):
     except Exception as exc:
         pass
 
+    # Goal-planned jobs interrupted by the last shutdown continue; only a durable store has them.
+    resume_task = None
+    if os.environ.get("HERMES_AUTO_RESUME", "1") != "0":
+        resume_task = asyncio.create_task(job_launcher.resume_orphaned_goal_jobs(), name="resume-orphaned-jobs")
+
     # Publish initial runtime startup event
     event_bus.publish(
         source_id="hermes",
@@ -58,6 +63,8 @@ async def lifespan(app: FastAPI):
         accent_color="#CBA35C",
     )
     yield
+    if resume_task and not resume_task.done():
+        resume_task.cancel()
     # Get the Execution page state onto disk before the process exits (the writer is a daemon thread).
     try:
         await asyncio.to_thread(default_execution_registry.flush, 5.0)
@@ -557,6 +564,8 @@ async def create_goal_job(payload: CreateGoalJobPayload):
             task_timeout_seconds=payload.taskTimeoutSeconds,
             exclude_agents=payload.excludeAgents or None,
             agent_max_turns=payload.agentMaxTurns,
+            planner_model=payload.plannerModel,
+            planner_effort=payload.plannerEffort,
         ) | {"targetRepo": str(repo), "plannerModel": payload.plannerModel, "plannerEffort": payload.plannerEffort}
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))

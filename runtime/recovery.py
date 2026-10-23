@@ -19,6 +19,7 @@ from runtime.storage.schema_registry import StoredRuntimeEvent
 from runtime.lease import JobLeaseStore, InMemoryJobLeaseStore
 from runtime.engine import ReactiveJobEngine
 from capabilities.capabilities import CapabilityRegistry, default_capability_registry
+from runtime.capacity import ProviderFailureClass
 
 logger = logging.getLogger("hermes.runtime.recovery")
 
@@ -334,3 +335,39 @@ class RecoveryManager:
 
         engine._recovery_metrics = metrics
         return engine, metrics
+
+
+_LIMIT_EVENTS = {
+    "provider.rate_limited": ProviderFailureClass.RATE_LIMITED,
+    "provider.quota_exhausted": ProviderFailureClass.TOKEN_QUOTA_EXHAUSTED,
+}
+
+
+def restore_provider_limits(events: List[Any], registry: Any, now: Optional[datetime] = None) -> Dict[str, str]:
+    """
+    Re-applies provider limits still in force from a job's ledger, so a resumed job waits for the
+    reset instead of spending an attempt to rediscover the limit. Returns {provider_id: resetsAt}.
+    """
+    now = now or datetime.now(timezone.utc)
+    latest: Dict[str, Tuple[ProviderFailureClass, datetime]] = {}
+    for event in events:
+        failure_class = _LIMIT_EVENTS.get(event.event_type)
+        payload = event.payload or {}
+        provider_id = payload.get("providerId")
+        if not failure_class or not provider_id or not payload.get("resetsAt"):
+            continue
+        try:
+            resets_at = datetime.fromisoformat(payload["resetsAt"])
+        except (TypeError, ValueError):
+            continue
+        latest[provider_id] = (failure_class, resets_at if resets_at.tzinfo else resets_at.replace(tzinfo=timezone.utc))
+
+    restored: Dict[str, str] = {}
+    for provider_id, (failure_class, resets_at) in latest.items():
+        remaining = (resets_at - now).total_seconds()
+        if remaining > 0:
+            registry.record_provider_failure(provider_id, failure_class, retry_after_seconds=remaining,
+                                             reason="limit restored from the job ledger after a restart")
+            restored[provider_id] = resets_at.isoformat()
+    return restored
+

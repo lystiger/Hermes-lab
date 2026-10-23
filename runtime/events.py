@@ -1,5 +1,5 @@
 import asyncio
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 import logging
 from typing import Any, Dict, List, Optional, Set
 import uuid
@@ -20,6 +20,13 @@ def _make_json_safe(obj: Any) -> Any:
     if hasattr(obj, "to_dict") and callable(obj.to_dict):
         return _make_json_safe(obj.to_dict())
     return obj
+
+
+def _resets_at(retry_after: Optional[float]) -> Optional[str]:
+    """Absolute reset time for a provider limit, so a restarted Hermes still waits for it."""
+    if not retry_after or retry_after <= 0:
+        return None
+    return (datetime.now(timezone.utc) + timedelta(seconds=retry_after)).isoformat()
 
 
 class RuntimeEventBridge:
@@ -839,18 +846,22 @@ class RuntimeEventBridge:
             kind="provider.rate_limited",
             detail=f"Provider '{provider_id}' rate limited (retry-after: {retry_after}s)",
             job_id=job_id or "system",
-            metadata={"providerId": provider_id, "retryAfter": retry_after},
+            metadata={"providerId": provider_id, "retryAfter": retry_after, "resetsAt": _resets_at(retry_after)},
             accent_color="#F97316",
         )
 
-    async def emit_provider_quota_exhausted(self, provider_id: str, reason: str = "Quota exhausted", job_id: Optional[str] = None) -> StoredRuntimeEvent:
+    async def emit_provider_quota_exhausted(
+        self, provider_id: str, reason: str = "Quota exhausted", job_id: Optional[str] = None,
+        retry_after: Optional[float] = None,
+    ) -> StoredRuntimeEvent:
         return await self.persist_and_publish(
             source_id=f"provider.{provider_id}",
             source_kind="provider",
             kind="provider.quota_exhausted",
             detail=f"Provider '{provider_id}' quota exhausted: {reason}",
             job_id=job_id or "system",
-            metadata={"providerId": provider_id, "reason": reason},
+            metadata={"providerId": provider_id, "reason": reason, "retryAfter": retry_after,
+                      "resetsAt": _resets_at(retry_after)},
             accent_color="#DC2626",
         )
 

@@ -11,6 +11,7 @@ def _adapter(worktree_root: Path) -> HermesActorAdapter:
     adapter = HermesActorAdapter.__new__(HermesActorAdapter)
     adapter._git_lock = threading.RLock()
     adapter.worktree_root = worktree_root
+    adapter.target_subdir = ""
     adapter._verify_execution_fence = lambda *args, **kwargs: None
     adapter._is_worktree_root = lambda path: True
     adapter.run_cmd = lambda cmd, cwd=None, check=True: subprocess.run(

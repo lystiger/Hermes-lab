@@ -447,8 +447,10 @@ class HermesActorAdapter(ActorAdapter):
                     # Check for dirty uncommitted changes and clean them
                     dirty = subprocess.run(["git", "status", "--porcelain"], cwd=str(path), capture_output=True, text=True)
                     if dirty.stdout.strip():
+                        # An interrupted attempt leaves new files too; a retry starts from the last commit.
                         logger.warning("Resetting dirty uncommitted changes in worktree at %s", path.name)
                         self.run_cmd(["git", "reset", "--hard", "HEAD"], cwd=path)
+                        self.run_cmd(["git", "clean", "-fd"], cwd=path)
                     return path
                 if any(path.iterdir()):
                     raise WorktreeError(

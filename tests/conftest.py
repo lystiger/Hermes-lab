@@ -17,6 +17,10 @@ os.environ["HERMES_EXECUTION_STATE"] = str(_SESSION_STATE / "execution-registry.
 # control URL (e.g. the cross-process a2a smoke test) start their own server and pass it explicitly.
 os.environ.pop("LYSSTACK_CONTROL_URL", None)
 os.environ["HERMES_AGENT_MODELS"] = str(_SESSION_STATE / "agent_models.json")
+# The API resumes interrupted jobs on startup; a test app must not pick up other tests' jobs.
+os.environ["HERMES_AUTO_RESUME"] = "0"
+os.environ.pop("DATABASE_URL", None)
+os.environ.pop("HERMES_DATABASE_URL", None)
 
 ROOT_DIR = Path(__file__).resolve().parent.parent
 if str(ROOT_DIR) not in sys.path:

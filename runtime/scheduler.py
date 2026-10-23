@@ -475,7 +475,8 @@ class ReactiveScheduler:
                         if failure_class == ProviderFailureClass.RATE_LIMITED:
                             await self.event_bridge.emit_provider_rate_limited(provider_id, retry_after=retry_after, job_id=task.job_id)
                         elif failure_class in (ProviderFailureClass.TOKEN_QUOTA_EXHAUSTED, ProviderFailureClass.BILLING):
-                            await self.event_bridge.emit_provider_quota_exhausted(provider_id, reason=str(result.error), job_id=task.job_id)
+                            await self.event_bridge.emit_provider_quota_exhausted(
+                                provider_id, reason=str(result.error), job_id=task.job_id, retry_after=retry_after)
 
                     # Attempt capability-based rerouting
                     alt_actor = self.reroute_policy.find_alternative_actor(task, failed_actor=actor_id)

@@ -953,11 +953,13 @@ class ReactiveJobEngine:
         logger.info("Job %s: %s %s failed (%s); repair cycle %d", self.job.job_id, role, task.task_id, summary, cycle)
         return True
 
-    async def run_until_complete(self, max_steps: int = 100) -> JobRecord:
+    async def run_until_complete(self, max_steps: Optional[int] = None) -> JobRecord:
         """
-        Drives the engine in a loop until a terminal state is reached or max_steps is exceeded.
+        Drives the engine in a loop until a terminal state is reached or max_steps
+        (default: limits.max_engine_steps) is exceeded.
         Fails closed on storage/persistence failures: halts orchestration and cancels workers.
         """
+        max_steps = max_steps or self.limits.max_engine_steps
         step_count = 0
         try:
             while not self.is_terminal and step_count < max_steps:

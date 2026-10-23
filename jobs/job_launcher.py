@@ -465,6 +465,74 @@ class JobLauncher:
                     self._start_engine_background(engine)
         return res
 
+    def _goal_adapters(
+        self,
+        job_id: str,
+        meta: Dict[str, Any],
+        event_bridge: Any,
+        limits: RuntimeLimits,
+        model_client: Optional[Any] = None,
+        agent_registry: Any = None,
+        backend_registry: Any = None,
+    ) -> Tuple[GroundedPlanner, HermesActorAdapter, HermesVerifierAdapter]:
+        """Planner, actor and verifier for a goal-planned job, built from its metadata at launch and on resume."""
+        target_repo = Path(meta["target_repo"])
+        worktree_root = Path(meta["worktree_root"])
+        subdir = meta.get("target_subdir") or ""
+        agent_max_turns = meta.get("agent_max_turns")
+        # Agents work inside the subfolder, so the planner reads and cites paths from there too.
+        planner = GroundedPlanner(
+            model_client=model_client,
+            target_repo=target_repo / subdir if subdir else target_repo,
+            limits=limits,
+            event_bridge=event_bridge,
+            allow_heuristic_fallback=meta.get("allow_heuristic_fallback", True),
+        )
+        actor = HermesActorAdapter(
+            target_repo=target_repo,
+            worktree_root=worktree_root,
+            run_dir=Path(meta["runs_root"]) / job_id,
+            dry_run=bool(meta.get("actor_dry_run", meta.get("dry_run"))),
+            skip_agent_exec=bool(meta.get("skip_agent_exec")),
+            agent_registry=agent_registry,
+            backend_registry=backend_registry,
+            job_id=job_id,
+            base_ref="main",
+            target_branch=f"job/{job_id}/integration",
+            event_bridge=event_bridge,
+            target_subdir=subdir,
+            default_permissions=meta.get("permissions"),
+            default_timeout_seconds=meta.get("task_timeout_seconds") or 300,
+            default_agent_options={"max_turns": agent_max_turns} if agent_max_turns else None,
+        )
+        verifier = HermesVerifierAdapter(verification_steps=[], working_dir=target_repo, worktree_root=worktree_root)
+        return planner, actor, verifier
+
+    async def _hold_lease(self, engine: ReactiveJobEngine, owner: Optional[str] = None, wait_seconds: float = 0.0) -> bool:
+        """
+        Takes the job's execution lease and keeps it alive while the engine runs, so a restarted
+        Hermes can tell an orphaned job (lease expired) from one another process still runs.
+        With wait_seconds, retries until a dead owner's lease expires.
+        """
+        from runtime.storage.config import get_global_lease_store
+        from runtime.lease import JobLeaseManager
+
+        job_id = engine.job.job_id
+        owner = owner or f"hermes-{os.getpid()}-{uuid.uuid4().hex[:6]}"
+        lease_mgr = JobLeaseManager(
+            lease_store=get_global_lease_store(),
+            owner_id=owner,
+            on_lease_lost=lambda jid: engine.fence(f"Execution lease lost for job {jid}"),
+        )
+        deadline = time.monotonic() + wait_seconds
+        while not await lease_mgr.lease_store.acquire_lease(job_id, owner, duration_seconds=lease_mgr.duration_seconds):
+            if time.monotonic() >= deadline:
+                return False
+            await asyncio.sleep(min(5.0, max(0.1, deadline - time.monotonic())))
+        task_hb = asyncio.create_task(lease_mgr._heartbeat_loop(job_id), name=f"lease-hb-{job_id}")
+        self._lease_managers[job_id] = (lease_mgr, task_hb, owner)
+        return True
+
     def launch_goal(
         self,
         goal: str,
@@ -484,6 +552,8 @@ class JobLauncher:
         task_timeout_seconds: int = 300,
         exclude_agents: Optional[List[str]] = None,
         agent_max_turns: Optional[int] = None,
+        planner_model: Optional[str] = None,
+        planner_effort: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         Launches an initial-planned engineering job from a natural language goal and target repository.
@@ -500,7 +570,6 @@ class JobLauncher:
 
         worktree_root = (Path.home() / "hermes-worktrees" / job_id).resolve()
         runs_root = (Path.home() / "hermes-runs").resolve()
-        run_dir = runs_root / job_id
 
         from runtime.storage.config import get_global_event_store
         event_store = get_global_event_store()
@@ -508,42 +577,7 @@ class JobLauncher:
 
         runtime_limits = limits or RuntimeLimits()
 
-        # Instantiate GroundedPlanner for dynamic repository-grounded goal decomposition
-        subdir = normalize_target_subdir(target_subdir)
-        # Agents work inside the subfolder, so the planner reads and cites paths from there too.
-        planning_root = resolved_target_repo / subdir if subdir else resolved_target_repo
-        planner_adapter = GroundedPlanner(
-            model_client=model_client,
-            target_repo=planning_root,
-            limits=runtime_limits,
-            event_bridge=event_bridge,
-            allow_heuristic_fallback=allow_heuristic_fallback,
-        )
-
-        actor_adapter = HermesActorAdapter(
-            target_repo=resolved_target_repo,
-            worktree_root=worktree_root,
-            run_dir=run_dir,
-            dry_run=dry_run,
-            skip_agent_exec=skip_agent_exec,
-            agent_registry=agent_registry,
-            backend_registry=backend_registry,
-            job_id=job_id,
-            base_ref="main",
-            target_branch=f"job/{job_id}/integration",
-            event_bridge=event_bridge,
-            target_subdir=subdir,
-            default_permissions=permissions,
-            default_timeout_seconds=task_timeout_seconds,
-            default_agent_options={"max_turns": agent_max_turns} if agent_max_turns else None,
-        )
-
-        verifier_adapter = HermesVerifierAdapter(
-            verification_steps=[],
-            working_dir=resolved_target_repo,
-            worktree_root=worktree_root,
-        )
-
+        # Everything needed to rebuild this job's adapters after a restart (see _goal_adapters).
         job_metadata = {
             "goal": goal,
             "target_repo": str(resolved_target_repo),
@@ -553,7 +587,22 @@ class JobLauncher:
             "planning_mode": "grounded_planner",
             "launch_mode": mode,
             "dry_run": bool(dry_run or skip_agent_exec),
+            "actor_dry_run": bool(dry_run),
+            "skip_agent_exec": bool(skip_agent_exec),
+            "target_subdir": normalize_target_subdir(target_subdir),
+            "permissions": permissions,
+            "task_timeout_seconds": task_timeout_seconds,
+            "agent_max_turns": agent_max_turns,
+            "exclude_agents": list(exclude_agents or []),
+            "allow_heuristic_fallback": allow_heuristic_fallback,
+            "limits": runtime_limits.to_dict(),
+            **({"planner_model": planner_model} if planner_model else {}),
+            **({"planner_effort": planner_effort} if planner_effort else {}),
         }
+        planner_adapter, actor_adapter, verifier_adapter = self._goal_adapters(
+            job_id, job_metadata, event_bridge, runtime_limits, model_client=model_client,
+            agent_registry=agent_registry, backend_registry=backend_registry,
+        )
 
         engine = ReactiveJobEngine(
             job_id=job_id,
@@ -610,6 +659,9 @@ class JobLauncher:
 
         async def _plan_then_run():
             try:
+                if not await self._hold_lease(engine):
+                    logger.error("Goal-planned job %s could not take its execution lease", job_id)
+                    return
                 await engine.initialize_and_plan(initial_tasks=None)
             except Exception as exc:
                 logger.exception("Goal-planned job %s failed to plan: %s", job_id, exc)
@@ -620,39 +672,12 @@ class JobLauncher:
         self._active_async_tasks[job_id] = task
         return res
 
-    async def launch_goal_async(
-        self,
-        goal: str,
-        target_repo: Optional[Union[Path, str]] = None,
-        constraints: Optional[List[str]] = None,
-        dry_run: bool = False,
-        skip_agent_exec: bool = False,
-        model_client: Optional[Any] = None,
-        agent_registry: Any = None,
-        backend_registry: Any = None,
-        limits: Optional[RuntimeLimits] = None,
-        start_background: bool = True,
-        mode: str = "goal_planned",
-        allow_heuristic_fallback: bool = True,
-    ) -> Dict[str, Any]:
+    async def launch_goal_async(self, goal: str, start_background: bool = True, **kwargs) -> Dict[str, Any]:
         """
-        Async version of launch_goal that initializes the engine and decomposes the initial
-        plan into the TaskGraph BEFORE starting background execution.
+        Async version of launch_goal (same options) that initializes the engine and decomposes the
+        initial plan into the TaskGraph BEFORE starting background execution.
         """
-        res = self.launch_goal(
-            goal=goal,
-            target_repo=target_repo,
-            constraints=constraints,
-            dry_run=dry_run,
-            skip_agent_exec=skip_agent_exec,
-            model_client=model_client,
-            agent_registry=agent_registry,
-            backend_registry=backend_registry,
-            limits=limits,
-            start_background=False,
-            mode=mode,
-            allow_heuristic_fallback=allow_heuristic_fallback,
-        )
+        res = self.launch_goal(goal=goal, start_background=False, **kwargs)
         job_id = res.get("jobId")
         if job_id:
             engine = job_service.get_engine(job_id)
@@ -820,31 +845,75 @@ class JobLauncher:
         job_id: str,
         owner_id: Optional[str] = None,
         detected_interruption_at: Optional[str] = None,
+        wait_for_lease_seconds: float = 0.0,
     ) -> Dict[str, Any]:
         """
         Durable recovery and resumption of an unfinished job.
         Acquires exclusive execution lease, reconciles tasks, rebuilds Hermes adapters,
-        and continues reactive execution.
+        and continues reactive execution. With wait_for_lease_seconds, waits for a dead
+        owner's lease to expire (a restart resumes jobs the previous process still held).
         """
         from runtime.storage.config import get_global_event_store, get_global_lease_store
+        from runtime.storage.projector import RuntimeStateProjector
         from runtime.recovery import RecoveryManager
-        from runtime.lease import JobLeaseManager
 
         # Canonical single owner_id for this resume session
         owner = owner_id or f"hermes-node-{uuid.uuid4().hex[:8]}"
 
         store = get_global_event_store()
         lease_store = get_global_lease_store()
-        manager = RecoveryManager(event_store=store, lease_store=lease_store)
-        engine, metrics = await manager.recover_and_rehydrate(
-            job_id=job_id,
-            owner_id=owner,
-            detected_interruption_at=detected_interruption_at,
+        # A goal-planned job is rebuilt with the limits and agent exclusions it was launched with.
+        events = await store.list_events(job_id)
+        meta = RuntimeStateProjector.project(events).job.metadata if events else {}
+        goal_planned = meta.get("launch_mode") == "goal_planned" and "worktree_root" in meta
+        limits = RuntimeLimits.from_dict(meta["limits"]) if goal_planned and meta.get("limits") else RuntimeLimits()
+        manager = RecoveryManager(
+            event_store=store,
+            lease_store=lease_store,
+            limits=limits,
+            **({"capability_registry": create_default_capability_registry(exclude=meta.get("exclude_agents"))}
+               if goal_planned and meta.get("exclude_agents") else {}),
         )
+        deadline = time.monotonic() + wait_for_lease_seconds
+        while True:
+            try:
+                engine, metrics = await manager.recover_and_rehydrate(
+                    job_id=job_id,
+                    owner_id=owner,
+                    detected_interruption_at=detected_interruption_at,
+                    event_bridge=RuntimeEventBridge(event_bus, event_store=store),
+                )
+                break
+            except RuntimeError:
+                # Lease still held; recover_and_rehydrate changes nothing before taking it.
+                if time.monotonic() >= deadline:
+                    raise
+                await asyncio.sleep(min(5.0, max(0.1, deadline - time.monotonic())))
 
-        # Rebuild real Hermes execution bindings from sprint spec if available
+        # A usage limit hit before the restart still holds until its reset time.
+        from runtime.recovery import restore_provider_limits
+        restored = restore_provider_limits(events, engine.scheduler.capacity_registry)
+        if restored:
+            logger.info("Job %s: provider limits still in force after restart: %s", job_id, restored)
+
         sprint_id = None
-        if isinstance(engine.job.metadata, dict) and engine.job.metadata.get("sprint_id"):
+        if goal_planned:
+            # Planning interrupted before any task existed: plan again from the start.
+            needs_plan = engine.job.state in (JobState.CREATED, JobState.PLANNING) and not engine.graph.list_tasks()
+            model_client = None
+            if needs_plan and meta.get("planner_model"):
+                from runtime.planning.claude_client import claude_planner_client
+                model_client = claude_planner_client(meta["planner_model"], meta.get("planner_effort"))
+            planner, actor, verifier = self._goal_adapters(
+                job_id, meta, engine.event_bridge, limits, model_client=model_client,
+            )
+            engine.set_default_execution_adapter(actor)
+            engine.set_verifier(verifier)
+            engine.set_planner(planner)
+            if needs_plan:
+                engine.job.state = JobState.CREATED
+        # Rebuild real Hermes execution bindings from sprint spec if available
+        elif isinstance(engine.job.metadata, dict) and engine.job.metadata.get("sprint_id"):
             sprint_id = engine.job.metadata["sprint_id"]
         elif engine.job.job_id.startswith("run_"):
             parts = engine.job.job_id.split("_", 2)
@@ -900,14 +969,8 @@ class JobLauncher:
                 engine.set_verifier(verifier_adapter)
                 engine.set_planner(planner_adapter)
 
-        # Setup lease manager heartbeat using the exact same owner and register engine fencing
-        lease_mgr = JobLeaseManager(
-            lease_store=lease_store,
-            owner_id=owner,
-            on_lease_lost=lambda jid: engine.fence(f"Execution lease lost for job {jid}"),
-        )
-        task_hb = asyncio.create_task(lease_mgr._heartbeat_loop(job_id), name=f"lease-hb-{job_id}")
-        self._lease_managers[job_id] = (lease_mgr, task_hb, owner)
+        # Heartbeat the lease recovery took, under the same owner, and fence the engine if it is lost
+        await self._hold_lease(engine, owner)
 
         # Register engine with job_service
         job_service.register_engine(engine)
@@ -921,6 +984,37 @@ class JobLauncher:
             "recovery": metrics.to_dict(),
             "status": engine.job.state.value,
         }
+
+
+    async def resume_orphaned_goal_jobs(self, lease_wait_seconds: float = 90.0) -> List[str]:
+        """
+        After a restart, resumes every unfinished goal-planned job in the ledger. A job the previous
+        process held is resumed once its lease expires; one another live process holds is left alone.
+        Returns the job ids resumed.
+        """
+        from runtime.storage.config import get_global_event_store
+        from runtime.storage.projector import RuntimeStateProjector
+
+        store = get_global_event_store()
+        resumed: List[str] = []
+
+        async def _resume(job_id: str) -> None:
+            try:
+                await self.resume_async(job_id, wait_for_lease_seconds=lease_wait_seconds)
+                resumed.append(job_id)
+                logger.info("Resumed goal-planned job %s after restart", job_id)
+            except Exception as exc:  # noqa: BLE001 - one job must not stop the others
+                logger.warning("Could not resume job %s after restart: %s", job_id, exc)
+
+        candidates = []
+        for job_id in await store.list_unfinished_jobs():
+            if job_id in self._active_async_tasks or job_service.get_engine(job_id):
+                continue
+            meta = RuntimeStateProjector.project(await store.list_events(job_id)).job.metadata or {}
+            if meta.get("launch_mode") == "goal_planned" and "worktree_root" in meta:
+                candidates.append(job_id)
+        await asyncio.gather(*(_resume(j) for j in candidates))
+        return resumed
 
 
 job_launcher = JobLauncher()

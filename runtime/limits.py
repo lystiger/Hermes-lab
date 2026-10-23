@@ -16,6 +16,8 @@ class RuntimeLimits:
     max_evidence_files: int = 20
     max_evidence_bytes: int = 50000
     max_plan_repair_attempts: int = 1
+    # Engine cycles per job; a cycle is roughly one task finishing, so this sits well above max_tasks_per_job.
+    max_engine_steps: int = 500
 
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
@@ -34,4 +36,5 @@ class RuntimeLimits:
             max_evidence_files=int(data.get("max_evidence_files") or data.get("maxEvidenceFiles", 20)),
             max_evidence_bytes=int(data.get("max_evidence_bytes") or data.get("maxEvidenceBytes", 50000)),
             max_plan_repair_attempts=int(data.get("max_plan_repair_attempts") or data.get("maxPlanRepairAttempts", 1)),
+            max_engine_steps=int(data.get("max_engine_steps") or data.get("maxEngineSteps", 500)),
         )

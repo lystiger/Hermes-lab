@@ -19,6 +19,20 @@ This repository contains Hermes runtime and runner code, sprint specifications, 
 for existing runner configurations and prompt protocols. They refer to Hermes
 Runtime APIs and messages, not a separate LysStack execution service.
 
+## Durable Jobs
+
+Without `DATABASE_URL`, Hermes keeps its job ledger in memory and a restart loses every running job. With it, a restart resumes unfinished goal-planned jobs on its own:
+
+```bash
+docker compose up -d postgres                       # container hermes_postgres
+psql postgresql://postgres:postgres@localhost:5432/postgres -c "CREATE DATABASE hermes"
+DATABASE_URL=postgresql+asyncpg://postgres:postgres@localhost:5432/hermes .venv/bin/alembic upgrade head
+```
+
+The `lysomarchy-hermes-api` service reads `DATABASE_URL` from `~/.config/lysomarchy/hermes-stack.env`. The `hermes_lab` database belongs to the Postgres tests, so live jobs use `hermes`.
+
+On startup, Hermes waits for the previous process's job lease to expire (up to 60s), then rebuilds each job's agents from the settings it was launched with. Finished tasks are kept, interrupted ones run again from a clean worktree, and a usage limit that hasn't reset yet still pauses the job. A job interrupted while planning is planned again. Set `HERMES_AUTO_RESUME=0` to resume jobs by hand with `POST /jobs/{id}/resume`.
+
 ## Worktree Layout
 
 Sprint worktrees are organized per sprint, e.g. under `~/hermes-worktrees/hermes-lab-s03/` or `~/hermes-worktrees/hermes-lab-s04/`:

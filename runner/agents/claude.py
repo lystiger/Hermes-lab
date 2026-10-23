@@ -56,7 +56,7 @@ class ClaudeAdapter(AgentAdapter):
 
     def build_command(self, prompt, options, worktree=None):
         options = self.model_options(options)
-        allowed_tools = options.get("allowed_tools", ["Bash", "Edit", "Write"])
+        allowed_tools = options.get("allowed_tools", ["Bash", "Edit", "Write", "Skill"])
         if isinstance(allowed_tools, str):
             allowed_tools = [allowed_tools]
         extra_denials = options.get("disallowed_tools", [])

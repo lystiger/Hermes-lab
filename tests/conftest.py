@@ -19,6 +19,9 @@ os.environ.pop("LYSSTACK_CONTROL_URL", None)
 os.environ["HERMES_AGENT_MODELS"] = str(_SESSION_STATE / "agent_models.json")
 # The API resumes interrupted jobs on startup; a test app must not pick up other tests' jobs.
 os.environ["HERMES_AUTO_RESUME"] = "0"
+# The console lists jobs from the runs folder; test jobs (including those written by API
+# subprocesses, which inherit this) must never land in the real one.
+os.environ["HERMES_RUNS_ROOT"] = str(_SESSION_STATE / "hermes-runs")
 os.environ.pop("DATABASE_URL", None)
 os.environ.pop("HERMES_DATABASE_URL", None)
 

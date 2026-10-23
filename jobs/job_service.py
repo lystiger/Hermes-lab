@@ -102,7 +102,9 @@ class JobService:
         self._engines: Dict[str, Any] = {}
         self._persisted: Dict[str, str] = {}
         self._store = event_store
-        self.runs_root = runs_root or (Path(__file__).resolve().parent.parent / "hermes-runs")
+        # HERMES_RUNS_ROOT lets tests (and their API subprocesses) keep fake jobs out of the real folder.
+        self.runs_root = runs_root or Path(
+            os.environ.get("HERMES_RUNS_ROOT") or Path(__file__).resolve().parent.parent / "hermes-runs")
         self.sprints_root = sprints_root or (Path(__file__).resolve().parent.parent / "sprints")
         artifact_registry.add_allowed_root(self.runs_root)
         self._recover_recent_runs()

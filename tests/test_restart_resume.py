@@ -16,6 +16,7 @@ from runtime.recovery import restore_provider_limits
 from runtime.storage import config as storage_config
 from runtime.storage.in_memory_store import InMemoryRuntimeEventStore
 from runtime.storage.schema_registry import StoredRuntimeEvent
+from runtime.task_graph import TaskNode
 from tests.test_goal_route import make_repo, plan_json
 
 
@@ -197,3 +198,28 @@ def test_an_unchanged_job_says_so(tmp_path):
     path = adapter._ensure_worktree(tmp_path / "wt" / "v", branch="task/v", base_branch="main")
     assert "has not changed any file yet" in adapter._job_changes_section(path)
     subprocess.run(["git", "worktree", "remove", "--force", str(path)], cwd=repo, capture_output=True)
+
+
+def test_agent_prompts_carry_the_role_not_a_persona(tmp_path):
+    adapter = HermesActorAdapter(target_repo=tmp_path, worktree_root=tmp_path / "wt", run_dir=tmp_path / "run")
+    task = TaskNode(task_id="v", job_id="j", description="Check it", metadata={"role": "verifier"})
+
+    prompt = adapter.build_effective_prompt("Check it", current_agent="codex", role="verifier", task=task)
+
+    assert "AGENT IDENTITY" not in prompt and "Speaking Style" not in prompt
+    assert "Your role in this task: verifier." in prompt and "Do not modify any file" in prompt
+
+
+def test_the_planner_always_reads_the_projects_agent_instructions(tmp_path):
+    from runtime.planning.reconnaissance import RepositoryReconnaissance
+
+    (tmp_path / "AGENTS.md").write_text("# Rules\nRun ./scripts/verify before finishing.\n")
+    (tmp_path / "skills" / "n8n-workflow").mkdir(parents=True)
+    (tmp_path / "skills" / "n8n-workflow" / "SKILL.md").write_text("# n8n workflows\n")
+    for i in range(40):
+        (tmp_path / f"api_route_model_{i}.py").write_text("x = 1\n")
+
+    evidence = RepositoryReconnaissance.collect(tmp_path, "Add a Discord notifier", limits=RuntimeLimits(max_evidence_files=5))
+
+    paths = [f.path for f in evidence.files]
+    assert paths[0] == "AGENTS.md" and "skills/n8n-workflow/SKILL.md" in paths

@@ -229,7 +229,8 @@ class HermesActorAdapter(ActorAdapter):
         # Agents and verification run in this subfolder of each worktree; git stays at the root.
         self.target_subdir = normalize_target_subdir(target_subdir)
         self.logger = logger
-        self.persona_enabled = True
+        # Personas are console display only; in a headless prompt they cost tokens and add nothing.
+        self.persona_enabled = False
         self.controller_id = f"hermes.runtime:{self.job_id}"
         self._git_lock = repo_git_lock(self.target_repo)
         self.context_bundle = self._load_context_bundle()
@@ -724,6 +725,16 @@ class HermesActorAdapter(ActorAdapter):
             "--- END WHAT THIS JOB CHANGED ---"
         )
 
+    @staticmethod
+    def _role_section(role: Optional[str]) -> str:
+        role = role or "builder"
+        lines = ["--- HERMES TASK ROLE ---", f"Your role in this task: {role}."]
+        if role in ("verifier", "security"):
+            lines.append("Do not modify any file: check the work and report. Hermes fails a check that changes files.")
+        lines.append("Report the real state of the code and the real check results, including failures.")
+        lines.append("--- END TASK ROLE ---")
+        return "\n".join(lines)
+
     def build_effective_prompt(
         self,
         base_prompt: str,
@@ -745,6 +756,8 @@ class HermesActorAdapter(ActorAdapter):
                     parts.append(profile.persona.render_prompt_section(agent_id=profile.id, role=role or "operative"))
             except Exception as e:
                 logger.debug("Could not resolve persona for %s: %s", current_agent, e)
+        else:
+            parts.append(self._role_section(role or (task.metadata.get("role") if task else None)))
 
         if task:
             cont_sec = self.build_continuity_section(task, observations=observations, failure_history=failure_history)

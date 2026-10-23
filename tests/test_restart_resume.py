@@ -223,3 +223,41 @@ def test_the_planner_always_reads_the_projects_agent_instructions(tmp_path):
 
     paths = [f.path for f in evidence.files]
     assert paths[0] == "AGENTS.md" and "skills/n8n-workflow/SKILL.md" in paths
+
+
+def declare_checks(root, *checks):
+    import json as _json
+    (root / "hermes.json").write_text(_json.dumps({"checks": list(checks)}))
+
+
+def test_hermes_runs_the_projects_checks_for_a_verifier(tmp_path):
+    repo = make_repo(tmp_path / "repo")
+    adapter = HermesActorAdapter(target_repo=repo, worktree_root=tmp_path / "wt", run_dir=tmp_path / "run")
+    path = adapter._ensure_worktree(tmp_path / "wt" / "v", branch="task/v", base_branch="main")
+    declare_checks(path, {"name": "unit", "command": "echo 23 passed"}, {"name": "import", "command": "echo docker says no >&2; exit 3"})
+
+    section = adapter._project_checks_section(path)
+
+    assert "[PASS] unit" in section and "23 passed" in section
+    assert "[FAIL] import" in section and "exit 3" in section and "docker says no" in section
+    assert "Treat these results as proven" in section
+    subprocess.run(["git", "worktree", "remove", "--force", str(path)], cwd=repo, capture_output=True)
+
+
+def test_a_project_without_declared_checks_adds_nothing(tmp_path):
+    adapter = HermesActorAdapter(target_repo=tmp_path, worktree_root=tmp_path / "wt", run_dir=tmp_path / "run")
+    assert adapter._project_checks_section(tmp_path) == ""
+
+
+@pytest.mark.anyio
+async def test_the_final_gate_runs_declared_checks_when_none_are_configured(tmp_path):
+    from runtime.hermes_adapter import HermesVerifierAdapter
+
+    (tmp_path / "integration").mkdir()
+    declare_checks(tmp_path / "integration", {"name": "check", "command": "exit 1"})
+    verifier = HermesVerifierAdapter(verification_steps=[], working_dir=tmp_path, worktree_root=tmp_path)
+
+    from types import SimpleNamespace
+    result = await verifier.verify(job=SimpleNamespace(job_id="j"), graph=None, artifacts=[])
+
+    assert result.status.value != "passed" and result.checks[0].name == "check"

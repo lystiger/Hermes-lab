@@ -80,6 +80,41 @@ class MergeConflictError(RuntimeError):
         self.files = files
 
 
+PROJECT_CHECKS_FILE = "hermes.json"
+CHECK_OUTPUT_CHARS = 4000
+
+
+def load_project_checks(root: Path) -> List[Dict[str, Any]]:
+    """
+    The checks a project declares in hermes.json ({"checks": [{"name", "command", "timeout_seconds"}]}).
+    Hermes runs them itself, outside any agent sandbox, so a verifier never has to prove them alone.
+    """
+    try:
+        data = json.loads((Path(root) / PROJECT_CHECKS_FILE).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return []
+    checks = data.get("checks") if isinstance(data, dict) else None
+    return [c for c in checks or [] if isinstance(c, dict) and (c.get("command") or c.get("cmd"))]
+
+
+def run_project_checks(root: Path, checks: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Runs declared checks in root; each result has name, command, exit_code and the end of its output."""
+    results = []
+    for check in checks:
+        command = check.get("command") or check.get("cmd")
+        try:
+            proc = subprocess.run(command, cwd=str(root), shell=isinstance(command, str), capture_output=True,
+                                  text=True, timeout=check.get("timeout_seconds", 900))
+            code, output = proc.returncode, (proc.stdout + proc.stderr).strip()
+        except subprocess.TimeoutExpired:
+            code, output = None, f"timed out after {check.get('timeout_seconds', 900)}s"
+        except OSError as exc:
+            code, output = None, str(exc)
+        results.append({"name": check.get("name") or str(command), "command": command, "exit_code": code,
+                        "output": output[-CHECK_OUTPUT_CHARS:]})
+    return results
+
+
 class ContextSpecError(ValueError):
     """Raised when a sprint specification declares an unusable context bundle."""
 
@@ -444,6 +479,8 @@ class HermesActorAdapter(ActorAdapter):
             self.worktree_root.mkdir(parents=True, exist_ok=True)
             if not self._is_worktree_root(integration_dir):
                 self._ensure_worktree(integration_dir, branch=self.target_branch, base_branch=self.base_ref)
+            # Hermes runs the project's checks here at the job's end, so they need its virtualenv too.
+            self._link_virtualenvs(integration_dir)
 
             if not self._is_worktree_root(integration_dir):
                 raise WorktreeError(
@@ -733,6 +770,23 @@ class HermesActorAdapter(ActorAdapter):
             lines.append("Do not modify any file: check the work and report. Hermes fails a check that changes files.")
         lines.append("Report the real state of the code and the real check results, including failures.")
         lines.append("--- END TASK ROLE ---")
+        return "\n".join(lines)
+
+    def _project_checks_section(self, worktree_path: Path) -> str:
+        """The project's declared checks, run by Hermes in this worktree, for a verifier to judge."""
+        root = subdir_path(worktree_path, self.target_subdir)
+        checks = load_project_checks(root)
+        if not checks:
+            return ""
+        lines = ["\n\n--- CHECKS HERMES RAN ---",
+                 f"Hermes ran this project's declared checks ({PROJECT_CHECKS_FILE}) on this exact code, outside "
+                 "your sandbox. Treat these results as proven. Do not report a check as UNPROVEN because your "
+                 "sandbox cannot run it (for example Docker or network); judge it from this output."]
+        for result in run_project_checks(root, checks):
+            status = "PASS" if result["exit_code"] == 0 else "FAIL"
+            lines.append(f"\n[{status}] {result['name']} (`{result['command']}`, exit {result['exit_code']})\n"
+                         f"{result['output'] or '(no output)'}")
+        lines.append("--- END CHECKS HERMES RAN ---")
         return "\n".join(lines)
 
     def build_effective_prompt(
@@ -1032,6 +1086,7 @@ class HermesActorAdapter(ActorAdapter):
             base_prompt += self._fallback_failure_section(task)
             if role in ("verifier", "security"):
                 base_prompt += self._job_changes_section(worktree_path)
+                base_prompt += self._project_checks_section(worktree_path)
 
             # Gather task observations and prior failure telemetry for continuity
             obs_reg = getattr(self, "observation_registry", None)
@@ -1523,7 +1578,10 @@ class HermesVerifierAdapter(VerifierAdapter):
         Executes verification checks against the authoritative integration worktree.
         """
         target_dir = self._resolve_target_dir()
-        if not self.verification_steps:
+        # Without configured steps, the project's own declared checks are the gate (read now, so a job
+        # that adds or changes them is held to the new ones).
+        steps = self.verification_steps or load_project_checks(subdir_path(target_dir, self.target_subdir))
+        if not steps:
             return VerificationResult(
                 status=VerificationStatus.PASSED,
                 summary="No verification checks configured; verified by default",
@@ -1544,7 +1602,7 @@ class HermesVerifierAdapter(VerifierAdapter):
                 "chromium unavailable", "browser unavailable",
             ))
 
-        for step in self.verification_steps:
+        for step in steps:
             check_name = step.get("name", "verification_check")
             raw_cmd = step.get("command") or step.get("cmd")
             if not raw_cmd:

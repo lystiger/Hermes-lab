@@ -300,6 +300,11 @@ class ReactiveScheduler:
             score=best_score,
         )
 
+    @staticmethod
+    def _builder_actors(graph: TaskGraph) -> set:
+        return {t.assigned_actor for t in graph.list_tasks()
+                if t.assigned_actor and (t.metadata or {}).get("role") == "builder"}
+
     async def schedule_ready_tasks(
         self,
         graph: TaskGraph,
@@ -322,6 +327,12 @@ class ReactiveScheduler:
                 continue
 
             decision = self.match_actor_for_task(task)
+            # A verifier should not check its own work: prefer an agent that built nothing in this job.
+            builders = self._builder_actors(graph) if (task.metadata or {}).get("role") == "verifier" else set()
+            if decision.actor_id in builders:
+                independent = self.match_actor_for_task(task, excluded_actors=sorted(builders))
+                if independent.dispatched and independent.actor_id:
+                    decision = independent
             if not decision.dispatched or not decision.actor_id:
                 if decision.reason != "no_capable_actor":
                     # Temporarily unavailable: task remains READY / deferred

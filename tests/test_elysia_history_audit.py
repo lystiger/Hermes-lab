@@ -92,6 +92,25 @@ def test_simulated_run_is_flagged_and_needs_review(tmp_path):
     assert run["family_id"] in split["excluded_needs_review"]
 
 
+@pytest.mark.parametrize("flag", ["dry_run", "dryRun", "simulated", "actor_dry_run"])
+@pytest.mark.parametrize("value", [True, False])
+def test_nested_task_simulation_flags_control_split_exclusion(tmp_path, flag, value):
+    root = tmp_path / "roots" / "a"
+    run_id = "run_20260101_100000_nested01"
+    _write_run(root, run_id, extra={
+        "tasks": [{"id": "task-a", "role": "builder", "metadata": {flag: value}}],
+    })
+
+    _, manifest, split = _run_audit(tmp_path, [root])
+
+    run = _run_by_id(manifest, run_id)
+    assert run["flags"]["simulated"] is value
+    assert ("simulated_run" in run["reasons"]) is value
+    assert (run["family_id"] in split["excluded_needs_review"]) is value
+    included = split["development"] + split["held_out"]
+    assert (run["family_id"] in included) is not value
+
+
 def test_retry_family_stays_together(tmp_path):
     root = tmp_path / "roots" / "a"
     _write_run(root, "run_20260101_100000_rt01", status="FAILED")

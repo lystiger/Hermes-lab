@@ -149,7 +149,8 @@ def scan_roots(roots):
                 "completedAt": completed,
                 "executing": status not in TERMINAL_STATUSES or not completed,
                 "simulated": _is_dry(job) or _is_dry(job.get("metadata"))
-                or any(_is_dry(item) for item in (job.get("tasks") or [])),
+                or any(_is_dry(item) or (isinstance(item, dict) and _is_dry(item.get("metadata")))
+                       for item in (job.get("tasks") or [])),
                 "graph": _task_graph(job),
                 "retry_strings": sorted({s for entry in (job.get("retryHistory") or [])
                                          for s in _strings(entry)}),

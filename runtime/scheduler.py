@@ -301,9 +301,10 @@ class ReactiveScheduler:
         )
 
     @staticmethod
-    def _builder_actors(graph: TaskGraph) -> set:
+    def _author_actors(graph: TaskGraph) -> set:
+        # Any non-verifier task may change files: the planner sometimes labels builders "hardener".
         return {t.assigned_actor for t in graph.list_tasks()
-                if t.assigned_actor and (t.metadata or {}).get("role") == "builder"}
+                if t.assigned_actor and (t.metadata or {}).get("role") != "verifier"}
 
     async def schedule_ready_tasks(
         self,
@@ -327,8 +328,8 @@ class ReactiveScheduler:
                 continue
 
             decision = self.match_actor_for_task(task)
-            # A verifier should not check its own work: prefer an agent that built nothing in this job.
-            builders = self._builder_actors(graph) if (task.metadata or {}).get("role") == "verifier" else set()
+            # A verifier should not check its own work: prefer an agent that wrote nothing in this job.
+            builders = self._author_actors(graph) if (task.metadata or {}).get("role") == "verifier" else set()
             if decision.actor_id in builders:
                 independent = self.match_actor_for_task(task, excluded_actors=sorted(builders))
                 if independent.dispatched and independent.actor_id:

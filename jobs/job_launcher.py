@@ -503,7 +503,10 @@ class JobLauncher:
             target_subdir=subdir,
             default_permissions=meta.get("permissions"),
             default_timeout_seconds=meta.get("task_timeout_seconds") or 300,
-            default_agent_options={"max_turns": agent_max_turns} if agent_max_turns else None,
+            default_agent_options={
+                **({"max_turns": agent_max_turns} if agent_max_turns else {}),
+                **({"dangerously_skip_permissions": True} if meta.get("antigravity_skip_permissions") else {}),
+            } or None,
         )
         verifier = HermesVerifierAdapter(verification_steps=[], working_dir=target_repo, worktree_root=worktree_root)
         return planner, actor, verifier
@@ -552,6 +555,7 @@ class JobLauncher:
         task_timeout_seconds: int = 300,
         exclude_agents: Optional[List[str]] = None,
         agent_max_turns: Optional[int] = None,
+        antigravity_skip_permissions: bool = False,
         planner_model: Optional[str] = None,
         planner_effort: Optional[str] = None,
     ) -> Dict[str, Any]:
@@ -593,6 +597,7 @@ class JobLauncher:
             "permissions": permissions,
             "task_timeout_seconds": task_timeout_seconds,
             "agent_max_turns": agent_max_turns,
+            "antigravity_skip_permissions": antigravity_skip_permissions,
             "exclude_agents": list(exclude_agents or []),
             "allow_heuristic_fallback": allow_heuristic_fallback,
             "limits": runtime_limits.to_dict(),

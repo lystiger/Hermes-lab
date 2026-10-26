@@ -28,10 +28,10 @@ def setup(actors):
     return ReactiveScheduler(capability_registry=caps, default_actor_concurrency=1), exec_mgr
 
 
-def job(verify_role="verifier"):
+def job(verify_role="verifier", build_role="builder"):
     graph = TaskGraph(job_id="job_verify")
     graph.add_task(TaskNode(task_id="build", required_capabilities=["implementation"],
-                            metadata={"role": "builder"}))
+                            metadata={"role": build_role}))
     verify = TaskNode(task_id="verify", required_capabilities=["verification", "testing.unit"],
                       metadata={"role": verify_role})
     verify.dependencies = ["build"]
@@ -70,3 +70,12 @@ async def test_other_roles_keep_the_best_match():
     graph = job(verify_role="hardener")
     await run_all(scheduler, exec_mgr, graph)
     assert graph.get_task("verify").assigned_actor == "antigravity"
+
+
+@pytest.mark.anyio
+async def test_verifier_skips_a_builder_labelled_hardener():
+    scheduler, exec_mgr = setup({"antigravity": BUILDER_CAPS, "codex": ["verification", "testing.unit"]})
+    graph = job(build_role="hardener")
+    await run_all(scheduler, exec_mgr, graph)
+    assert graph.get_task("build").assigned_actor == "antigravity"
+    assert graph.get_task("verify").assigned_actor == "codex"

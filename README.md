@@ -1,17 +1,86 @@
 # Hermes Runtime
 
-The authoritative engineering execution runtime for job orchestration, task scheduling, agent execution, worktrees, verification, event history, recovery, and provider capacity. LysStack supplies bounded engineering context, policy, and decisions; it does not execute agents or schedule runtime jobs. LysControl is the operator-facing UI and consumes Hermes through REST/SSE.
+Hermes runs a team of coding agents (Claude Code, Codex, Antigravity) on one engineering goal and
+only lets their work through after it has been verified. You give it a goal and a Git repository.
+A planner model splits the goal into a task graph. Each task runs in its own Git worktree, an
+independent agent and the project's own checks verify it, and a passing job ends in a pull request.
 
-## Repository Structure
+## Why
 
-This repository contains Hermes runtime and runner code, sprint specifications, prompts, and reports. Sprint specifications can target this repository directly or configure `target_repo` to orchestrate changes across external local Git repositories on Linux, WSL, or native Windows.
+Coding agents write code quickly, but on their own they cannot be trusted with a repository: they
+drift from the goal, mark their own work as done, and lose state when a process dies. Hermes is the
+harness around them:
 
-### Key Capabilities
+- **Planning:** a planner model turns a goal into tasks with roles and dependencies, and the runtime assigns agents by capability.
+- **Isolation:** every agent works in its own worktree; only verified work is merged into the job's integration branch.
+- **Verification:** the project's declared checks run outside any agent sandbox. A verifier agent that did not build the work reports PASS, FAIL or UNPROVEN, and a failure triggers a bounded repair cycle.
+- **Durability:** the job ledger lives in Postgres. After a restart, unfinished jobs resume on their own, and a provider usage limit pauses a job instead of failing it.
+- **Operator view:** a React console streams jobs, tasks, agents and events over REST/SSE.
 
-- **Multi-Agent Orchestration**: Pluggable agent adapters ([`Antigravity`](file:///home/lystiger/hermes-lab/runner/agents/antigravity.py), [`Claude`](file:///home/lystiger/hermes-lab/runner/agents/claude.py), [`Codex`](file:///home/lystiger/hermes-lab/runner/agents/codex.py)) running isolated phases across dedicated Git worktrees.
-- **Execution Backends**: `subprocess` runtime alongside one-shot and sessionful `herdr` agent lifecycle backends.
-- **External Repository & Platform Portability**: Clean separation between Hermes control root (`control_root`) and target repositories (`target_repo`) on Linux without cross-kernel path coupling.
-- **Generic Verification & Playwright Support**: Declarative, ordered verification pipeline supporting arbitrary test suites (Playwright E2E browser tests, pytest, uv, npm, etc.) with per-step timeouts, working directories, and sanitized reporting.
+## Architecture
+
+```mermaid
+flowchart LR
+    Goal["Goal + target repo"] --> API["FastAPI API<br/>POST /jobs/goal"]
+    API --> Planner["Planner model<br/>(task graph)"]
+    Planner --> Engine["Reactive job engine<br/>scheduler · replanner"]
+    Engine --> Agents["Agent runs<br/>Claude · Codex · Antigravity<br/>one Git worktree each"]
+    Agents --> Verify["Verification<br/>project checks + independent verifier"]
+    Verify -- "FAIL: repair" --> Engine
+    Verify -- "PASS" --> PR["Integration branch → pull request"]
+    Engine <--> DB[("Postgres<br/>job ledger")]
+    API -- "REST / SSE" --> Console["React console"]
+    MCP["Read-only MCP tool server"] -. "briefs, job status" .-> Planner
+```
+
+The orchestrator agent gets its tools from a read-only MCP (stdio) server
+([`orchestrator/tools_server.py`](orchestrator/tools_server.py)). It can read the project briefs in
+LysStack and the job and capacity status in Hermes, but it cannot start, cancel or merge a run. The full
+design is in [`architecture.md`](architecture.md).
+
+## Quick start
+
+Requires Python 3.12, Docker, Git, and the agent CLIs you want to run (`claude`, `codex`, `agy`).
+
+```bash
+python -m venv .venv && .venv/bin/pip install -r requirements.txt
+.venv/bin/python -m pytest -q                 # 1004 tests
+
+docker compose up -d postgres                 # optional: durable job ledger
+.venv/bin/alembic upgrade head
+.venv/bin/uvicorn main:app --port 8000
+```
+
+Dry-run a goal job first to check the plan without running any agent:
+
+```bash
+curl -X POST localhost:8000/jobs/goal -H 'content-type: application/json' -d '{
+  "goal": "Add a /health endpoint with a test",
+  "targetRepo": "my-service",
+  "dryRun": true
+}'
+curl localhost:8000/jobs/<job_id>/tasks
+```
+
+`targetRepo` must be a Git repository directly under `HERMES_GOAL_REPOS_ROOT` (default `~/Projects`).
+A project can declare its checks in a `hermes.json` at its root
+(`{"checks": [{"name": "check", "command": "./scripts/check", "timeout_seconds": 900}]}`). Hermes runs
+them before each verification and again at the final gate.
+
+Console: `cd console && npm ci && VITE_LYSSTACK_API_URL=http://localhost:8000 npm run dev` (see
+[`console/README.md`](console/README.md)).
+
+## Key capabilities
+
+- **Multi-agent orchestration:** pluggable agent adapters ([`Antigravity`](runner/agents/antigravity.py), [`Claude`](runner/agents/claude.py), [`Codex`](runner/agents/codex.py)) running isolated phases across dedicated Git worktrees.
+- **Execution backends:** a `subprocess` runtime alongside one-shot and sessionful `herdr` agent lifecycle backends.
+- **External repositories:** the Hermes control root (`control_root`) is kept separate from target repositories (`target_repo`).
+- **Generic verification:** a declarative, ordered verification pipeline for any test suite (Playwright E2E, pytest, uv, npm) with per-step timeouts and working directories, and sanitized reports.
+
+## Tests
+
+`python -m pytest -q` runs the whole suite (1004 passed, 6 skipped on 2026-10-28). GitHub Actions runs it on
+every push and pull request. Postgres tests use a separate `hermes_lab_test` database.
 
 ## Compatibility Names
 
@@ -68,7 +137,7 @@ Target projects can declare an ordered `verification` pipeline in the sprint spe
 - **Isolated Logging & Sanitization**: Stdout and stderr logs are preserved under `~/hermes-runs/`, while sanitized reports (`--export-report`) strip sensitive runtime metadata and tokens.
 - **Backwards Compatibility**: Specs omitting `verification` fall back to the legacy isolated venv / pytest workflow.
 
-## Sprint History
+## Sprint history
 
 - **Sprint 01**: Initial FastAPI health service scaffolding and endpoint implementation (`/health` and `/version`). Merged into `main`. Old worktrees (`~/hermes-lab-agy` and `~/hermes-lab-claude`) cleaned up.
 - **Sprint 02**: Worktrees initialized under `~/hermes-worktrees/hermes-lab-s02/`.

@@ -82,3 +82,22 @@ class TestVerifierRunsInSubdir(unittest.IsolatedAsyncioTestCase):
             res = await self._verify(root, steps, "")
 
             self.assertEqual(res.status, VerificationStatus.PASSED)
+
+
+def test_a_goal_job_verifies_with_the_subfolders_checks(tmp_path):
+    import asyncio
+    import json
+
+    from jobs.job_launcher import JobLauncher
+    from runtime.limits import RuntimeLimits
+
+    (tmp_path / "integration" / "console").mkdir(parents=True)
+    (tmp_path / "integration" / "console" / "hermes.json").write_text(
+        json.dumps({"checks": [{"name": "console-check", "command": "exit 1"}]}))
+    meta = {"target_repo": str(tmp_path), "worktree_root": str(tmp_path), "runs_root": str(tmp_path / "runs"),
+            "target_subdir": "console"}
+    _, _, verifier = JobLauncher()._goal_adapters("job_sub", meta, event_bridge=None, limits=RuntimeLimits())
+
+    result = asyncio.run(verifier.verify(job=SimpleNamespace(job_id="job_sub"), graph=None, artifacts=[]))
+
+    assert [c.name for c in result.checks] == ["console-check"]

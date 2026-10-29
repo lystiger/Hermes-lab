@@ -511,7 +511,7 @@ class JobLauncher:
         )
         verifier = HermesVerifierAdapter(
             verification_steps=[], working_dir=target_repo, worktree_root=worktree_root,
-            allow_unchecked=bool(meta.get("dry_run")),
+            target_subdir=subdir, allow_unchecked=bool(meta.get("dry_run")),
         )
         return planner, actor, verifier
 
@@ -966,11 +966,13 @@ class JobLauncher:
                     base_ref=base_ref,
                     target_branch=target_branch,
                     event_bridge=engine.event_bridge,
+                    target_subdir=normalize_target_subdir(spec.get("target_subdir")),
                 )
                 verifier_adapter = HermesVerifierAdapter(
                     verification_steps=spec.get("verification_steps") or spec.get("verification", []),
                     working_dir=target_repo,
                     worktree_root=worktree_root,
+                    target_subdir=normalize_target_subdir(spec.get("target_subdir")),
                 )
                 planner_adapter = HermesPlannerAdapter(limits=engine.limits)
 

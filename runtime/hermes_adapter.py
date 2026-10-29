@@ -1548,8 +1548,11 @@ class HermesVerifierAdapter(VerifierAdapter):
         working_dir: Optional[Path] = None,
         worktree_root: Optional[Path] = None,
         target_subdir: str = "",
+        allow_unchecked: bool = False,
     ):
         self.target_subdir = normalize_target_subdir(target_subdir)
+        # Only a dry run, which changes nothing, may pass without checks.
+        self.allow_unchecked = allow_unchecked
         self.verifier_id = verifier_id
         self.verification_steps = verification_steps or []
         self.working_dir = Path(working_dir).resolve() if working_dir else Path.cwd()
@@ -1582,10 +1585,18 @@ class HermesVerifierAdapter(VerifierAdapter):
         # that adds or changes them is held to the new ones).
         steps = self.verification_steps or load_project_checks(subdir_path(target_dir, self.target_subdir))
         if not steps:
+            if self.allow_unchecked:
+                return VerificationResult(
+                    status=VerificationStatus.PASSED,
+                    summary="Dry run: no verification checks configured",
+                    checks=[],
+                )
+            # Nothing to check is not a pass: the job blocks until the project declares its checks.
             return VerificationResult(
-                status=VerificationStatus.PASSED,
-                summary="No verification checks configured; verified by default",
+                status=VerificationStatus.FAILED,
+                summary="No verification checks configured: declare them in hermes.json, then resume the job",
                 checks=[],
+                blocked_by="environment",
             )
 
         checks_results: List[VerificationCheck] = []

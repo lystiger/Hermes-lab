@@ -354,6 +354,7 @@ class JobLauncher:
             working_dir=target_repo,
             worktree_root=worktree_root,
             target_subdir=target_subdir,
+            allow_unchecked=bool(dry_run or skip_agent_exec),
         )
 
         runtime_limits = RuntimeLimits(
@@ -508,7 +509,10 @@ class JobLauncher:
                 **({"dangerously_skip_permissions": True} if meta.get("antigravity_skip_permissions") else {}),
             } or None,
         )
-        verifier = HermesVerifierAdapter(verification_steps=[], working_dir=target_repo, worktree_root=worktree_root)
+        verifier = HermesVerifierAdapter(
+            verification_steps=[], working_dir=target_repo, worktree_root=worktree_root,
+            allow_unchecked=bool(meta.get("dry_run")),
+        )
         return planner, actor, verifier
 
     async def _hold_lease(self, engine: ReactiveJobEngine, owner: Optional[str] = None, wait_seconds: float = 0.0) -> bool:

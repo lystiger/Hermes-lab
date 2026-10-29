@@ -44,7 +44,7 @@ Requires Python 3.12, Docker, Git, and the agent CLIs you want to run (`claude`,
 
 ```bash
 python -m venv .venv && .venv/bin/pip install -r requirements.txt
-.venv/bin/python -m pytest -q                 # 1004 tests
+.venv/bin/python -m pytest -q                 # 1019 tests
 
 docker compose up -d postgres                 # optional: durable job ledger
 .venv/bin/alembic upgrade head
@@ -79,7 +79,7 @@ Console: `cd console && npm ci && VITE_LYSSTACK_API_URL=http://localhost:8000 np
 
 ## Tests
 
-`python -m pytest -q` runs the whole suite (1004 passed, 6 skipped on 2026-10-28). GitHub Actions runs it on
+`python -m pytest -q` runs the whole suite (1019 passed, 6 skipped on 2026-10-29). GitHub Actions runs it on
 every push and pull request. Postgres tests use a separate `hermes_lab_test` database.
 
 ## Compatibility Names

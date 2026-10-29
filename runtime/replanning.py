@@ -172,6 +172,9 @@ def _fallback_metadata(failed_task: TaskNode) -> Dict[str, Any]:
     inherited["fallback_errors"] = list((failed_task.metadata or {}).get("fallback_errors") or []) + [
         {"task_id": failed_task.task_id, "error": _error_text(failed_task.error)}
     ]
+    # An agent that changed nothing would likely change nothing again; the scheduler skips it when it can.
+    if failed_task.assigned_actor and _error_text(failed_task.error).startswith("FAILED_NO_CHANGES"):
+        inherited["avoid_actors"] = sorted(set(inherited.get("avoid_actors") or []) | {failed_task.assigned_actor})
     return inherited
 
 

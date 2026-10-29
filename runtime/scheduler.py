@@ -300,6 +300,12 @@ class ReactiveScheduler:
             score=best_score,
         )
 
+    @staticmethod
+    def _author_actors(graph: TaskGraph) -> set:
+        # Any non-verifier task may change files: the planner sometimes labels builders "hardener".
+        return {t.assigned_actor for t in graph.list_tasks()
+                if t.assigned_actor and (t.metadata or {}).get("role") != "verifier"}
+
     async def schedule_ready_tasks(
         self,
         graph: TaskGraph,
@@ -322,6 +328,27 @@ class ReactiveScheduler:
                 continue
 
             decision = self.match_actor_for_task(task)
+            # A verifier should not check its own work: prefer an agent that wrote nothing in this job.
+            builders = self._author_actors(graph) if (task.metadata or {}).get("role") == "verifier" else set()
+            if decision.actor_id in builders:
+                independent = self.match_actor_for_task(task, excluded_actors=sorted(builders))
+                if independent.dispatched and independent.actor_id:
+                    decision = independent
+            # A fallback skips agents that made no changes on this work, unless it is pinned to a backend.
+            avoid = (task.metadata or {}).get("avoid_actors") or []
+            pinned = any((task.metadata or {}).get(k) for k in ("execution_backend", "backend", "options"))
+            if decision.actor_id in avoid and not pinned:
+                alt_actor = self.reroute_policy.find_alternative_actor(task, excluded_actors=avoid)
+                if alt_actor and self.is_actor_available(alt_actor):
+                    decision = DispatchDecision(
+                        task_id=task.task_id,
+                        actor_id=alt_actor,
+                        dispatched=True,
+                        reason=f"Pre-dispatch rerouted from '{decision.actor_id}' (made no changes) to '{alt_actor}'",
+                        required_capabilities=task.required_capabilities,
+                        matched_capabilities=decision.matched_capabilities,
+                        score=9.0,
+                    )
             if not decision.dispatched or not decision.actor_id:
                 if decision.reason != "no_capable_actor":
                     # Temporarily unavailable: task remains READY / deferred

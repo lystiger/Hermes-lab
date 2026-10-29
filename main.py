@@ -529,6 +529,9 @@ class CreateGoalJobPayload(BaseModel):
     excludeAgents: List[str] = Field(default_factory=list, max_length=10)
     # Turn cap per agent run. Every turn re-reads the conversation, so turns drive token use.
     agentMaxTurns: int = Field(default=20, ge=3, le=60)
+    # Run Antigravity with --dangerously-skip-permissions instead of the allowedCommands list.
+    # It can then run any command as this user; review the PR before merging.
+    antigravitySkipPermissions: bool = False
 
 
 GOAL_REPOS_ROOT = Path(os.environ.get("HERMES_GOAL_REPOS_ROOT", Path.home() / "Projects"))
@@ -564,6 +567,7 @@ async def create_goal_job(payload: CreateGoalJobPayload):
             task_timeout_seconds=payload.taskTimeoutSeconds,
             exclude_agents=payload.excludeAgents or None,
             agent_max_turns=payload.agentMaxTurns,
+            antigravity_skip_permissions=payload.antigravitySkipPermissions,
             planner_model=payload.plannerModel,
             planner_effort=payload.plannerEffort,
         ) | {"targetRepo": str(repo), "plannerModel": payload.plannerModel, "plannerEffort": payload.plannerEffort}

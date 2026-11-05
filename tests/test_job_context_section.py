@@ -231,6 +231,92 @@ def test_budget_bound_9_tasks_2000_char_goal():
     assert "t0_subtask:" not in prompt_after
 
 
+def test_builder_task_prompt_budget_against_pre_change_baseline():
+    """
+    For a builder task in a job with 9 tasks and a 2,000-character goal,
+    the new prompt is no more than 2,500 characters longer than today's prompt
+    for the same task and job, excluding the task description.
+    Baseline is measured from the pre-change code.
+    """
+    long_goal = ("Optimize database query performance and cache layer across all services. " * 35)[:2000]
+    assert len(long_goal) == 2000
+
+    tasks = [
+        TaskNode(
+            task_id=f"t{i}_subtask",
+            description=(
+                f"Subtask {i} description detailing performance optimization and schema changes for module {i}. "
+                "Detailed specifications and criteria."
+            ),
+            status=TaskStatus.PENDING if i > 3 else (TaskStatus.RUNNING if i == 3 else TaskStatus.SUCCEEDED),
+            metadata={"role": "builder" if i == 0 else "operative"},
+        )
+        for i in range(9)
+    ]
+    builder_task = tasks[0]
+
+    adapter = HermesActorAdapter()
+
+    # Pre-change baseline prompt for a builder task:
+    # Before the prompt enhancements, HermesActorAdapter._prepare_effective_prompt:
+    # 1. Did not assemble any job context section (no goal, no sibling tasks).
+    # 2. Did not include builder project checks section from hermes.json.
+    # 3. Assembled role section (builder), continuity section (if any), task description (base_prompt),
+    #    context bundle (if any), and workspace rules.
+    baseline_parts = [
+        adapter._role_section("builder"),
+    ]
+    cont_sec = adapter.build_continuity_section(builder_task)
+    if cont_sec:
+        baseline_parts.append(cont_sec)
+    baseline_parts.append(builder_task.description + adapter._fallback_failure_section(builder_task))
+    if adapter.context_bundle:
+        baseline_parts.append(adapter.context_bundle)
+    baseline_parts.append(
+        "--- HERMES WORKSPACE RULES ---\n"
+        "Never run git (no status, add, commit, log or branch). Edit files in place; Hermes commits and "
+        "merges your changes after you finish.\n"
+        "--- END WORKSPACE RULES ---"
+    )
+    baseline_prompt = "\n\n".join(baseline_parts)
+
+    # New prompt for the builder task in the 9-task job with 2,000-character goal
+    new_prompt = adapter._prepare_effective_prompt(
+        task=builder_task,
+        actor_id="antigravity",
+        role="builder",
+        job_goal=long_goal,
+        tasks=tasks,
+    )
+
+    # Measure prompt length delta excluding the task description
+    added_chars_raw = len(new_prompt) - len(baseline_prompt)
+    added_chars_excluding_desc = (
+        len(new_prompt.replace(builder_task.description, ""))
+        - len(baseline_prompt.replace(builder_task.description, ""))
+    )
+
+    assert added_chars_excluding_desc <= 2500, (
+        f"Added {added_chars_excluding_desc} characters excluding task description, exceeding 2500 budget"
+    )
+    assert added_chars_raw <= 2500, f"Raw added {added_chars_raw} chars exceeds 2500 budget"
+    assert added_chars_excluding_desc > 0, "Expected new prompt to include job context"
+
+    # Structure checks
+    assert new_prompt.startswith("--- JOB CONTEXT ---")
+    assert "--- END JOB CONTEXT ---" in new_prompt
+    assert "--- HERMES TASK ROLE ---" in new_prompt
+    assert "Your role in this task: builder." in new_prompt
+    assert "--- HERMES WORKSPACE RULES ---" in new_prompt
+
+    # Ensure all 8 sibling tasks are in the prompt
+    for i in range(1, 9):
+        assert f"t{i}_subtask:" in new_prompt
+
+    # Ensure current builder task is excluded from sibling list
+    assert "t0_subtask:" not in new_prompt[:new_prompt.index("--- HERMES TASK ROLE ---")]
+
+
 def test_prepare_effective_prompt_resolves_context_engine():
     """_prepare_effective_prompt automatically extracts goal and tasks from engine in context."""
     from unittest.mock import MagicMock

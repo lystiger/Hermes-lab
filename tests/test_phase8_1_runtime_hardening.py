@@ -61,7 +61,9 @@ from jobs.job_launcher import job_launcher
 
 @pytest.fixture
 def client():
-    return TestClient(app)
+    # One event loop for the whole test: a job's engine runs as a task on it and is cancelled if it closes.
+    with TestClient(app) as c:
+        yield c
 
 
 # -----------------------------------------------------------------------------

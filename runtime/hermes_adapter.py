@@ -22,6 +22,7 @@ import json
 import logging
 import os
 from pathlib import Path, PureWindowsPath
+import re
 import shutil
 import subprocess
 import sys
@@ -700,6 +701,52 @@ class HermesActorAdapter(ActorAdapter):
         sections.append("--- END OPERATIONAL MESSAGES ---")
         return "\n\n".join(sections)
 
+    @staticmethod
+    def _format_completion_files(files: Sequence[str], limit: int = 20) -> str:
+        """Paths from `git status --porcelain` lines, the first `limit` named, then "and N more"."""
+        paths = list(dict.fromkeys(f.split(maxsplit=1)[-1].strip('"') for f in files if f and f.strip()))
+        if len(paths) <= limit:
+            return ", ".join(paths)
+        return f"{', '.join(paths[:limit])}, and {len(paths) - limit} more"
+
+    @classmethod
+    def is_completion_boilerplate(cls, obs: Any) -> bool:
+        """
+        Returns True if an observation's only content is routine completion boilerplate,
+        such as a dry run completion notice or a bare exit code notice with no files or commit.
+        """
+        if isinstance(obs, dict):
+            content = str(obs.get("content", ""))
+            meta = obs.get("metadata") or {}
+        elif hasattr(obs, "content"):
+            content = str(obs.content)
+            meta = getattr(obs, "metadata", {}) or {}
+        else:
+            content = str(obs)
+            meta = {}
+
+        text = content.strip()
+        if not text:
+            return True
+
+        # Dry-run execution boilerplate with no additional useful content
+        if re.search(
+            r"^(?:(?:Agent|Task)(?:\s+\S+)?\s+)?completed dry-run execution(?:\s+by\s+\S+|\s+of\s+task\s+\S+)?\.?$",
+            text,
+            re.IGNORECASE,
+        ):
+            return True
+
+        # Bare execution completion with only exit code (no commit sha, no changed files)
+        if re.search(
+            r"^(?:(?:Agent|Task)(?:\s+\S+)?\s+|Agent\s+)?completed\s+(?:task\s+\S+\s+)?with exit code\s+\d+\.?$",
+            text,
+            re.IGNORECASE,
+        ):
+            return True
+
+        return False
+
     def build_continuity_section(
         self,
         task: TaskNode,
@@ -709,30 +756,34 @@ class HermesActorAdapter(ActorAdapter):
         """
         Renders execution continuity context across retries, reroutes, and recoveries.
         Ensures model progress, discoveries, and failure lessons are preserved.
+        Omits completion boilerplate and omits the section entirely when nothing useful remains.
         """
-        lines = []
-        is_retry = task.attempt > 0
+        body_lines = []
         has_reroute = bool(task.metadata and (task.metadata.get("previous_actor") or task.metadata.get("last_reroute_reason")))
-        if is_retry or has_reroute or observations or failure_history:
-            lines.append("--- LYSSTACK CONTINUITY CONTEXT ---")
-            if has_reroute:
-                prev = task.metadata.get("previous_actor", "previous agent")
-                reason = task.metadata.get("last_reroute_reason", "capacity reroute")
-                lines.append(f"[Reroute Notice] Execution rerouted from '{prev}'. Reason: {reason}")
-            if is_retry and task.error:
-                lines.append(f"[Previous Failure (Attempt {task.attempt})]\n{task.error}")
-            if observations:
-                lines.append("[Previous Attempt Discoveries & Observations]")
-                for obs in observations:
-                    content = obs.content if hasattr(obs, "content") else str(obs.get("content", obs) if isinstance(obs, dict) else obs)
-                    kind = getattr(obs, "kind", obs.get("kind", "discovery") if isinstance(obs, dict) else "discovery")
-                    lines.append(f"- [{kind}] {content}")
-            if failure_history:
-                lines.append("[Prior Run Telemetry]")
-                for f in failure_history:
-                    lines.append(f"- Run {f.get('run_id')}: status={f.get('status')}, exit_reason={f.get('exit_reason')}")
-            lines.append("--- END CONTINUITY CONTEXT ---")
-        return "\n\n".join(lines) if lines else ""
+        if has_reroute:
+            prev = task.metadata.get("previous_actor", "previous agent")
+            reason = task.metadata.get("last_reroute_reason", "capacity reroute")
+            body_lines.append(f"[Reroute Notice] Execution rerouted from '{prev}'. Reason: {reason}")
+        is_retry = task.attempt > 0
+        if is_retry and task.error:
+            body_lines.append(f"[Previous Failure (Attempt {task.attempt})]\n{task.error}")
+
+        useful_obs = [o for o in (observations or []) if not self.is_completion_boilerplate(o)]
+        if useful_obs:
+            body_lines.append("[Previous Attempt Discoveries & Observations]")
+            for obs in useful_obs:
+                content = obs.content if hasattr(obs, "content") else str(obs.get("content", obs) if isinstance(obs, dict) else obs)
+                kind = getattr(obs, "kind", obs.get("kind", "discovery") if isinstance(obs, dict) else "discovery")
+                body_lines.append(f"- [{kind}] {content}")
+        if failure_history:
+            body_lines.append("[Prior Run Telemetry]")
+            for f in failure_history:
+                body_lines.append(f"- Run {f.get('run_id')}: status={f.get('status')}, exit_reason={f.get('exit_reason')}")
+
+        if not body_lines:
+            return ""
+
+        return "\n\n".join(["--- LYSSTACK CONTINUITY CONTEXT ---", *body_lines, "--- END CONTINUITY CONTEXT ---"])
 
     MAX_DIFF_CHARS = 30000
 
@@ -789,6 +840,102 @@ class HermesActorAdapter(ActorAdapter):
         lines.append("--- END CHECKS HERMES RAN ---")
         return "\n".join(lines)
 
+    def _builder_project_checks_section(self, worktree_path: Path) -> str:
+        """The project's declared check commands from hermes.json, for builders and hardeners."""
+        root = subdir_path(Path(worktree_path), self.target_subdir)
+        checks = load_project_checks(root)
+        if not checks:
+            return ""
+        lines = [
+            "\n\n--- PROJECT CHECKS ---",
+            f"This project declares check commands in {PROJECT_CHECKS_FILE}. Hermes does not run them for "
+            "builders; run them before finishing:\n",
+        ]
+        for check in checks:
+            command = check.get("command") or check.get("cmd")
+            name = check.get("name") or str(command)
+            lines.append(f"- {name}: `{command}`")
+        lines.append("--- END PROJECT CHECKS ---")
+        return "\n".join(lines)
+
+    @staticmethod
+    def truncate_goal(goal: str, limit: int = 600) -> str:
+        goal = (goal or "").strip()
+        if len(goal) <= limit:
+            return goal
+        prefix = goal[:limit]
+        if goal[limit].isspace():
+            return prefix.rstrip() + "…"
+        match = list(re.finditer(r"\s+", prefix))
+        if match:
+            end = match[-1].start()
+            return prefix[:end].rstrip() + "…"
+        return prefix + "…"
+
+    @staticmethod
+    def normalize_task_status(status: Any) -> str:
+        s = str(getattr(status, "value", status) or "").lower()
+        if s in ("succeeded", "success", "done", "completed"):
+            return "done"
+        if s in ("running", "in_progress", "active"):
+            return "running"
+        if s in ("failed", "failure", "error", "cancelled", "canceled"):
+            return "failed"
+        return "pending"
+
+    @staticmethod
+    def _extract_first_sentence(desc: str, max_chars: int = 160) -> str:
+        if not desc:
+            return ""
+        lines = [l.strip() for l in desc.splitlines() if l.strip()]
+        if not lines:
+            return ""
+        content_lines = [l for l in lines if not l.startswith("#")]
+        first_line = content_lines[0] if content_lines else lines[0].lstrip("#").strip()
+        match = re.search(r"^.*?[.!?](?=\s|$)", first_line)
+        if match:
+            sentence = match.group(0).strip()
+        else:
+            sentence = first_line
+        if len(sentence) > max_chars:
+            sentence = sentence[:max_chars].rstrip()
+        return sentence
+
+    MAX_SIBLING_LINE = 180
+    MAX_SIBLINGS = 12
+
+    def build_job_context_section(
+        self,
+        task: Optional[Any] = None,
+        goal: Optional[str] = None,
+        tasks: Optional[List[Any]] = None,
+    ) -> str:
+        """The job goal and one line per other task, so a task agent knows what its siblings own."""
+        current_id = task.get("task_id") if isinstance(task, dict) else getattr(task, "task_id", None)
+        lines = []
+        for item in tasks or []:
+            get = item.get if isinstance(item, dict) else lambda k, d=None, i=item: getattr(i, k, d)
+            task_id = get("task_id")
+            if not task_id or task_id == current_id:
+                continue
+            sentence = self._extract_first_sentence(get("description") or "")
+            status = f"({self.normalize_task_status(get('status'))})"
+            line = f"{task_id}: {sentence} {status}" if sentence else f"{task_id}: {status}"
+            if len(line) > self.MAX_SIBLING_LINE:
+                line = line[:self.MAX_SIBLING_LINE - len(status) - 2].rstrip() + "… " + status
+            lines.append(line)
+        if len(lines) > self.MAX_SIBLINGS:
+            lines = lines[:self.MAX_SIBLINGS] + [f"… and {len(lines) - self.MAX_SIBLINGS} more tasks"]
+
+        scope = ("Do only your task below. Other agents own the tasks listed here: do not do their work, "
+                 "even where the goal names it.") if lines else ""
+        body = [part for part in (self.truncate_goal(goal) if goal else "", "\n".join(lines), scope) if part]
+        if not body:
+            return ""
+        return "\n\n".join(["--- JOB CONTEXT ---", *body, "--- END JOB CONTEXT ---"])
+
+    _job_context_section = build_job_context_section
+
     def build_effective_prompt(
         self,
         base_prompt: str,
@@ -799,9 +946,15 @@ class HermesActorAdapter(ActorAdapter):
         task: Optional[TaskNode] = None,
         observations: Optional[List[Any]] = None,
         failure_history: Optional[List[Dict[str, Any]]] = None,
+        job_goal: Optional[str] = None,
+        tasks: Optional[List[Union[TaskNode, Dict[str, Any]]]] = None,
     ) -> str:
         """Constructs the full effective prompt with persona, continuity, context, and operational instructions."""
         parts = []
+        job_sec = self.build_job_context_section(task=task, goal=job_goal, tasks=tasks)
+        if job_sec:
+            parts.append(job_sec)
+
         if current_agent and self.persona_enabled:
             try:
                 from personas.persona import resolve_agent_profile
@@ -853,6 +1006,80 @@ class HermesActorAdapter(ActorAdapter):
             parts.append(verifier_contract)
 
         return "\n\n".join(parts)
+
+    def _prepare_effective_prompt(
+        self,
+        task: TaskNode,
+        actor_id: str,
+        role: str,
+        worktree_path: Optional[Path] = None,
+        context: Optional[Dict[str, Any]] = None,
+        job_goal: Optional[str] = None,
+        tasks: Optional[List[Union[TaskNode, Dict[str, Any]]]] = None,
+    ) -> str:
+        # The engine dispatches with {"job": job.to_dict(), "engine": engine}.
+        context = context or {}
+        engine = context.get("engine")
+        if job_goal is None:
+            job_goal = (context.get("job") or {}).get("goal") or getattr(getattr(engine, "job", None), "goal", None)
+        if tasks is None and engine is not None:
+            tasks = engine.graph.list_tasks()
+
+        base_prompt = task.description
+        prompt_file = task.metadata.get("prompt_file")
+        if prompt_file:
+            p_path = Path(prompt_file)
+            if not p_path.is_absolute():
+                p_path = (self.target_repo / p_path).resolve()
+            if p_path.exists():
+                base_prompt = p_path.read_text(encoding="utf-8")
+        base_prompt += self._fallback_failure_section(task)
+        effective_role = role or (task.metadata.get("role") if (task and isinstance(task.metadata, dict)) else None) or "builder"
+        if effective_role in ("verifier", "security"):
+            if worktree_path:
+                base_prompt += self._job_changes_section(worktree_path)
+                base_prompt += self._project_checks_section(worktree_path)
+        elif effective_role in ("builder", "hardener"):
+            base_prompt += self._builder_project_checks_section(worktree_path or self.target_repo)
+
+        obs_reg = getattr(self, "observation_registry", None)
+        if obs_reg is None:
+            try:
+                from runtime.observations import default_observation_registry
+                obs_reg = default_observation_registry
+            except Exception:
+                pass
+
+        prior_obs = self._prior_observations(task, obs_reg)
+
+        if not prior_obs and isinstance(task.metadata, dict) and task.metadata.get("observations"):
+            prior_obs = task.metadata["observations"]
+
+        prior_runs = (task.metadata or {}).get("prior_runs", [])
+
+        return self.build_effective_prompt(
+            base_prompt=base_prompt,
+            current_agent=actor_id,
+            role=role,
+            task=task,
+            observations=prior_obs,
+            failure_history=prior_runs,
+            job_goal=job_goal,
+            tasks=tasks,
+        )
+
+    def _save_effective_prompt(
+        self,
+        task: TaskNode,
+        run: Optional[AgentRun],
+        actor_id: str,
+        effective_prompt: str,
+    ) -> Path:
+        attempt = max(1, getattr(run, "attempt", 1) or 1, getattr(task, "attempt", 1) or 1)
+        self.run_dir.mkdir(parents=True, exist_ok=True)
+        prompt_file = self.run_dir / f"{task.task_id}_{actor_id}_attempt{attempt}_prompt.md"
+        prompt_file.write_text(effective_prompt, encoding="utf-8")
+        return prompt_file
 
     def build_tool_job_config(self, task: TaskNode) -> Dict[str, Any]:
         """
@@ -965,6 +1192,14 @@ class HermesActorAdapter(ActorAdapter):
         # 2. Dry run / Mock execution mode
         if is_dry_run or is_skip:
             logger.info("Executing task %s in dry-run/skip mode on actor %s", task.task_id, actor_id)
+            effective_prompt = self._prepare_effective_prompt(
+                task,
+                actor_id,
+                role,
+                worktree_path=self.target_repo,
+                context=context,
+            )
+            self._save_effective_prompt(task, run, actor_id, effective_prompt)
             artifact = {
                 "id": f"art_{task.task_id}_{run.run_id}",
                 "job_id": task.job_id,
@@ -1075,43 +1310,8 @@ class HermesActorAdapter(ActorAdapter):
             self.sync_task_worktree_from_integration(worktree_path)
 
             # Prepare prompt
-            base_prompt = task.description
-            prompt_file = task.metadata.get("prompt_file")
-            if prompt_file:
-                p_path = Path(prompt_file)
-                if not p_path.is_absolute():
-                    p_path = (self.target_repo / p_path).resolve()
-                if p_path.exists():
-                    base_prompt = p_path.read_text(encoding="utf-8")
-            base_prompt += self._fallback_failure_section(task)
-            if role in ("verifier", "security"):
-                base_prompt += self._job_changes_section(worktree_path)
-                base_prompt += self._project_checks_section(worktree_path)
-
-            # Gather task observations and prior failure telemetry for continuity
-            obs_reg = getattr(self, "observation_registry", None)
-            if obs_reg is None:
-                try:
-                    from runtime.observations import default_observation_registry
-                    obs_reg = default_observation_registry
-                except Exception:
-                    pass
-
-            prior_obs = self._prior_observations(task, obs_reg)
-
-            if not prior_obs and isinstance(task.metadata, dict) and task.metadata.get("observations"):
-                prior_obs = task.metadata["observations"]
-
-            prior_runs = (task.metadata or {}).get("prior_runs", [])
-
-            effective_prompt = self.build_effective_prompt(
-                base_prompt=base_prompt,
-                current_agent=actor_id,
-                role=role,
-                task=task,
-                observations=prior_obs,
-                failure_history=prior_runs,
-            )
+            effective_prompt = self._prepare_effective_prompt(task, actor_id, role, worktree_path, context=context)
+            self._save_effective_prompt(task, run, actor_id, effective_prompt)
 
             # Logs
             self.run_dir.mkdir(parents=True, exist_ok=True)
@@ -1243,13 +1443,29 @@ class HermesActorAdapter(ActorAdapter):
                     "created_at": datetime.now(timezone.utc).isoformat(),
                 })
 
+            clean_files = [f.split(maxsplit=1)[-1].strip('"') for f in (mutations or changed_files)]
+            files_str = self._format_completion_files(mutations or changed_files)
+            if commit_sha and files_str:
+                obs_content = f"Agent {actor_id} completed task {task.task_id} (commit {commit_sha}): {files_str}"
+            elif commit_sha:
+                obs_content = f"Agent {actor_id} completed task {task.task_id} (commit {commit_sha})"
+            elif files_str:
+                obs_content = f"Agent {actor_id} completed task {task.task_id}: {files_str}"
+            else:
+                obs_content = f"Agent {actor_id} completed task {task.task_id} with exit code {exit_code}"
+
             obs = Observation(
                 job_id=task.job_id,
                 task_id=task.task_id,
                 source=actor_id,
                 kind="execution_output",
-                content=f"Agent {actor_id} completed task {task.task_id} with exit code {exit_code}",
-                metadata={"changed_files_count": len(changed_files), "commit_sha": commit_sha, "exit_code": exit_code},
+                content=obs_content,
+                metadata={
+                    "changed_files_count": len(changed_files),
+                    "commit_sha": commit_sha,
+                    "exit_code": exit_code,
+                    "changed_files": clean_files,
+                },
             )
 
             obs_list = [obs]

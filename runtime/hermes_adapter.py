@@ -741,19 +741,21 @@ class HermesActorAdapter(ActorAdapter):
             content = str(obs)
             meta = {}
 
-        if meta.get("dry_run"):
-            return True
-
         text = content.strip()
         if not text:
             return True
 
-        if "completed dry-run execution" in text.lower():
+        # Dry-run execution boilerplate with no additional useful content
+        if re.search(
+            r"^(?:(?:Agent|Task)(?:\s+\S+)?\s+)?completed dry-run execution(?:\s+by\s+\S+|\s+of\s+task\s+\S+)?\.?$",
+            text,
+            re.IGNORECASE,
+        ):
             return True
 
         # Bare execution completion with only exit code (no commit sha, no changed files)
         if re.search(
-            r"^(?:Agent\s+\S+\s+|Task\s+\S+\s+|Agent\s+)?completed\s+(?:task\s+\S+\s+)?with exit code\s+\d+$",
+            r"^(?:(?:Agent|Task)(?:\s+\S+)?\s+|Agent\s+)?completed\s+(?:task\s+\S+\s+)?with exit code\s+\d+\.?$",
             text,
             re.IGNORECASE,
         ):
@@ -920,6 +922,7 @@ class HermesActorAdapter(ActorAdapter):
         task: Optional[TaskNode] = None,
         goal: Optional[str] = None,
         tasks: Optional[List[Any]] = None,
+        max_budget: int = 2400,
     ) -> str:
         if goal is None:
             if task and isinstance(getattr(task, "metadata", None), dict):
@@ -959,7 +962,8 @@ class HermesActorAdapter(ActorAdapter):
                     except Exception:
                         pass
 
-        truncated_goal = self.truncate_goal(goal) if goal else ""
+        goal_limit = min(600, max(100, max_budget - 200))
+        truncated_goal = self.truncate_goal(goal, limit=goal_limit) if goal else ""
 
         current_id = None
         if task:
@@ -967,7 +971,7 @@ class HermesActorAdapter(ActorAdapter):
             if not current_id and isinstance(task, dict):
                 current_id = task.get("task_id") or task.get("taskId") or task.get("name")
 
-        sibling_lines = []
+        sibling_candidates = []
         if tasks:
             for item in tasks:
                 if isinstance(item, dict):
@@ -984,13 +988,59 @@ class HermesActorAdapter(ActorAdapter):
 
                 sentence = self._extract_first_sentence(desc, max_chars=160)
                 norm_status = self.normalize_task_status(status)
-                if sentence:
-                    sibling_lines.append(f"{t_id}: {sentence} ({norm_status})")
-                else:
-                    sibling_lines.append(f"{t_id}: ({norm_status})")
+                sibling_candidates.append((str(t_id), sentence, norm_status))
 
-        if not truncated_goal and not sibling_lines:
+        if not truncated_goal and not sibling_candidates:
             return ""
+
+        overhead = len("--- JOB CONTEXT ---\n\n\n\n--- END JOB CONTEXT ---")
+        if truncated_goal:
+            overhead += len(truncated_goal)
+            if sibling_candidates:
+                overhead += 2
+
+        sibling_budget = max(50, max_budget - overhead)
+        n = len(sibling_candidates)
+
+        if n > 0:
+            candidate_lines = [
+                f"{t_id}: {sentence} ({norm_status})" if sentence else f"{t_id}: ({norm_status})"
+                for t_id, sentence, norm_status in sibling_candidates
+            ]
+            if len("\n".join(candidate_lines)) <= sibling_budget:
+                sibling_lines = candidate_lines
+            else:
+                sibling_lines = []
+                rem_chars = sibling_budget - (n - 1)
+                for idx, (t_id, sentence, norm_status) in enumerate(sibling_candidates):
+                    tasks_left = n - idx
+                    target_len = max(10, rem_chars // tasks_left)
+                    status_suffix = f" ({norm_status})"
+                    prefix = f"{t_id}: "
+                    full_line = f"{prefix}{sentence}{status_suffix}" if sentence else f"{t_id}:{status_suffix}"
+                    if len(full_line) <= target_len:
+                        line = full_line
+                    else:
+                        avail_for_sentence = target_len - len(prefix) - len(status_suffix)
+                        if avail_for_sentence > 10 and sentence:
+                            cut = sentence[:avail_for_sentence]
+                            m = list(re.finditer(r"\s+", cut))
+                            if m and m[-1].start() > 10:
+                                cut = cut[:m[-1].start()].rstrip() + "…"
+                            else:
+                                cut = cut[:avail_for_sentence - 1].rstrip() + "…"
+                            line = f"{prefix}{cut}{status_suffix}"
+                        else:
+                            no_desc_line = f"{t_id}: ({norm_status})"
+                            if len(no_desc_line) <= target_len:
+                                line = no_desc_line
+                            else:
+                                avail_for_id = max(5, target_len - len(status_suffix) - 3)
+                                line = f"{t_id[:avail_for_id].rstrip()}…: ({norm_status})"
+                    sibling_lines.append(line)
+                    rem_chars -= len(line)
+        else:
+            sibling_lines = []
 
         body_parts = []
         if truncated_goal:
@@ -1014,10 +1064,12 @@ class HermesActorAdapter(ActorAdapter):
         failure_history: Optional[List[Dict[str, Any]]] = None,
         job_goal: Optional[str] = None,
         tasks: Optional[List[Union[TaskNode, Dict[str, Any]]]] = None,
+        job_context_budget: Optional[int] = None,
     ) -> str:
         """Constructs the full effective prompt with persona, continuity, context, and operational instructions."""
         parts = []
-        job_sec = self.build_job_context_section(task=task, goal=job_goal, tasks=tasks)
+        budget = job_context_budget if job_context_budget is not None else 2400
+        job_sec = self.build_job_context_section(task=task, goal=job_goal, tasks=tasks, max_budget=budget)
         if job_sec:
             parts.append(job_sec)
 
@@ -1102,6 +1154,7 @@ class HermesActorAdapter(ActorAdapter):
             if p_path.exists():
                 base_prompt = p_path.read_text(encoding="utf-8")
         base_prompt += self._fallback_failure_section(task)
+        builder_checks_len = 0
         effective_role = role or (task.metadata.get("role") if (task and isinstance(task.metadata, dict)) else None) or "builder"
         if effective_role in ("verifier", "security"):
             if worktree_path:
@@ -1110,7 +1163,10 @@ class HermesActorAdapter(ActorAdapter):
         elif effective_role in ("builder", "hardener"):
             target_wt = worktree_path or (self.target_repo if (hasattr(self, "target_repo") and self.target_repo and Path(self.target_repo).exists()) else None)
             if target_wt:
-                base_prompt += self._builder_project_checks_section(target_wt)
+                checks_sec = self._builder_project_checks_section(target_wt)
+                if checks_sec:
+                    builder_checks_len = len(checks_sec)
+                    base_prompt += checks_sec
 
         obs_reg = getattr(self, "observation_registry", None)
         if obs_reg is None:
@@ -1127,6 +1183,8 @@ class HermesActorAdapter(ActorAdapter):
 
         prior_runs = (task.metadata or {}).get("prior_runs", [])
 
+        job_budget = max(500, 2480 - builder_checks_len)
+
         return self.build_effective_prompt(
             base_prompt=base_prompt,
             current_agent=actor_id,
@@ -1136,6 +1194,7 @@ class HermesActorAdapter(ActorAdapter):
             failure_history=prior_runs,
             job_goal=job_goal,
             tasks=tasks,
+            job_context_budget=job_budget,
         )
 
     def _save_effective_prompt(

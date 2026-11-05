@@ -238,3 +238,22 @@ def test_a_superseded_dependency_waits_for_its_replacement():
     assert "test" in ready()
     g.supersede_task("fix_build")  # dropped without a replacement: no longer blocks
     assert "test" in ready()
+
+
+@pytest.mark.anyio
+async def test_engine_job_shows_one_name_for_the_antigravity_agent(tmp_path):
+    repo = make_repo(tmp_path / "repo")
+
+    async def model(prompt):
+        return plan_json("Add an API")
+
+    res = await JobLauncher().launch_goal_async(goal="Add an API", target_repo=repo, model_client=model,
+                                                dry_run=True, skip_agent_exec=True, start_background=False)
+    tasks = job_service.get_engine(res["jobId"]).graph.list_tasks()
+    for task, name in zip(tasks, ("antigravity", "agy", "gemini")):
+        task.assigned_actor = name
+    job = job_service.get_job(res["jobId"])
+    assert {p.agentId for p in job.phases} == {"gemini"}
+    assert {t["assignedActor"] for t in job.tasks} == {"gemini"}
+    assert {t["assignedActor"] for t in job_service.get_job_tasks(res["jobId"])} == {"gemini"}
+    assert {t.assigned_actor for t in tasks} == {"antigravity", "agy", "gemini"}  # the runtime keeps its names

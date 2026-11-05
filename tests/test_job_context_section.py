@@ -317,6 +317,73 @@ def test_builder_task_prompt_budget_against_pre_change_baseline():
     assert "t0_subtask:" not in new_prompt[:new_prompt.index("--- HERMES TASK ROLE ---")]
 
 
+def test_builder_task_prompt_budget_with_long_task_ids():
+    """
+    For a builder task in a job with 9 tasks, a 2,000-character goal, and long task IDs,
+    the new prompt additions stay under the 2,500-character limit.
+    """
+    long_goal = ("Optimize database query performance and cache layer across all services. " * 35)[:2000]
+    assert len(long_goal) == 2000
+
+    tasks = [
+        TaskNode(
+            task_id=f"t{i}_" + "long_descriptive_task_identifier_segment_" * 5,
+            description=(
+                f"Subtask {i} description detailing performance optimization and schema changes for module {i}. "
+                "Detailed specifications and criteria."
+            ),
+            status=TaskStatus.PENDING if i > 3 else (TaskStatus.RUNNING if i == 3 else TaskStatus.SUCCEEDED),
+            metadata={"role": "builder" if i == 0 else "operative"},
+        )
+        for i in range(9)
+    ]
+    builder_task = tasks[0]
+
+    adapter = HermesActorAdapter()
+
+    baseline_parts = [
+        adapter._role_section("builder"),
+    ]
+    cont_sec = adapter.build_continuity_section(builder_task)
+    if cont_sec:
+        baseline_parts.append(cont_sec)
+    baseline_parts.append(builder_task.description + adapter._fallback_failure_section(builder_task))
+    if adapter.context_bundle:
+        baseline_parts.append(adapter.context_bundle)
+    baseline_parts.append(
+        "--- HERMES WORKSPACE RULES ---\n"
+        "Never run git (no status, add, commit, log or branch). Edit files in place; Hermes commits and "
+        "merges your changes after you finish.\n"
+        "--- END WORKSPACE RULES ---"
+    )
+    baseline_prompt = "\n\n".join(baseline_parts)
+
+    new_prompt = adapter._prepare_effective_prompt(
+        task=builder_task,
+        actor_id="antigravity",
+        role="builder",
+        job_goal=long_goal,
+        tasks=tasks,
+    )
+
+    added_chars_raw = len(new_prompt) - len(baseline_prompt)
+    added_chars_excluding_desc = (
+        len(new_prompt.replace(builder_task.description, ""))
+        - len(baseline_prompt.replace(builder_task.description, ""))
+    )
+
+    assert added_chars_excluding_desc <= 2500, (
+        f"Added {added_chars_excluding_desc} characters excluding task description, exceeding 2500 budget"
+    )
+    assert added_chars_raw <= 2500, f"Raw added {added_chars_raw} chars exceeds 2500 budget"
+    assert added_chars_excluding_desc > 0, "Expected new prompt to include job context"
+
+    # All 8 sibling tasks must be listed
+    for i in range(1, 9):
+        assert f"t{i}_" in new_prompt
+    assert "t0_" not in new_prompt[:new_prompt.index("--- HERMES TASK ROLE ---")]
+
+
 def test_prepare_effective_prompt_resolves_context_engine():
     """_prepare_effective_prompt automatically extracts goal and tasks from engine in context."""
     from unittest.mock import MagicMock

@@ -51,7 +51,7 @@ def test_is_completion_boilerplate_identification():
         Observation(content="Task completed dry-run execution")
     )
     assert HermesActorAdapter.is_completion_boilerplate(
-        Observation(content="Custom text", metadata={"dry_run": True})
+        Observation(content="Task t1 completed dry-run execution by antigravity", metadata={"dry_run": True})
     )
     assert HermesActorAdapter.is_completion_boilerplate(
         {"content": "Task t1_fix completed dry-run execution by antigravity"}
@@ -86,6 +86,22 @@ def test_is_completion_boilerplate_identification():
     )
     assert not HermesActorAdapter.is_completion_boilerplate(
         Observation(content="Context pressure handoff at 88.0% context window.", kind="continuity_handoff")
+    )
+    # Observations containing useful discoveries alongside completion text must NOT be treated as boilerplate
+    assert not HermesActorAdapter.is_completion_boilerplate(
+        Observation(content="Task t1 completed dry-run execution by antigravity. Database migration 004 required before running tests")
+    )
+    assert not HermesActorAdapter.is_completion_boilerplate(
+        Observation(
+            content="Task t1 completed dry-run execution by antigravity. Database migration 004 required before running tests",
+            metadata={"dry_run": True},
+        )
+    )
+    assert not HermesActorAdapter.is_completion_boilerplate(
+        Observation(content="completed dry-run execution\nUseful migration discovery: add column user_id")
+    )
+    assert not HermesActorAdapter.is_completion_boilerplate(
+        Observation(content="Agent antigravity completed task t1 with exit code 0. Discovered migration needed")
     )
 
 
@@ -168,6 +184,32 @@ def test_build_continuity_section_retains_useful_observations():
     assert "--- LYSSTACK CONTINUITY CONTEXT ---" in section
     assert "completed dry-run execution" not in section
     assert "Agent antigravity completed task t1 (commit sha_123456): src/core.py, tests/test_core.py" in section
+    assert "Database migration 004 required before running tests" in section
+    assert "--- END CONTINUITY CONTEXT ---" in section
+
+
+def test_build_continuity_section_retains_observation_with_dry_run_and_useful_discovery():
+    """Verify that an observation containing both dry-run completion text and a useful discovery is retained."""
+    adapter = HermesActorAdapter()
+    task = TaskNode(
+        task_id="t2_useful_continuity",
+        job_id="job_test",
+        description="Verify changes",
+        attempt=0,
+    )
+
+    obs = [
+        Observation(
+            job_id="job_test",
+            task_id="t1",
+            kind="discovery",
+            content="Task t1 completed dry-run execution by antigravity. Database migration 004 required before running tests",
+            metadata={"dry_run": True},
+        )
+    ]
+
+    section = adapter.build_continuity_section(task, observations=obs)
+    assert "--- LYSSTACK CONTINUITY CONTEXT ---" in section
     assert "Database migration 004 required before running tests" in section
     assert "--- END CONTINUITY CONTEXT ---" in section
 

@@ -489,14 +489,14 @@ class JobService:
         engine = self._engines.get(job_id)
         if engine:
             runs = engine.execution_manager.list_runs_for_job(job_id)
-            return [r.to_dict() for r in runs]
+            return [_display_agents(r.to_dict(), ("actor_id",)) for r in runs]
         return []
 
     def get_job_observations(self, job_id: str) -> List[Dict[str, Any]]:
         engine = self._engines.get(job_id)
         if engine:
             obs = engine.observation_registry.list_for_job(job_id)
-            return [o.to_dict() for o in obs]
+            return [_display_agents(o.to_dict(), ("actor_id", "source")) for o in obs]
         job = self.get_job(job_id)
         if job and job.observations:
             return job.observations
@@ -550,11 +550,11 @@ class JobService:
                         completedAt=state.job.completed_at,
                         progress=progress,
                         phases=phases,
-                        tasks=[t.to_dict() for t in task_nodes],
+                        tasks=[_display_agents(t.to_dict(), ("assignedActor", "assigned_actor")) for t in task_nodes],
                         blockedReason=state.job.blocked_reason,
                         repairCount=state.job.repair_count,
                         replanCount=state.job.replan_count,
-                        observations=[o.to_dict() for o in state.observations],
+                        observations=[_display_agents(o.to_dict(), ("actor_id", "source")) for o in state.observations],
                     )
                     self.register_job(job_dto)
                     return job_dto
@@ -582,7 +582,7 @@ class JobService:
                 if events:
                     from runtime.storage.projector import RuntimeStateProjector
                     state = RuntimeStateProjector.project(events)
-                    return [r.to_dict() for r in state.runs]
+                    return [_display_agents(r.to_dict(), ("actor_id",)) for r in state.runs]
             except Exception as exc:
                 logger.warning("Error reconstructing runs for job %s: %s", job_id, exc)
         return []
@@ -599,7 +599,7 @@ class JobService:
                 if events:
                     from runtime.storage.projector import RuntimeStateProjector
                     state = RuntimeStateProjector.project(events)
-                    return [o.to_dict() for o in state.observations]
+                    return [_display_agents(o.to_dict(), ("actor_id", "source")) for o in state.observations]
             except Exception as exc:
                 logger.warning("Error reconstructing observations for job %s: %s", job_id, exc)
         return []

@@ -1446,6 +1446,9 @@ class HermesActorAdapter(ActorAdapter):
                         prior_obs.append(job_obs)
         except Exception:
             pass
+        # Task ids repeat across jobs (planner slugs), so keep only this job's observations.
+        if task.job_id:
+            prior_obs = [o for o in prior_obs if getattr(o, "job_id", task.job_id) in (task.job_id, "")]
         return prior_obs
 
     def _task_event_sink(self, task: TaskNode, run: AgentRun, actor_id: str):

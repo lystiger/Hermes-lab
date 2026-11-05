@@ -702,28 +702,12 @@ class HermesActorAdapter(ActorAdapter):
         return "\n\n".join(sections)
 
     @staticmethod
-    def _clean_changed_file_path(entry: str) -> str:
-        s = entry.strip()
-        parts = s.split(maxsplit=1)
-        if len(parts) == 2 and (parts[0] in {"M", "A", "D", "R", "C", "U", "??", "AM", "MM", "AD"} or len(parts[0]) <= 2):
-            return parts[1].strip('"')
-        return s.strip('"')
-
-    @classmethod
-    def _format_completion_files(cls, files: Sequence[str], limit: int = 20) -> str:
-        cleaned = [cls._clean_changed_file_path(f) for f in files if f and f.strip()]
-        seen = set()
-        unique = []
-        for f in cleaned:
-            if f not in seen:
-                seen.add(f)
-                unique.append(f)
-        if not unique:
-            return ""
-        if len(unique) <= limit:
-            return ", ".join(unique)
-        remaining = len(unique) - limit
-        return f"{', '.join(unique[:limit])}, and {remaining} more"
+    def _format_completion_files(files: Sequence[str], limit: int = 20) -> str:
+        """Paths from `git status --porcelain` lines, the first `limit` named, then "and N more"."""
+        paths = list(dict.fromkeys(f.split(maxsplit=1)[-1].strip('"') for f in files if f and f.strip()))
+        if len(paths) <= limit:
+            return ", ".join(paths)
+        return f"{', '.join(paths[:limit])}, and {len(paths) - limit} more"
 
     @classmethod
     def is_completion_boilerplate(cls, obs: Any) -> bool:
@@ -917,138 +901,36 @@ class HermesActorAdapter(ActorAdapter):
             sentence = sentence[:max_chars].rstrip()
         return sentence
 
+    MAX_SIBLING_LINE = 180
+    MAX_SIBLINGS = 12
+
     def build_job_context_section(
         self,
-        task: Optional[TaskNode] = None,
+        task: Optional[Any] = None,
         goal: Optional[str] = None,
         tasks: Optional[List[Any]] = None,
-        max_budget: int = 2400,
     ) -> str:
-        if goal is None:
-            if task and isinstance(getattr(task, "metadata", None), dict):
-                goal = task.metadata.get("job_goal") or task.metadata.get("goal")
-            if not goal:
-                goal = getattr(self, "job_goal", None) or getattr(self, "goal", None)
-            if not goal and hasattr(self, "spec") and isinstance(self.spec, dict):
-                goal = self.spec.get("goal") or self.spec.get("name") or self.spec.get("title")
-            if not goal:
-                j_id = getattr(task, "job_id", None) or getattr(self, "job_id", None)
-                if j_id:
-                    try:
-                        from jobs.job_service import job_service
-                        eng = job_service.get_engine(j_id)
-                        if eng and hasattr(eng, "job") and getattr(eng.job, "goal", None):
-                            goal = eng.job.goal
-                    except Exception:
-                        pass
+        """The job goal and one line per other task, so a task agent knows what its siblings own."""
+        current_id = task.get("task_id") if isinstance(task, dict) else getattr(task, "task_id", None)
+        lines = []
+        for item in tasks or []:
+            get = item.get if isinstance(item, dict) else lambda k, d=None, i=item: getattr(i, k, d)
+            task_id = get("task_id")
+            if not task_id or task_id == current_id:
+                continue
+            sentence = self._extract_first_sentence(get("description") or "")
+            status = f"({self.normalize_task_status(get('status'))})"
+            line = f"{task_id}: {sentence} {status}" if sentence else f"{task_id}: {status}"
+            if len(line) > self.MAX_SIBLING_LINE:
+                line = line[:self.MAX_SIBLING_LINE - len(status) - 2].rstrip() + "… " + status
+            lines.append(line)
+        if len(lines) > self.MAX_SIBLINGS:
+            lines = lines[:self.MAX_SIBLINGS] + [f"… and {len(lines) - self.MAX_SIBLINGS} more tasks"]
 
-        if tasks is None:
-            if task and isinstance(getattr(task, "metadata", None), dict):
-                tasks = task.metadata.get("tasks") or task.metadata.get("sibling_tasks") or task.metadata.get("all_tasks")
-            if tasks is None:
-                tasks = getattr(self, "tasks", None)
-            if tasks is None and hasattr(self, "graph") and hasattr(self.graph, "list_tasks"):
-                tasks = self.graph.list_tasks()
-            if tasks is None and hasattr(self, "spec") and isinstance(self.spec, dict) and self.spec.get("phases"):
-                tasks = self.spec.get("phases")
-            if tasks is None:
-                j_id = getattr(task, "job_id", None) or getattr(self, "job_id", None)
-                if j_id:
-                    try:
-                        from jobs.job_service import job_service
-                        eng = job_service.get_engine(j_id)
-                        if eng and hasattr(eng, "graph") and hasattr(eng.graph, "list_tasks"):
-                            tasks = eng.graph.list_tasks()
-                    except Exception:
-                        pass
-
-        goal_limit = min(600, max(100, max_budget - 200))
-        truncated_goal = self.truncate_goal(goal, limit=goal_limit) if goal else ""
-
-        current_id = None
-        if task:
-            current_id = getattr(task, "task_id", None)
-            if not current_id and isinstance(task, dict):
-                current_id = task.get("task_id") or task.get("taskId") or task.get("name")
-
-        sibling_candidates = []
-        if tasks:
-            for item in tasks:
-                if isinstance(item, dict):
-                    t_id = item.get("task_id") or item.get("taskId") or item.get("name")
-                    desc = item.get("description") or item.get("name") or ""
-                    status = item.get("status")
-                else:
-                    t_id = getattr(item, "task_id", None)
-                    desc = getattr(item, "description", "") or ""
-                    status = getattr(item, "status", None)
-
-                if not t_id or t_id == current_id:
-                    continue
-
-                sentence = self._extract_first_sentence(desc, max_chars=160)
-                norm_status = self.normalize_task_status(status)
-                sibling_candidates.append((str(t_id), sentence, norm_status))
-
-        if not truncated_goal and not sibling_candidates:
+        body = [part for part in (self.truncate_goal(goal) if goal else "", "\n".join(lines)) if part]
+        if not body:
             return ""
-
-        overhead = len("--- JOB CONTEXT ---\n\n\n\n--- END JOB CONTEXT ---")
-        if truncated_goal:
-            overhead += len(truncated_goal)
-            if sibling_candidates:
-                overhead += 2
-
-        sibling_budget = max(50, max_budget - overhead)
-        n = len(sibling_candidates)
-
-        if n > 0:
-            candidate_lines = [
-                f"{t_id}: {sentence} ({norm_status})" if sentence else f"{t_id}: ({norm_status})"
-                for t_id, sentence, norm_status in sibling_candidates
-            ]
-            if len("\n".join(candidate_lines)) <= sibling_budget:
-                sibling_lines = candidate_lines
-            else:
-                sibling_lines = []
-                rem_chars = sibling_budget - (n - 1)
-                for idx, (t_id, sentence, norm_status) in enumerate(sibling_candidates):
-                    tasks_left = n - idx
-                    target_len = max(10, rem_chars // tasks_left)
-                    status_suffix = f" ({norm_status})"
-                    prefix = f"{t_id}: "
-                    full_line = f"{prefix}{sentence}{status_suffix}" if sentence else f"{t_id}:{status_suffix}"
-                    if len(full_line) <= target_len:
-                        line = full_line
-                    else:
-                        avail_for_sentence = target_len - len(prefix) - len(status_suffix)
-                        if avail_for_sentence > 10 and sentence:
-                            cut = sentence[:avail_for_sentence]
-                            m = list(re.finditer(r"\s+", cut))
-                            if m and m[-1].start() > 10:
-                                cut = cut[:m[-1].start()].rstrip() + "…"
-                            else:
-                                cut = cut[:avail_for_sentence - 1].rstrip() + "…"
-                            line = f"{prefix}{cut}{status_suffix}"
-                        else:
-                            no_desc_line = f"{t_id}: ({norm_status})"
-                            if len(no_desc_line) <= target_len:
-                                line = no_desc_line
-                            else:
-                                avail_for_id = max(5, target_len - len(status_suffix) - 3)
-                                line = f"{t_id[:avail_for_id].rstrip()}…: ({norm_status})"
-                    sibling_lines.append(line)
-                    rem_chars -= len(line)
-        else:
-            sibling_lines = []
-
-        body_parts = []
-        if truncated_goal:
-            body_parts.append(truncated_goal)
-        if sibling_lines:
-            body_parts.append("\n".join(sibling_lines))
-
-        return "\n\n".join(["--- JOB CONTEXT ---", *body_parts, "--- END JOB CONTEXT ---"])
+        return "\n\n".join(["--- JOB CONTEXT ---", *body, "--- END JOB CONTEXT ---"])
 
     _job_context_section = build_job_context_section
 
@@ -1064,12 +946,10 @@ class HermesActorAdapter(ActorAdapter):
         failure_history: Optional[List[Dict[str, Any]]] = None,
         job_goal: Optional[str] = None,
         tasks: Optional[List[Union[TaskNode, Dict[str, Any]]]] = None,
-        job_context_budget: Optional[int] = None,
     ) -> str:
         """Constructs the full effective prompt with persona, continuity, context, and operational instructions."""
         parts = []
-        budget = job_context_budget if job_context_budget is not None else 2400
-        job_sec = self.build_job_context_section(task=task, goal=job_goal, tasks=tasks, max_budget=budget)
+        job_sec = self.build_job_context_section(task=task, goal=job_goal, tasks=tasks)
         if job_sec:
             parts.append(job_sec)
 
@@ -1135,15 +1015,13 @@ class HermesActorAdapter(ActorAdapter):
         job_goal: Optional[str] = None,
         tasks: Optional[List[Union[TaskNode, Dict[str, Any]]]] = None,
     ) -> str:
-        if job_goal is None and isinstance(context, dict):
-            if context.get("job") and isinstance(context["job"], dict) and context["job"].get("goal"):
-                job_goal = context["job"]["goal"]
-            elif context.get("engine") and hasattr(context["engine"], "job"):
-                job_goal = getattr(context["engine"].job, "goal", None)
-
-        if tasks is None and isinstance(context, dict):
-            if context.get("engine") and hasattr(context["engine"], "graph"):
-                tasks = context["engine"].graph.list_tasks()
+        # The engine dispatches with {"job": job.to_dict(), "engine": engine}.
+        context = context or {}
+        engine = context.get("engine")
+        if job_goal is None:
+            job_goal = (context.get("job") or {}).get("goal") or getattr(getattr(engine, "job", None), "goal", None)
+        if tasks is None and engine is not None:
+            tasks = engine.graph.list_tasks()
 
         base_prompt = task.description
         prompt_file = task.metadata.get("prompt_file")
@@ -1154,19 +1032,13 @@ class HermesActorAdapter(ActorAdapter):
             if p_path.exists():
                 base_prompt = p_path.read_text(encoding="utf-8")
         base_prompt += self._fallback_failure_section(task)
-        builder_checks_len = 0
         effective_role = role or (task.metadata.get("role") if (task and isinstance(task.metadata, dict)) else None) or "builder"
         if effective_role in ("verifier", "security"):
             if worktree_path:
                 base_prompt += self._job_changes_section(worktree_path)
                 base_prompt += self._project_checks_section(worktree_path)
         elif effective_role in ("builder", "hardener"):
-            target_wt = worktree_path or (self.target_repo if (hasattr(self, "target_repo") and self.target_repo and Path(self.target_repo).exists()) else None)
-            if target_wt:
-                checks_sec = self._builder_project_checks_section(target_wt)
-                if checks_sec:
-                    builder_checks_len = len(checks_sec)
-                    base_prompt += checks_sec
+            base_prompt += self._builder_project_checks_section(worktree_path or self.target_repo)
 
         obs_reg = getattr(self, "observation_registry", None)
         if obs_reg is None:
@@ -1183,8 +1055,6 @@ class HermesActorAdapter(ActorAdapter):
 
         prior_runs = (task.metadata or {}).get("prior_runs", [])
 
-        job_budget = max(500, 2480 - builder_checks_len)
-
         return self.build_effective_prompt(
             base_prompt=base_prompt,
             current_agent=actor_id,
@@ -1194,7 +1064,6 @@ class HermesActorAdapter(ActorAdapter):
             failure_history=prior_runs,
             job_goal=job_goal,
             tasks=tasks,
-            job_context_budget=job_budget,
         )
 
     def _save_effective_prompt(
@@ -1325,7 +1194,7 @@ class HermesActorAdapter(ActorAdapter):
                 task,
                 actor_id,
                 role,
-                worktree_path=self.target_repo if (hasattr(self, "target_repo") and self.target_repo and Path(self.target_repo).exists()) else None,
+                worktree_path=self.target_repo,
                 context=context,
             )
             self._save_effective_prompt(task, run, actor_id, effective_prompt)
@@ -1572,7 +1441,7 @@ class HermesActorAdapter(ActorAdapter):
                     "created_at": datetime.now(timezone.utc).isoformat(),
                 })
 
-            clean_files = [self._clean_changed_file_path(f) for f in (mutations or changed_files)]
+            clean_files = [f.split(maxsplit=1)[-1].strip('"') for f in (mutations or changed_files)]
             files_str = self._format_completion_files(mutations or changed_files)
             if commit_sha and files_str:
                 obs_content = f"Agent {actor_id} completed task {task.task_id} (commit {commit_sha}): {files_str}"

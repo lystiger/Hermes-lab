@@ -854,6 +854,63 @@ class HermesActorAdapter(ActorAdapter):
 
         return "\n\n".join(parts)
 
+    def _prepare_effective_prompt(
+        self,
+        task: TaskNode,
+        actor_id: str,
+        role: str,
+        worktree_path: Optional[Path] = None,
+    ) -> str:
+        base_prompt = task.description
+        prompt_file = task.metadata.get("prompt_file")
+        if prompt_file:
+            p_path = Path(prompt_file)
+            if not p_path.is_absolute():
+                p_path = (self.target_repo / p_path).resolve()
+            if p_path.exists():
+                base_prompt = p_path.read_text(encoding="utf-8")
+        base_prompt += self._fallback_failure_section(task)
+        if role in ("verifier", "security") and worktree_path:
+            base_prompt += self._job_changes_section(worktree_path)
+            base_prompt += self._project_checks_section(worktree_path)
+
+        obs_reg = getattr(self, "observation_registry", None)
+        if obs_reg is None:
+            try:
+                from runtime.observations import default_observation_registry
+                obs_reg = default_observation_registry
+            except Exception:
+                pass
+
+        prior_obs = self._prior_observations(task, obs_reg)
+
+        if not prior_obs and isinstance(task.metadata, dict) and task.metadata.get("observations"):
+            prior_obs = task.metadata["observations"]
+
+        prior_runs = (task.metadata or {}).get("prior_runs", [])
+
+        return self.build_effective_prompt(
+            base_prompt=base_prompt,
+            current_agent=actor_id,
+            role=role,
+            task=task,
+            observations=prior_obs,
+            failure_history=prior_runs,
+        )
+
+    def _save_effective_prompt(
+        self,
+        task: TaskNode,
+        run: Optional[AgentRun],
+        actor_id: str,
+        effective_prompt: str,
+    ) -> Path:
+        attempt = max(1, getattr(run, "attempt", 1) or 1, getattr(task, "attempt", 1) or 1)
+        self.run_dir.mkdir(parents=True, exist_ok=True)
+        prompt_file = self.run_dir / f"{task.task_id}_{actor_id}_attempt{attempt}_prompt.md"
+        prompt_file.write_text(effective_prompt, encoding="utf-8")
+        return prompt_file
+
     def build_tool_job_config(self, task: TaskNode) -> Dict[str, Any]:
         """
         Builds the job configuration handed to the ToolRegistry for policy derivation.
@@ -965,6 +1022,13 @@ class HermesActorAdapter(ActorAdapter):
         # 2. Dry run / Mock execution mode
         if is_dry_run or is_skip:
             logger.info("Executing task %s in dry-run/skip mode on actor %s", task.task_id, actor_id)
+            effective_prompt = self._prepare_effective_prompt(
+                task,
+                actor_id,
+                role,
+                worktree_path=self.target_repo if (hasattr(self, "target_repo") and self.target_repo and Path(self.target_repo).exists()) else None,
+            )
+            self._save_effective_prompt(task, run, actor_id, effective_prompt)
             artifact = {
                 "id": f"art_{task.task_id}_{run.run_id}",
                 "job_id": task.job_id,
@@ -1075,43 +1139,8 @@ class HermesActorAdapter(ActorAdapter):
             self.sync_task_worktree_from_integration(worktree_path)
 
             # Prepare prompt
-            base_prompt = task.description
-            prompt_file = task.metadata.get("prompt_file")
-            if prompt_file:
-                p_path = Path(prompt_file)
-                if not p_path.is_absolute():
-                    p_path = (self.target_repo / p_path).resolve()
-                if p_path.exists():
-                    base_prompt = p_path.read_text(encoding="utf-8")
-            base_prompt += self._fallback_failure_section(task)
-            if role in ("verifier", "security"):
-                base_prompt += self._job_changes_section(worktree_path)
-                base_prompt += self._project_checks_section(worktree_path)
-
-            # Gather task observations and prior failure telemetry for continuity
-            obs_reg = getattr(self, "observation_registry", None)
-            if obs_reg is None:
-                try:
-                    from runtime.observations import default_observation_registry
-                    obs_reg = default_observation_registry
-                except Exception:
-                    pass
-
-            prior_obs = self._prior_observations(task, obs_reg)
-
-            if not prior_obs and isinstance(task.metadata, dict) and task.metadata.get("observations"):
-                prior_obs = task.metadata["observations"]
-
-            prior_runs = (task.metadata or {}).get("prior_runs", [])
-
-            effective_prompt = self.build_effective_prompt(
-                base_prompt=base_prompt,
-                current_agent=actor_id,
-                role=role,
-                task=task,
-                observations=prior_obs,
-                failure_history=prior_runs,
-            )
+            effective_prompt = self._prepare_effective_prompt(task, actor_id, role, worktree_path)
+            self._save_effective_prompt(task, run, actor_id, effective_prompt)
 
             # Logs
             self.run_dir.mkdir(parents=True, exist_ok=True)

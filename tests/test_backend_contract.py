@@ -390,3 +390,95 @@ def test_dependencies_are_not_copied_when_the_lockfile_differs(tmp_path):
     result, seen = _run_in(repo, tmp_path)
     assert result.status == "succeeded", result.error
     assert seen["has_deps"] is False
+
+
+def test_run_saves_effective_prompt_file_matching_backend_prompt(tmp_path):
+    repo = _git_repo(tmp_path / "repo")
+    run_dir = tmp_path / "run"
+    adapter = HermesActorAdapter(
+        target_repo=repo,
+        worktree_root=tmp_path / "worktrees",
+        run_dir=run_dir,
+        agent_registry=AgentRegistry({EchoAdapter.name: EchoAdapter}),
+        backend_registry=BackendRegistry({FakeSessionfulBackend.name: FakeSessionfulBackend}),
+        job_id="job_prompt",
+    )
+    task = TaskNode(
+        task_id="T_prompt",
+        job_id="job_prompt",
+        description="implement feature X",
+        assigned_actor="echo",
+        attempt=1,
+        metadata={"execution_backend": "fake-sessionful", "role": "hardener"},
+    )
+    run = AgentRun(run_id="run_1", job_id="job_prompt", task_id="T_prompt", actor_id="echo", attempt=1)
+    result = asyncio.run(adapter.execute_task(task, run))
+    assert result.status == "succeeded", result.error
+
+    prompt_path = run_dir / "T_prompt_echo_attempt1_prompt.md"
+    assert prompt_path.is_file()
+    saved_prompt = prompt_path.read_text(encoding="utf-8")
+
+    backend_req = FakeSessionfulBackend.instances[0].requests[0]
+    prompt_passed_to_backend = backend_req.metadata["prompt"]
+
+    assert saved_prompt == prompt_passed_to_backend
+    assert "implement feature X" in saved_prompt
+    assert "Never run git" in saved_prompt
+
+
+def test_dry_run_saves_effective_prompt_file(tmp_path):
+    repo = _git_repo(tmp_path / "repo")
+    run_dir = tmp_path / "run"
+    adapter = HermesActorAdapter(
+        target_repo=repo,
+        worktree_root=tmp_path / "worktrees",
+        run_dir=run_dir,
+        job_id="job_dry",
+        dry_run=True,
+    )
+    task = TaskNode(
+        task_id="T_dry",
+        job_id="job_dry",
+        description="dry run task description",
+        assigned_actor="claude",
+        attempt=1,
+    )
+    run = AgentRun(run_id="run_dry", job_id="job_dry", task_id="T_dry", actor_id="claude", attempt=1)
+    result = asyncio.run(adapter.execute_task(task, run))
+    assert result.status == "succeeded"
+
+    prompt_path = run_dir / "T_dry_claude_attempt1_prompt.md"
+    assert prompt_path.is_file()
+    saved_prompt = prompt_path.read_text(encoding="utf-8")
+    assert "dry run task description" in saved_prompt
+    assert "Never run git" in saved_prompt
+
+
+def test_prompt_file_named_with_retry_attempt_number(tmp_path):
+    repo = _git_repo(tmp_path / "repo")
+    run_dir = tmp_path / "run"
+    adapter = HermesActorAdapter(
+        target_repo=repo,
+        worktree_root=tmp_path / "worktrees",
+        run_dir=run_dir,
+        agent_registry=AgentRegistry({EchoAdapter.name: EchoAdapter}),
+        backend_registry=BackendRegistry({FakeSessionfulBackend.name: FakeSessionfulBackend}),
+        job_id="job_att2",
+    )
+    task = TaskNode(
+        task_id="T_retry",
+        job_id="job_att2",
+        description="retry task description",
+        assigned_actor="echo",
+        attempt=2,
+        metadata={"execution_backend": "fake-sessionful", "role": "hardener"},
+    )
+    run = AgentRun(run_id="run_2", job_id="job_att2", task_id="T_retry", actor_id="echo", attempt=2)
+    result = asyncio.run(adapter.execute_task(task, run))
+    assert result.status == "succeeded", result.error
+
+    prompt_path = run_dir / "T_retry_echo_attempt2_prompt.md"
+    assert prompt_path.is_file()
+    assert prompt_path.read_text(encoding="utf-8") == FakeSessionfulBackend.instances[0].requests[0].metadata["prompt"]
+

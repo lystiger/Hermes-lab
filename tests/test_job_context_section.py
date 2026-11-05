@@ -440,3 +440,14 @@ def test_dict_tasks_and_markdown_headings():
     assert "d1: Initialize database. (done)" in sec
     assert "d2: (pending)" in sec
 
+
+
+def test_job_context_tells_the_agent_to_leave_sibling_work_alone():
+    """The goal names every item; the agent must still do only its own task."""
+    adapter = HermesActorAdapter()
+    sec = adapter.build_job_context_section(
+        task=TaskNode(task_id="t1"),
+        goal="Add stats, truncate, tests and README docs.",
+        tasks=[TaskNode(task_id="t2", description="Write README docs.")],
+    )
+    assert "Do only your task" in sec

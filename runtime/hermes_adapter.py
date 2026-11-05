@@ -927,7 +927,9 @@ class HermesActorAdapter(ActorAdapter):
         if len(lines) > self.MAX_SIBLINGS:
             lines = lines[:self.MAX_SIBLINGS] + [f"… and {len(lines) - self.MAX_SIBLINGS} more tasks"]
 
-        body = [part for part in (self.truncate_goal(goal) if goal else "", "\n".join(lines)) if part]
+        scope = ("Do only your task below. Other agents own the tasks listed here: do not do their work, "
+                 "even where the goal names it.") if lines else ""
+        body = [part for part in (self.truncate_goal(goal) if goal else "", "\n".join(lines), scope) if part]
         if not body:
             return ""
         return "\n\n".join(["--- JOB CONTEXT ---", *body, "--- END JOB CONTEXT ---"])

@@ -79,7 +79,7 @@ Console: `cd console && npm ci && VITE_LYSSTACK_API_URL=http://localhost:8000 np
 
 ## Tests
 
-`python -m pytest -q` runs the whole suite (1020 passed, 6 skipped on 2026-10-29). GitHub Actions runs it on
+`python -m pytest -q` runs the whole suite (1037 passed, 7 skipped on 2026-11-05). GitHub Actions runs it on
 every push and pull request. Postgres tests use a separate `hermes_lab_test` database.
 
 ## Compatibility Names

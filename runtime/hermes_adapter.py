@@ -854,6 +854,24 @@ class HermesActorAdapter(ActorAdapter):
         lines.append("--- END CHECKS HERMES RAN ---")
         return "\n".join(lines)
 
+    def _builder_project_checks_section(self, worktree_path: Path) -> str:
+        """The project's declared check commands from hermes.json, for builders and hardeners."""
+        root = subdir_path(Path(worktree_path), self.target_subdir)
+        checks = load_project_checks(root)
+        if not checks:
+            return ""
+        lines = [
+            "\n\n--- PROJECT CHECKS ---",
+            f"This project declares check commands in {PROJECT_CHECKS_FILE}. Hermes does not run them for "
+            "builders; run them before finishing:\n",
+        ]
+        for check in checks:
+            command = check.get("command") or check.get("cmd")
+            name = check.get("name") or str(command)
+            lines.append(f"- {name}: `{command}`")
+        lines.append("--- END PROJECT CHECKS ---")
+        return "\n".join(lines)
+
     def build_effective_prompt(
         self,
         base_prompt: str,
@@ -935,9 +953,15 @@ class HermesActorAdapter(ActorAdapter):
             if p_path.exists():
                 base_prompt = p_path.read_text(encoding="utf-8")
         base_prompt += self._fallback_failure_section(task)
-        if role in ("verifier", "security") and worktree_path:
-            base_prompt += self._job_changes_section(worktree_path)
-            base_prompt += self._project_checks_section(worktree_path)
+        effective_role = role or (task.metadata.get("role") if (task and isinstance(task.metadata, dict)) else None) or "builder"
+        if effective_role in ("verifier", "security"):
+            if worktree_path:
+                base_prompt += self._job_changes_section(worktree_path)
+                base_prompt += self._project_checks_section(worktree_path)
+        elif effective_role in ("builder", "hardener"):
+            target_wt = worktree_path or (self.target_repo if (hasattr(self, "target_repo") and self.target_repo and Path(self.target_repo).exists()) else None)
+            if target_wt:
+                base_prompt += self._builder_project_checks_section(target_wt)
 
         obs_reg = getattr(self, "observation_registry", None)
         if obs_reg is None:

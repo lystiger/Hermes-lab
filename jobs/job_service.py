@@ -12,6 +12,14 @@ from artifacts.artifact_registry import ArtifactRef, artifact_registry
 logger = logging.getLogger("hermes.job_service")
 
 
+
+def _display_agents(record: Dict[str, Any], fields) -> Dict[str, Any]:
+    """The planner may name one agent "antigravity", "agy" or "gemini"; the console shows a single name."""
+    for name in fields:
+        if str(record.get(name) or "").lower() in {"antigravity", "agy", "gemini"}:
+            record[name] = normalize_agent_id(record[name])
+    return record
+
 @dataclass
 class ArtifactRefDTO:
     id: str
@@ -422,12 +430,12 @@ class JobService:
             job.repairCount = engine.job.repair_count
             job.replanCount = engine.job.replan_count
 
-            job.observations = [observation.to_dict() for observation in
+            job.observations = [_display_agents(observation.to_dict(), ("actor_id", "source")) for observation in
                                 engine.observation_registry.list_for_job(job_id)]
 
             # Map tasks
             task_nodes = engine.graph.list_tasks()
-            job.tasks = [t.to_dict() for t in task_nodes]
+            job.tasks = [_display_agents(t.to_dict(), ("assignedActor", "assigned_actor")) for t in task_nodes]
             if task_nodes:
                 phases = []
                 for idx, t in enumerate(task_nodes, start=1):
@@ -439,7 +447,7 @@ class JobService:
                             # The role and order come from the plan or spec, never from the agent that runs it.
                             order=meta["order"] if isinstance(meta.get("order"), int) else idx,
                             role=meta.get("role") or meta.get("execution_role") or "builder",
-                            agentId=t.assigned_actor or "unknown",
+                            agentId=normalize_agent_id(t.assigned_actor or "unknown"),
                             status=t.status.value,
                             attempt=t.attempt,
                             startedAt=t.started_at,
@@ -471,7 +479,7 @@ class JobService:
     def get_job_tasks(self, job_id: str) -> List[Dict[str, Any]]:
         engine = self._engines.get(job_id)
         if engine:
-            return [t.to_dict() for t in engine.graph.list_tasks()]
+            return [_display_agents(t.to_dict(), ("assignedActor", "assigned_actor")) for t in engine.graph.list_tasks()]
         job = self.get_job(job_id)
         if job and job.tasks:
             return job.tasks
@@ -481,14 +489,14 @@ class JobService:
         engine = self._engines.get(job_id)
         if engine:
             runs = engine.execution_manager.list_runs_for_job(job_id)
-            return [r.to_dict() for r in runs]
+            return [_display_agents(r.to_dict(), ("actor_id",)) for r in runs]
         return []
 
     def get_job_observations(self, job_id: str) -> List[Dict[str, Any]]:
         engine = self._engines.get(job_id)
         if engine:
             obs = engine.observation_registry.list_for_job(job_id)
-            return [o.to_dict() for o in obs]
+            return [_display_agents(o.to_dict(), ("actor_id", "source")) for o in obs]
         job = self.get_job(job_id)
         if job and job.observations:
             return job.observations
@@ -518,7 +526,7 @@ class JobService:
                                 name=t.description,
                                 order=idx,
                                 role=t.assigned_actor or "builder",
-                                agentId=t.assigned_actor or "unknown",
+                                agentId=normalize_agent_id(t.assigned_actor or "unknown"),
                                 status=t.status.value,
                                 attempt=t.attempt,
                                 startedAt=t.started_at,
@@ -542,11 +550,11 @@ class JobService:
                         completedAt=state.job.completed_at,
                         progress=progress,
                         phases=phases,
-                        tasks=[t.to_dict() for t in task_nodes],
+                        tasks=[_display_agents(t.to_dict(), ("assignedActor", "assigned_actor")) for t in task_nodes],
                         blockedReason=state.job.blocked_reason,
                         repairCount=state.job.repair_count,
                         replanCount=state.job.replan_count,
-                        observations=[o.to_dict() for o in state.observations],
+                        observations=[_display_agents(o.to_dict(), ("actor_id", "source")) for o in state.observations],
                     )
                     self.register_job(job_dto)
                     return job_dto
@@ -574,7 +582,7 @@ class JobService:
                 if events:
                     from runtime.storage.projector import RuntimeStateProjector
                     state = RuntimeStateProjector.project(events)
-                    return [r.to_dict() for r in state.runs]
+                    return [_display_agents(r.to_dict(), ("actor_id",)) for r in state.runs]
             except Exception as exc:
                 logger.warning("Error reconstructing runs for job %s: %s", job_id, exc)
         return []
@@ -591,7 +599,7 @@ class JobService:
                 if events:
                     from runtime.storage.projector import RuntimeStateProjector
                     state = RuntimeStateProjector.project(events)
-                    return [o.to_dict() for o in state.observations]
+                    return [_display_agents(o.to_dict(), ("actor_id", "source")) for o in state.observations]
             except Exception as exc:
                 logger.warning("Error reconstructing observations for job %s: %s", job_id, exc)
         return []

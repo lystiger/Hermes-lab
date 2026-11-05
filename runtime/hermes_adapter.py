@@ -872,6 +872,136 @@ class HermesActorAdapter(ActorAdapter):
         lines.append("--- END PROJECT CHECKS ---")
         return "\n".join(lines)
 
+    @staticmethod
+    def truncate_goal(goal: str, limit: int = 600) -> str:
+        goal = (goal or "").strip()
+        if len(goal) <= limit:
+            return goal
+        prefix = goal[:limit]
+        if goal[limit].isspace():
+            return prefix.rstrip() + "…"
+        match = list(re.finditer(r"\s+", prefix))
+        if match:
+            end = match[-1].start()
+            return prefix[:end].rstrip() + "…"
+        return prefix + "…"
+
+    @staticmethod
+    def normalize_task_status(status: Any) -> str:
+        s = str(getattr(status, "value", status) or "").lower()
+        if s in ("succeeded", "success", "done", "completed"):
+            return "done"
+        if s in ("running", "in_progress", "active"):
+            return "running"
+        if s in ("failed", "failure", "error", "cancelled", "canceled"):
+            return "failed"
+        return "pending"
+
+    @staticmethod
+    def _extract_first_sentence(desc: str, max_chars: int = 160) -> str:
+        if not desc:
+            return ""
+        lines = [l.strip() for l in desc.splitlines() if l.strip()]
+        if not lines:
+            return ""
+        content_lines = [l for l in lines if not l.startswith("#")]
+        first_line = content_lines[0] if content_lines else lines[0].lstrip("#").strip()
+        match = re.search(r"^.*?[.!?](?=\s|$)", first_line)
+        if match:
+            sentence = match.group(0).strip()
+        else:
+            sentence = first_line
+        if len(sentence) > max_chars:
+            sentence = sentence[:max_chars].rstrip()
+        return sentence
+
+    def build_job_context_section(
+        self,
+        task: Optional[TaskNode] = None,
+        goal: Optional[str] = None,
+        tasks: Optional[List[Any]] = None,
+    ) -> str:
+        if goal is None:
+            if task and isinstance(getattr(task, "metadata", None), dict):
+                goal = task.metadata.get("job_goal") or task.metadata.get("goal")
+            if not goal:
+                goal = getattr(self, "job_goal", None) or getattr(self, "goal", None)
+            if not goal and hasattr(self, "spec") and isinstance(self.spec, dict):
+                goal = self.spec.get("goal") or self.spec.get("name") or self.spec.get("title")
+            if not goal:
+                j_id = getattr(task, "job_id", None) or getattr(self, "job_id", None)
+                if j_id:
+                    try:
+                        from jobs.job_service import job_service
+                        eng = job_service.get_engine(j_id)
+                        if eng and hasattr(eng, "job") and getattr(eng.job, "goal", None):
+                            goal = eng.job.goal
+                    except Exception:
+                        pass
+
+        if tasks is None:
+            if task and isinstance(getattr(task, "metadata", None), dict):
+                tasks = task.metadata.get("tasks") or task.metadata.get("sibling_tasks") or task.metadata.get("all_tasks")
+            if tasks is None:
+                tasks = getattr(self, "tasks", None)
+            if tasks is None and hasattr(self, "graph") and hasattr(self.graph, "list_tasks"):
+                tasks = self.graph.list_tasks()
+            if tasks is None and hasattr(self, "spec") and isinstance(self.spec, dict) and self.spec.get("phases"):
+                tasks = self.spec.get("phases")
+            if tasks is None:
+                j_id = getattr(task, "job_id", None) or getattr(self, "job_id", None)
+                if j_id:
+                    try:
+                        from jobs.job_service import job_service
+                        eng = job_service.get_engine(j_id)
+                        if eng and hasattr(eng, "graph") and hasattr(eng.graph, "list_tasks"):
+                            tasks = eng.graph.list_tasks()
+                    except Exception:
+                        pass
+
+        truncated_goal = self.truncate_goal(goal) if goal else ""
+
+        current_id = None
+        if task:
+            current_id = getattr(task, "task_id", None)
+            if not current_id and isinstance(task, dict):
+                current_id = task.get("task_id") or task.get("taskId") or task.get("name")
+
+        sibling_lines = []
+        if tasks:
+            for item in tasks:
+                if isinstance(item, dict):
+                    t_id = item.get("task_id") or item.get("taskId") or item.get("name")
+                    desc = item.get("description") or item.get("name") or ""
+                    status = item.get("status")
+                else:
+                    t_id = getattr(item, "task_id", None)
+                    desc = getattr(item, "description", "") or ""
+                    status = getattr(item, "status", None)
+
+                if not t_id or t_id == current_id:
+                    continue
+
+                sentence = self._extract_first_sentence(desc, max_chars=160)
+                norm_status = self.normalize_task_status(status)
+                if sentence:
+                    sibling_lines.append(f"{t_id}: {sentence} ({norm_status})")
+                else:
+                    sibling_lines.append(f"{t_id}: ({norm_status})")
+
+        if not truncated_goal and not sibling_lines:
+            return ""
+
+        body_parts = []
+        if truncated_goal:
+            body_parts.append(truncated_goal)
+        if sibling_lines:
+            body_parts.append("\n".join(sibling_lines))
+
+        return "\n\n".join(["--- JOB CONTEXT ---", *body_parts, "--- END JOB CONTEXT ---"])
+
+    _job_context_section = build_job_context_section
+
     def build_effective_prompt(
         self,
         base_prompt: str,
@@ -882,9 +1012,15 @@ class HermesActorAdapter(ActorAdapter):
         task: Optional[TaskNode] = None,
         observations: Optional[List[Any]] = None,
         failure_history: Optional[List[Dict[str, Any]]] = None,
+        job_goal: Optional[str] = None,
+        tasks: Optional[List[Union[TaskNode, Dict[str, Any]]]] = None,
     ) -> str:
         """Constructs the full effective prompt with persona, continuity, context, and operational instructions."""
         parts = []
+        job_sec = self.build_job_context_section(task=task, goal=job_goal, tasks=tasks)
+        if job_sec:
+            parts.append(job_sec)
+
         if current_agent and self.persona_enabled:
             try:
                 from personas.persona import resolve_agent_profile
@@ -943,7 +1079,20 @@ class HermesActorAdapter(ActorAdapter):
         actor_id: str,
         role: str,
         worktree_path: Optional[Path] = None,
+        context: Optional[Dict[str, Any]] = None,
+        job_goal: Optional[str] = None,
+        tasks: Optional[List[Union[TaskNode, Dict[str, Any]]]] = None,
     ) -> str:
+        if job_goal is None and isinstance(context, dict):
+            if context.get("job") and isinstance(context["job"], dict) and context["job"].get("goal"):
+                job_goal = context["job"]["goal"]
+            elif context.get("engine") and hasattr(context["engine"], "job"):
+                job_goal = getattr(context["engine"].job, "goal", None)
+
+        if tasks is None and isinstance(context, dict):
+            if context.get("engine") and hasattr(context["engine"], "graph"):
+                tasks = context["engine"].graph.list_tasks()
+
         base_prompt = task.description
         prompt_file = task.metadata.get("prompt_file")
         if prompt_file:
@@ -985,6 +1134,8 @@ class HermesActorAdapter(ActorAdapter):
             task=task,
             observations=prior_obs,
             failure_history=prior_runs,
+            job_goal=job_goal,
+            tasks=tasks,
         )
 
     def _save_effective_prompt(
@@ -1116,6 +1267,7 @@ class HermesActorAdapter(ActorAdapter):
                 actor_id,
                 role,
                 worktree_path=self.target_repo if (hasattr(self, "target_repo") and self.target_repo and Path(self.target_repo).exists()) else None,
+                context=context,
             )
             self._save_effective_prompt(task, run, actor_id, effective_prompt)
             artifact = {
@@ -1228,7 +1380,7 @@ class HermesActorAdapter(ActorAdapter):
             self.sync_task_worktree_from_integration(worktree_path)
 
             # Prepare prompt
-            effective_prompt = self._prepare_effective_prompt(task, actor_id, role, worktree_path)
+            effective_prompt = self._prepare_effective_prompt(task, actor_id, role, worktree_path, context=context)
             self._save_effective_prompt(task, run, actor_id, effective_prompt)
 
             # Logs

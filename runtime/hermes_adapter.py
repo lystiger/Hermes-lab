@@ -22,6 +22,7 @@ import json
 import logging
 import os
 from pathlib import Path, PureWindowsPath
+import re
 import shutil
 import subprocess
 import sys
@@ -700,6 +701,66 @@ class HermesActorAdapter(ActorAdapter):
         sections.append("--- END OPERATIONAL MESSAGES ---")
         return "\n\n".join(sections)
 
+    @staticmethod
+    def _clean_changed_file_path(entry: str) -> str:
+        s = entry.strip()
+        parts = s.split(maxsplit=1)
+        if len(parts) == 2 and (parts[0] in {"M", "A", "D", "R", "C", "U", "??", "AM", "MM", "AD"} or len(parts[0]) <= 2):
+            return parts[1].strip('"')
+        return s.strip('"')
+
+    @classmethod
+    def _format_completion_files(cls, files: Sequence[str], limit: int = 20) -> str:
+        cleaned = [cls._clean_changed_file_path(f) for f in files if f and f.strip()]
+        seen = set()
+        unique = []
+        for f in cleaned:
+            if f not in seen:
+                seen.add(f)
+                unique.append(f)
+        if not unique:
+            return ""
+        if len(unique) <= limit:
+            return ", ".join(unique)
+        remaining = len(unique) - limit
+        return f"{', '.join(unique[:limit])}, and {remaining} more"
+
+    @classmethod
+    def is_completion_boilerplate(cls, obs: Any) -> bool:
+        """
+        Returns True if an observation's only content is routine completion boilerplate,
+        such as a dry run completion notice or a bare exit code notice with no files or commit.
+        """
+        if isinstance(obs, dict):
+            content = str(obs.get("content", ""))
+            meta = obs.get("metadata") or {}
+        elif hasattr(obs, "content"):
+            content = str(obs.content)
+            meta = getattr(obs, "metadata", {}) or {}
+        else:
+            content = str(obs)
+            meta = {}
+
+        if meta.get("dry_run"):
+            return True
+
+        text = content.strip()
+        if not text:
+            return True
+
+        if "completed dry-run execution" in text.lower():
+            return True
+
+        # Bare execution completion with only exit code (no commit sha, no changed files)
+        if re.search(
+            r"^(?:Agent\s+\S+\s+|Task\s+\S+\s+|Agent\s+)?completed\s+(?:task\s+\S+\s+)?with exit code\s+\d+$",
+            text,
+            re.IGNORECASE,
+        ):
+            return True
+
+        return False
+
     def build_continuity_section(
         self,
         task: TaskNode,
@@ -709,30 +770,34 @@ class HermesActorAdapter(ActorAdapter):
         """
         Renders execution continuity context across retries, reroutes, and recoveries.
         Ensures model progress, discoveries, and failure lessons are preserved.
+        Omits completion boilerplate and omits the section entirely when nothing useful remains.
         """
-        lines = []
-        is_retry = task.attempt > 0
+        body_lines = []
         has_reroute = bool(task.metadata and (task.metadata.get("previous_actor") or task.metadata.get("last_reroute_reason")))
-        if is_retry or has_reroute or observations or failure_history:
-            lines.append("--- LYSSTACK CONTINUITY CONTEXT ---")
-            if has_reroute:
-                prev = task.metadata.get("previous_actor", "previous agent")
-                reason = task.metadata.get("last_reroute_reason", "capacity reroute")
-                lines.append(f"[Reroute Notice] Execution rerouted from '{prev}'. Reason: {reason}")
-            if is_retry and task.error:
-                lines.append(f"[Previous Failure (Attempt {task.attempt})]\n{task.error}")
-            if observations:
-                lines.append("[Previous Attempt Discoveries & Observations]")
-                for obs in observations:
-                    content = obs.content if hasattr(obs, "content") else str(obs.get("content", obs) if isinstance(obs, dict) else obs)
-                    kind = getattr(obs, "kind", obs.get("kind", "discovery") if isinstance(obs, dict) else "discovery")
-                    lines.append(f"- [{kind}] {content}")
-            if failure_history:
-                lines.append("[Prior Run Telemetry]")
-                for f in failure_history:
-                    lines.append(f"- Run {f.get('run_id')}: status={f.get('status')}, exit_reason={f.get('exit_reason')}")
-            lines.append("--- END CONTINUITY CONTEXT ---")
-        return "\n\n".join(lines) if lines else ""
+        if has_reroute:
+            prev = task.metadata.get("previous_actor", "previous agent")
+            reason = task.metadata.get("last_reroute_reason", "capacity reroute")
+            body_lines.append(f"[Reroute Notice] Execution rerouted from '{prev}'. Reason: {reason}")
+        is_retry = task.attempt > 0
+        if is_retry and task.error:
+            body_lines.append(f"[Previous Failure (Attempt {task.attempt})]\n{task.error}")
+
+        useful_obs = [o for o in (observations or []) if not self.is_completion_boilerplate(o)]
+        if useful_obs:
+            body_lines.append("[Previous Attempt Discoveries & Observations]")
+            for obs in useful_obs:
+                content = obs.content if hasattr(obs, "content") else str(obs.get("content", obs) if isinstance(obs, dict) else obs)
+                kind = getattr(obs, "kind", obs.get("kind", "discovery") if isinstance(obs, dict) else "discovery")
+                body_lines.append(f"- [{kind}] {content}")
+        if failure_history:
+            body_lines.append("[Prior Run Telemetry]")
+            for f in failure_history:
+                body_lines.append(f"- Run {f.get('run_id')}: status={f.get('status')}, exit_reason={f.get('exit_reason')}")
+
+        if not body_lines:
+            return ""
+
+        return "\n\n".join(["--- LYSSTACK CONTINUITY CONTEXT ---", *body_lines, "--- END CONTINUITY CONTEXT ---"])
 
     MAX_DIFF_CHARS = 30000
 
@@ -1272,13 +1337,29 @@ class HermesActorAdapter(ActorAdapter):
                     "created_at": datetime.now(timezone.utc).isoformat(),
                 })
 
+            clean_files = [self._clean_changed_file_path(f) for f in (mutations or changed_files)]
+            files_str = self._format_completion_files(mutations or changed_files)
+            if commit_sha and files_str:
+                obs_content = f"Agent {actor_id} completed task {task.task_id} (commit {commit_sha}): {files_str}"
+            elif commit_sha:
+                obs_content = f"Agent {actor_id} completed task {task.task_id} (commit {commit_sha})"
+            elif files_str:
+                obs_content = f"Agent {actor_id} completed task {task.task_id}: {files_str}"
+            else:
+                obs_content = f"Agent {actor_id} completed task {task.task_id} with exit code {exit_code}"
+
             obs = Observation(
                 job_id=task.job_id,
                 task_id=task.task_id,
                 source=actor_id,
                 kind="execution_output",
-                content=f"Agent {actor_id} completed task {task.task_id} with exit code {exit_code}",
-                metadata={"changed_files_count": len(changed_files), "commit_sha": commit_sha, "exit_code": exit_code},
+                content=obs_content,
+                metadata={
+                    "changed_files_count": len(changed_files),
+                    "commit_sha": commit_sha,
+                    "exit_code": exit_code,
+                    "changed_files": clean_files,
+                },
             )
 
             obs_list = [obs]

@@ -70,6 +70,8 @@ DEFAULT_CAPABILITY_PROFILES: Dict[str, List[str]] = {
         "code.typescript",
         "frontend.react",
         "testing.unit",
+        "testing.integration",
+        "verification",
         "documentation",
         "git.inspect",
         "repo.read",

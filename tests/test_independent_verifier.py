@@ -79,3 +79,10 @@ async def test_verifier_skips_a_builder_labelled_hardener():
     await run_all(scheduler, exec_mgr, graph)
     assert graph.get_task("build").assigned_actor == "antigravity"
     assert graph.get_task("verify").assigned_actor == "codex"
+
+
+def test_claude_can_verify_a_planned_verifier_task():
+    # A planned verifier needs these; without them only codex and antigravity qualify, so codex gates every job.
+    from capabilities.capabilities import DEFAULT_CAPABILITY_PROFILES
+    verifier_caps = {"verification", "testing.integration", "git.inspect"}
+    assert verifier_caps <= set(DEFAULT_CAPABILITY_PROFILES["claude"])

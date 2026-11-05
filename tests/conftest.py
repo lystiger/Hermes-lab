@@ -22,6 +22,9 @@ os.environ["HERMES_AUTO_RESUME"] = "0"
 # The console lists jobs from the runs folder; test jobs (including those written by API
 # subprocesses, which inherit this) must never land in the real one.
 os.environ["HERMES_RUNS_ROOT"] = str(_SESSION_STATE / "hermes-runs")
+# Some tests run jobs against this repository, whose hermes.json check is this suite; the
+# check skips itself when this is set, so the suite never starts itself again.
+os.environ["HERMES_LAB_CHECK"] = "1"
 os.environ.pop("DATABASE_URL", None)
 os.environ.pop("HERMES_DATABASE_URL", None)
 

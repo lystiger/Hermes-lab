@@ -79,3 +79,15 @@ async def test_verifier_skips_a_builder_labelled_hardener():
     await run_all(scheduler, exec_mgr, graph)
     assert graph.get_task("build").assigned_actor == "antigravity"
     assert graph.get_task("verify").assigned_actor == "codex"
+
+
+@pytest.mark.parametrize("verifier_caps", [
+    # Capability sets the planner gave real verifier tasks on 2026-11-05.
+    {"verification", "testing.unit", "review.correctness"},
+    {"verification", "testing.integration", "git.inspect"},
+])
+@pytest.mark.parametrize("agent", ["claude", "antigravity"])
+def test_claude_and_antigravity_can_verify_planned_verifier_tasks(agent, verifier_caps):
+    # Codex alone had these, so it verified every job.
+    from capabilities.capabilities import DEFAULT_CAPABILITY_PROFILES
+    assert verifier_caps <= set(DEFAULT_CAPABILITY_PROFILES[agent])

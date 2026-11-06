@@ -537,6 +537,7 @@ class JobLauncher:
                 return False
             await asyncio.sleep(min(5.0, max(0.1, deadline - time.monotonic())))
         task_hb = asyncio.create_task(lease_mgr._heartbeat_loop(job_id), name=f"lease-hb-{job_id}")
+        await asyncio.sleep(0)
         self._lease_managers[job_id] = (lease_mgr, task_hb, owner)
         return True
 
@@ -674,6 +675,25 @@ class JobLauncher:
                 await engine.initialize_and_plan(initial_tasks=None)
             except Exception as exc:
                 logger.exception("Goal-planned job %s failed to plan: %s", job_id, exc)
+                lm_info = self._lease_managers.pop(job_id, None)
+                if lm_info:
+                    lm, task_hb, owner = lm_info
+                    if not task_hb.done():
+                        task_hb.cancel()
+                    try:
+                        await lm.lease_store.release_lease(job_id, owner)
+                    except Exception:
+                        pass
+                try:
+                    await engine._transition_job(JobState.FAILED, reason=str(exc))
+                except Exception:
+                    engine.job.state = JobState.FAILED
+                job_state_reducer.apply(
+                    kind="job.failed",
+                    detail=f"Goal-planned job {job_id} failed to plan: {exc}",
+                    job_id=job_id,
+                    metadata={"error": str(exc)},
+                )
                 return
             self._start_engine_background(engine)
 

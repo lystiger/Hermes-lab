@@ -220,11 +220,11 @@ def test_output_fixture_outside_git_repo(tmp_path):
     root = repo / "roots" / "a"
     _write_run(root, "run_20260101_100000_og01")
 
-    out = repo / "out"
+    out = tmp_path / "out"
     inside_git = [ancestor for ancestor in [out, *out.parents] if (ancestor / ".git").exists()]
     assert inside_git == [], "--out path supplied by the fixture resolves inside a git repository"
 
-    _run_audit(repo, [root])
+    _run_audit(tmp_path, [root])
 
 
 def test_out_overlapping_input_root_is_rejected(tmp_path):

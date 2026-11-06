@@ -311,8 +311,13 @@ class RecoveryManager:
         engine._last_verification_result = projected.last_verification
         engine._job_created_emitted = True
 
-        # If job was in WAITING_FOR_CAPACITY or EXECUTING, maintain valid state
-        if engine.job.state in (JobState.PLANNING, JobState.EXECUTING, JobState.WAITING_FOR_CAPACITY, JobState.REPAIRING, JobState.VERIFYING):
+        # If job was interrupted in PLANNING or REPAIRING, advance to EXECUTING to resume execution
+        if engine.job.state in (JobState.PLANNING, JobState.REPAIRING):
+            await engine._transition_job(
+                JobState.EXECUTING,
+                reason=f"Resuming interrupted {engine.job.state.value} phase after recovery",
+            )
+        elif engine.job.state in (JobState.EXECUTING, JobState.WAITING_FOR_CAPACITY, JobState.VERIFYING):
             pass
 
         # 8. Emit rehydrated & completed events

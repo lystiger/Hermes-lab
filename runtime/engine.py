@@ -868,10 +868,11 @@ class ReactiveJobEngine:
 
     def _capacity_wait_seconds(self) -> float:
         registry = getattr(self.scheduler, "capacity_registry", None)
-        resets = list(getattr(registry, "_provider_reset_at", {}).values())
+        now = datetime.now(timezone.utc)
+        resets = [at for at in getattr(registry, "_provider_reset_at", {}).values() if at > now]
         if not resets:
             return 5.0
-        until = min(resets) - datetime.now(timezone.utc)
+        until = min(resets) - now
         return min(5.0, max(0.01, until.total_seconds()))
 
     async def _repair_failed_verdict(self, task: TaskNode, exec_res: TaskExecutionResult) -> bool:

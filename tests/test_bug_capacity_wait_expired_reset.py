@@ -53,3 +53,4 @@ async def test_capacity_wait_ignores_expired_reset_time(monkeypatch):
     assert len(sleeps) == 5
     # Expired reset times must be dropped; a wait of 0.01s per step is the busy-loop regression.
     assert all(seconds >= 1.0 for seconds in sleeps), sleeps
+    assert "anthropic" not in registry._provider_reset_at

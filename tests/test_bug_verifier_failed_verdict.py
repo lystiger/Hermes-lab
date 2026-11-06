@@ -113,7 +113,11 @@ async def test_verifier_nested_failed_verdict_is_not_succeeded(tmp_path: Path):
 
     assert exec_result.status != "succeeded"
     assert exec_result.status == "failed"
-    assert task.status != TaskStatus.SUCCEEDED
+    assert task.status == TaskStatus.FAILED
+    assert exec_result.metadata.get("verdict") == "failed"
+    assert exec_result.metadata.get("repairable") is True
+    assert exec_result.metadata.get("verification_summary") == "T3 deliverables are absent: contract tests were not written."
+    assert exec_result.metadata.get("findings") == ["deliverables missing"]
 
 
 @pytest.mark.anyio
@@ -139,12 +143,14 @@ async def test_verifier_without_valid_verdict_fails_closed(tmp_path: Path):
 
         assert exec_result.status == "failed"
         assert task.status == TaskStatus.FAILED
+        assert exec_result.metadata.get("verdict") is None
 
 
 @pytest.mark.anyio
 async def test_verifier_passed_verdict_still_succeeds(tmp_path: Path):
     """
-    Control test: a verifier task with an explicit passed verdict still succeeds.
+    Control test: a verifier task with an explicit passed verdict still succeeds,
+    both for Codex and for Claude nested JSON envelope results.
     """
     codex_stdout = json.dumps({
         "verdict": "passed",
@@ -153,7 +159,7 @@ async def test_verifier_passed_verdict_still_succeeds(tmp_path: Path):
     })
 
     task, exec_result = await _execute_verifier_task(
-        tmp_path,
+        tmp_path / "codex",
         actor_id="codex",
         role="verifier",
         stdout_text=codex_stdout,
@@ -163,3 +169,26 @@ async def test_verifier_passed_verdict_still_succeeds(tmp_path: Path):
     assert exec_result.status == "succeeded"
     assert task.status == TaskStatus.SUCCEEDED
     assert exec_result.metadata.get("verdict") == "passed"
+
+    claude_stdout = json.dumps({
+        "type": "result",
+        "subtype": "success",
+        "is_error": False,
+        "result": "```json\n" + json.dumps({
+            "verdict": "passed",
+            "summary": "Claude verification passed.",
+            "findings": [],
+        }) + "\n```",
+    })
+
+    task2, exec_result2 = await _execute_verifier_task(
+        tmp_path / "claude",
+        actor_id="claude",
+        role="verifier",
+        stdout_text=claude_stdout,
+        returncode=0,
+    )
+
+    assert exec_result2.status == "succeeded"
+    assert task2.status == TaskStatus.SUCCEEDED
+    assert exec_result2.metadata.get("verdict") == "passed"

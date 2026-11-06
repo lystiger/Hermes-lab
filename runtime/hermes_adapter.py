@@ -988,8 +988,8 @@ class HermesActorAdapter(ActorAdapter):
             if mb_sec:
                 parts.append(mb_sec)
 
-        # Inject explicit verifier contract for verifier-role execution
-        if role == "verifier" or (task and isinstance(task.metadata, dict) and task.metadata.get("role") == "verifier"):
+        # Inject explicit verifier contract for verifier- and security-role execution (both fail without a verdict)
+        if role in ("verifier", "security") or (task and isinstance(task.metadata, dict) and task.metadata.get("role") in ("verifier", "security")):
             verifier_contract = (
                 "--- HERMES VERIFICATION CONTRACT ---\n"
                 "Your final response MUST contain a verification result in this JSON form:\n\n"
@@ -1370,7 +1370,7 @@ class HermesActorAdapter(ActorAdapter):
 
             # Ingest usage and check context pressure
             runtime_meta = dict(getattr(raw_res, "runtime_metadata", {}) or {})
-            if "verdict" not in runtime_meta and (actor_id == "codex" or role == "verifier"):
+            if "verdict" not in runtime_meta and (actor_id == "codex" or role in ("verifier", "security")):
                 try:
                     from runner.agents.codex import CodexAdapter
                     parsed_ver = CodexAdapter.parse_verification_output(stdout_text, stderr_text)
@@ -1488,6 +1488,8 @@ class HermesActorAdapter(ActorAdapter):
             # If agent reported a semantic failure verdict (e.g. Codex structured verification failure)
             verdict = runtime_meta.get("verdict")
             if verdict in ("failed", "fail"):
+                status_str = "failed"
+            elif role in ("verifier", "security") and verdict not in ("passed", "pass", "success", "ok"):
                 status_str = "failed"
             elif exit_code == 0:
                 status_str = "succeeded"

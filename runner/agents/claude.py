@@ -177,3 +177,22 @@ class ClaudeAdapter(AgentAdapter):
                 result.runtime_metadata["tokens_remaining"] = data["tokens_remaining"]
             if "token_limit" in data:
                 result.runtime_metadata["token_limit"] = data["token_limit"]
+            result_text = data.get("result")
+            if isinstance(result_text, (str, dict)):
+                try:
+                    from .codex import CodexAdapter
+                    text = json.dumps(result_text) if isinstance(result_text, dict) else result_text
+                    parsed_ver = CodexAdapter.parse_verification_output(text, result.stderr or "")
+                    if parsed_ver:
+                        if isinstance(parsed_ver.get("observations"), list):
+                            for obs in parsed_ver["observations"]:
+                                if isinstance(obs, dict) and "content" in obs:
+                                    obs["content"] = obs["content"].replace("Codex verification", "Claude verification")
+                        if parsed_ver.get("replan_reason"):
+                            parsed_ver["replan_reason"] = parsed_ver["replan_reason"].replace("Codex verification", "Claude verification")
+                        if hasattr(result, "runtime_metadata") and isinstance(result.runtime_metadata, dict):
+                            result.runtime_metadata.update(parsed_ver)
+                        else:
+                            object.__setattr__(result, "runtime_metadata", {**(getattr(result, "runtime_metadata", None) or {}), **parsed_ver})
+                except Exception:
+                    pass

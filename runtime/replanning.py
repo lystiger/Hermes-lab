@@ -1,7 +1,9 @@
+import asyncio
 from dataclasses import dataclass, field, asdict
 from enum import Enum
 import logging
 from typing import Any, Callable, Dict, List, Optional, Union
+import uuid
 
 from runtime.task_graph import TaskGraph, TaskNode, TaskStatus
 from runtime.observations import Observation
@@ -270,7 +272,7 @@ class ProductionPlannerAdapter(PlannerAdapter):
             
             if failed_obs:
                 for idx, obs in enumerate(failed_obs, start=1):
-                    repair_task_id = f"repair_check_{int(time.time())}_{idx}"
+                    repair_task_id = f"repair_check_{int(time.time())}_{idx}_{uuid.uuid4().hex[:8]}"
                     source_task = (
                         request.current_graph.get_task(obs.task_id)
                         if getattr(obs, "task_id", None) and request.current_graph is not None
@@ -304,7 +306,7 @@ class ProductionPlannerAdapter(PlannerAdapter):
                     mutations.append(GraphMutation(mutation_type=GraphMutationType.ADD_TASK, task=repair_node, reason="Repair verification failure"))
                     explanation_parts.append(f"Added repair task '{repair_task_id}' for {obs.content[:80]}")
             else:
-                repair_task_id = f"repair_general_{int(time.time())}"
+                repair_task_id = f"repair_general_{int(time.time())}_{uuid.uuid4().hex[:8]}"
                 repair_node = TaskNode(
                     task_id=repair_task_id,
                     job_id=request.job_id,
@@ -328,7 +330,7 @@ class ProductionPlannerAdapter(PlannerAdapter):
                 if failed_task.attempt < failed_task.max_attempts:
                     continue  # Scheduler will retry
                 # Exhausted attempts -> generate diagnostic/workaround task
-                fix_task_id = f"fix_{failed_task.task_id}_{int(time.time())}"
+                fix_task_id = f"fix_{failed_task.task_id}_{int(time.time())}_{uuid.uuid4().hex[:8]}"
                 fix_node = TaskNode(
                     task_id=fix_task_id,
                     job_id=request.job_id,

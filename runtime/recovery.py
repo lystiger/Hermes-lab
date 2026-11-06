@@ -3,7 +3,7 @@ from datetime import datetime, timezone, timedelta
 from enum import Enum
 import logging
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Set, Tuple, Union
+from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Union
 import uuid
 
 from runtime.job_state import JobRecord, JobState, TERMINAL_JOB_STATES
@@ -178,11 +178,13 @@ class RecoveryManager:
         lease_store: Optional[JobLeaseStore] = None,
         capability_registry: Optional[CapabilityRegistry] = None,
         limits: Optional[RuntimeLimits] = None,
+        is_engine_live: Optional[Callable[[str], bool]] = None,
     ):
         self.event_store = event_store
         self.lease_store = lease_store or InMemoryJobLeaseStore()
         self.capability_registry = capability_registry or default_capability_registry
         self.limits = limits or RuntimeLimits()
+        self.is_engine_live = is_engine_live
 
     async def recover_and_rehydrate(
         self,
@@ -207,7 +209,22 @@ class RecoveryManager:
         if projected.job.is_terminal:
             raise ValueError(f"Cannot resume terminal job '{job_id}' (state: {projected.job.state.value})")
 
-        # 4. Invariant: Single-Active-Executor Job Lease
+        # 4. Invariant: Refuse if the job already has a live engine
+        is_live = False
+        if self.is_engine_live is not None:
+            is_live = self.is_engine_live(job_id)
+        else:
+            try:
+                from jobs.job_service import job_service
+                eng = job_service.get_engine(job_id)
+                if eng and not eng.job.is_terminal:
+                    is_live = True
+            except ImportError:
+                pass
+        if is_live:
+            raise RuntimeError(f"Cannot resume job '{job_id}': engine is already live")
+
+        # 5. Invariant: Single-Active-Executor Job Lease
         lease_acquired = await self.lease_store.acquire_lease(job_id=job_id, owner_id=owner, duration_seconds=60.0)
         if not lease_acquired:
             raise RuntimeError(f"Cannot resume job '{job_id}': active lease held by another executor")
@@ -294,8 +311,20 @@ class RecoveryManager:
         engine._last_verification_result = projected.last_verification
         engine._job_created_emitted = True
 
-        # If job was in WAITING_FOR_CAPACITY or EXECUTING, maintain valid state
-        if engine.job.state in (JobState.PLANNING, JobState.EXECUTING, JobState.WAITING_FOR_CAPACITY, JobState.REPAIRING, JobState.VERIFYING):
+        # If job was interrupted in PLANNING or REPAIRING, advance to EXECUTING to resume execution.
+        # An empty goal-planned graph must remain in PLANNING so resume_async can plan from the start.
+        is_empty_goal_plan = (
+            engine.job.state == JobState.PLANNING
+            and not engine.graph.list_tasks()
+            and isinstance(engine.job.metadata, dict)
+            and engine.job.metadata.get("launch_mode") == "goal_planned"
+        )
+        if (engine.job.state in (JobState.PLANNING, JobState.REPAIRING)) and not is_empty_goal_plan:
+            await engine._transition_job(
+                JobState.EXECUTING,
+                reason=f"Resuming interrupted {engine.job.state.value} phase after recovery",
+            )
+        elif engine.job.state in (JobState.EXECUTING, JobState.WAITING_FOR_CAPACITY, JobState.VERIFYING):
             pass
 
         # 8. Emit rehydrated & completed events

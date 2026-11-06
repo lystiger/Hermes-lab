@@ -91,7 +91,13 @@ def scan_python(root):
     # Medium and high findings fail the check. Low ones are notes, so they do not drown the signal.
     blocking = [f for f in findings if f["severity"] in ("medium", "high")]
     notes = [f for f in findings if f["severity"] not in ("medium", "high")]
-    return {"check": "python-static", "status": "FAIL" if blocking else "PASS", "findings": blocking, "notes": notes}
+    # A file Bandit could not analyse is a gap in coverage, so the check is UNPROVEN unless a finding already fails it.
+    gaps = data.get("errors") or []
+    status = "FAIL" if blocking else "UNPROVEN" if gaps else "PASS"
+    result = {"check": "python-static", "status": status, "findings": blocking, "notes": notes}
+    if gaps:
+        result["reason"] = f"bandit could not analyse {len(gaps)} file(s)"
+    return result
 
 
 def scan_dependencies(root):
@@ -110,7 +116,13 @@ def scan_dependencies(root):
         for vuln in dep.get("vulns", []):
             findings.append({"rule": vuln.get("id"), "package": dep.get("name"), "version": dep.get("version"),
                              "severity": "high", "evidence": ", ".join(vuln.get("fix_versions", [])) or "no fix listed"})
-    return {"check": "dependencies", "status": "FAIL" if findings else "PASS", "findings": findings}
+    # A dependency pip-audit skipped was never looked up, so the check is UNPROVEN unless a finding already fails it.
+    skipped = [dep.get("name") for dep in data["dependencies"] if dep.get("skip_reason")]
+    status = "FAIL" if findings else "UNPROVEN" if skipped else "PASS"
+    result = {"check": "dependencies", "status": status, "findings": findings}
+    if skipped:
+        result["reason"] = f"pip-audit could not audit: {', '.join(skipped)}"
+    return result
 
 
 def _module_present(name):

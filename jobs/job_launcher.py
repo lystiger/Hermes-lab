@@ -239,7 +239,7 @@ class JobLauncher:
             spec = json.load(f)
 
         timestamp = time.strftime("%Y%m%d_%H%M%S")
-        job_id = f"run_{timestamp}_{sprint_id}"
+        job_id = f"run_{timestamp}_{sprint_id}_{uuid.uuid4().hex[:8]}"
 
         if mode == "legacy_static_runner":
             return self._launch_legacy(

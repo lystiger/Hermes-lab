@@ -1,3 +1,9 @@
+"""Bug 8 test.
+
+Bug 8: fixed (test_planning_exception_cancels_heartbeat_releases_lease_and_fails_job) - reproduced and fixed.
+Not marked not reproduced.
+"""
+
 import asyncio
 
 import pytest

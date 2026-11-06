@@ -1,3 +1,9 @@
+"""Bug 9 test.
+
+Bug 9: fixed (test_bandit_error_or_pip_audit_skip_reports_unproven) - reproduced and fixed.
+Not marked not reproduced.
+"""
+
 from security import scan
 
 

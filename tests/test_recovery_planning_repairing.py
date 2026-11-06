@@ -1,3 +1,9 @@
+"""Bug 7 test.
+
+Bug 7: fixed (test_interrupted_planning_or_repairing_resumes_explicitly) - reproduced and fixed.
+Not marked not reproduced.
+"""
+
 import pytest
 
 from runtime.job_state import JobRecord, JobState

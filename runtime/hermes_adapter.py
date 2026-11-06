@@ -1370,7 +1370,7 @@ class HermesActorAdapter(ActorAdapter):
 
             # Ingest usage and check context pressure
             runtime_meta = dict(getattr(raw_res, "runtime_metadata", {}) or {})
-            if "verdict" not in runtime_meta and (actor_id == "codex" or role == "verifier"):
+            if "verdict" not in runtime_meta and (actor_id == "codex" or role in ("verifier", "security")):
                 try:
                     from runner.agents.codex import CodexAdapter
                     parsed_ver = CodexAdapter.parse_verification_output(stdout_text, stderr_text)
@@ -1488,6 +1488,8 @@ class HermesActorAdapter(ActorAdapter):
             # If agent reported a semantic failure verdict (e.g. Codex structured verification failure)
             verdict = runtime_meta.get("verdict")
             if verdict in ("failed", "fail"):
+                status_str = "failed"
+            elif role in ("verifier", "security") and verdict not in ("passed", "pass", "success", "ok"):
                 status_str = "failed"
             elif exit_code == 0:
                 status_str = "succeeded"

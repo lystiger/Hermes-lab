@@ -311,8 +311,15 @@ class RecoveryManager:
         engine._last_verification_result = projected.last_verification
         engine._job_created_emitted = True
 
-        # If job was interrupted in PLANNING or REPAIRING, advance to EXECUTING to resume execution
-        if engine.job.state in (JobState.PLANNING, JobState.REPAIRING):
+        # If job was interrupted in PLANNING or REPAIRING, advance to EXECUTING to resume execution.
+        # An empty goal-planned graph must remain in PLANNING so resume_async can plan from the start.
+        is_empty_goal_plan = (
+            engine.job.state == JobState.PLANNING
+            and not engine.graph.list_tasks()
+            and isinstance(engine.job.metadata, dict)
+            and engine.job.metadata.get("launch_mode") == "goal_planned"
+        )
+        if (engine.job.state in (JobState.PLANNING, JobState.REPAIRING)) and not is_empty_goal_plan:
             await engine._transition_job(
                 JobState.EXECUTING,
                 reason=f"Resuming interrupted {engine.job.state.value} phase after recovery",

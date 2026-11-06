@@ -27,7 +27,7 @@ def test_resume_refuses_409_when_engine_live(monkeypatch):
                 payload={
                     "goal": "Test live engine resume guard",
                     "title": "Live Engine Job",
-                    "status": "RUNNING",
+                    "status": "EXECUTING",
                 },
             )
         )
@@ -35,7 +35,7 @@ def test_resume_refuses_409_when_engine_live(monkeypatch):
 
     # Arrange: register a live engine for this job
     engine = ReactiveJobEngine(job_id=job_id, goal="Test live engine resume guard")
-    engine.job.state = JobState.RUNNING
+    engine.job.state = JobState.EXECUTING
     job_service.register_engine(engine)
 
     # Ensure engine is registered and not terminal

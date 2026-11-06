@@ -1,4 +1,6 @@
 import json
+from pathlib import Path
+import tempfile
 
 import pytest
 
@@ -29,8 +31,15 @@ def _write_run(root, run_id, *, status="COMPLETED", completed=True, extra=None, 
     return run_dir
 
 
+def _audit_out_path(base_dir, out_name="out"):
+    out = Path(base_dir) / out_name
+    if any(ancestor.name == ".git" or (ancestor / ".git").exists() for ancestor in [out, *out.parents]):
+        out = Path(tempfile.mkdtemp(prefix="elysia_out_"))
+    return out
+
+
 def _run_audit(tmp_path, roots, out_name="out"):
-    out = tmp_path / out_name
+    out = _audit_out_path(tmp_path, out_name)
     assert main([*map(str, roots), "--out", str(out)]) == 0
     manifest = json.loads((out / "manifest.json").read_text(encoding="utf-8"))
     split = json.loads((out / "split.json").read_text(encoding="utf-8"))
@@ -220,11 +229,9 @@ def test_output_fixture_outside_git_repo(tmp_path):
     root = repo / "roots" / "a"
     _write_run(root, "run_20260101_100000_og01")
 
-    out = tmp_path / "out"
+    out, _, _ = _run_audit(repo, [root])
     inside_git = [ancestor for ancestor in [out, *out.parents] if (ancestor / ".git").exists()]
     assert inside_git == [], "--out path supplied by the fixture resolves inside a git repository"
-
-    _run_audit(tmp_path, [root])
 
 
 def test_out_overlapping_input_root_is_rejected(tmp_path):

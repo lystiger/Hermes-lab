@@ -20,6 +20,7 @@ class JobState(str, Enum):
     BLOCKED = "blocked"
     FAILED = "failed"
     CANCELLED = "cancelled"
+    RUNNING = EXECUTING
 
 
 LEGAL_JOB_TRANSITIONS: Dict[JobState, Set[JobState]] = {
@@ -82,7 +83,10 @@ class JobRecord:
         if not self.title:
             self.title = self.goal[:80] if self.goal else f"Job {self.job_id}"
         if isinstance(self.state, str):
-            self.state = JobState(self.state.lower())
+            val = self.state.lower()
+            if val == "running":
+                val = "executing"
+            self.state = JobState(val)
 
     @property
     def is_terminal(self) -> bool:

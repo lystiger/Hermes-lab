@@ -869,6 +869,12 @@ class JobLauncher:
         # Canonical single owner_id for this resume session
         owner = owner_id or f"hermes-node-{uuid.uuid4().hex[:8]}"
 
+        existing_engine = job_service.get_engine(job_id)
+        if (existing_engine and not existing_engine.job.is_terminal) or (
+            job_id in self._active_async_tasks and not self._active_async_tasks[job_id].done()
+        ):
+            raise RuntimeError(f"Cannot resume job '{job_id}': engine is already live and running")
+
         store = get_global_event_store()
         lease_store = get_global_lease_store()
         # A goal-planned job is rebuilt with the limits and agent exclusions it was launched with.
@@ -880,6 +886,10 @@ class JobLauncher:
             event_store=store,
             lease_store=lease_store,
             limits=limits,
+            is_engine_live=lambda jid: bool(
+                (job_service.get_engine(jid) and not job_service.get_engine(jid).job.is_terminal)
+                or (jid in self._active_async_tasks and not self._active_async_tasks[jid].done())
+            ),
             **({"capability_registry": create_default_capability_registry(exclude=meta.get("exclude_agents"))}
                if goal_planned and meta.get("exclude_agents") else {}),
         )

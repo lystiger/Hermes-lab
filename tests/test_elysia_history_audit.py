@@ -214,6 +214,19 @@ def test_out_inside_git_repository_is_rejected(tmp_path):
     assert not (repo / "out").exists()
 
 
+def test_output_fixture_outside_git_repo(tmp_path):
+    repo = tmp_path / "repo"
+    (repo / ".git").mkdir(parents=True)
+    root = repo / "roots" / "a"
+    _write_run(root, "run_20260101_100000_og01")
+
+    out = repo / "out"
+    inside_git = [ancestor for ancestor in [out, *out.parents] if (ancestor / ".git").exists()]
+    assert inside_git == [], "--out path supplied by the fixture resolves inside a git repository"
+
+    _run_audit(repo, [root])
+
+
 def test_out_overlapping_input_root_is_rejected(tmp_path):
     root = tmp_path / "roots" / "a"
     _write_run(root, "run_20260101_100000_ov01")

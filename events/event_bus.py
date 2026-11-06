@@ -4,7 +4,7 @@ import time
 from collections import deque
 from dataclasses import dataclass, field, asdict
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional, Set
+from typing import Any, Dict, List, Optional
 
 
 @dataclass(frozen=True)
@@ -47,7 +47,7 @@ class RuntimeEventBus:
     def __init__(self, max_history: int = 500):
         self.max_history = max_history
         self._history: deque[RuntimeEvent] = deque(maxlen=max_history)
-        self._subscribers: Set[asyncio.Queue] = set()
+        self._subscribers: Dict[asyncio.Queue, asyncio.AbstractEventLoop] = {}
         self._lock = threading.Lock()
         self._event_counter = 0
 
@@ -101,12 +101,10 @@ class RuntimeEventBus:
 
         with self._lock:
             self._history.append(event)
-            # Notify live async subscribers
-            for queue in list(self._subscribers):
-                try:
-                    queue.put_nowait(event)
-                except asyncio.QueueFull:
-                    pass
+            # Notify live async subscribers on their own event loop; publish may run on a worker thread
+            for queue, loop in list(self._subscribers.items()):
+                if not loop.is_closed():
+                    loop.call_soon_threadsafe(_offer, queue, event)
 
         return event
 
@@ -127,12 +125,20 @@ class RuntimeEventBus:
         return events
 
     def subscribe(self, queue: asyncio.Queue) -> None:
+        loop = asyncio.get_running_loop()
         with self._lock:
-            self._subscribers.add(queue)
+            self._subscribers[queue] = loop
 
     def unsubscribe(self, queue: asyncio.Queue) -> None:
         with self._lock:
-            self._subscribers.discard(queue)
+            self._subscribers.pop(queue, None)
+
+
+def _offer(queue: asyncio.Queue, event: RuntimeEvent) -> None:
+    try:
+        queue.put_nowait(event)
+    except asyncio.QueueFull:
+        pass
 
 
 # Singleton event bus instance for Hermes runtime

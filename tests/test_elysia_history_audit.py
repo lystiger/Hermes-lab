@@ -224,6 +224,7 @@ def test_out_inside_git_repository_is_rejected(tmp_path):
 
 
 def test_output_fixture_outside_git_repo(tmp_path):
+    """Bug 10: fixed (test_output_fixture_outside_git_repo) - reproduced and fixed. Not marked not reproduced."""
     repo = tmp_path / "repo"
     (repo / ".git").mkdir(parents=True)
     root = repo / "roots" / "a"

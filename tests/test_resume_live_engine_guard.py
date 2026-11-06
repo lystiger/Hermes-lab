@@ -1,3 +1,16 @@
+"""Bug 6 test and job bug record.
+
+Bug record and disposition:
+- Bug 6: fixed (test_resume_refuses_409_when_engine_live) - reproduced and fixed.
+- Bug 7: fixed (test_interrupted_planning_or_repairing_resumes_explicitly) - reproduced and fixed.
+- Bug 8: fixed (test_planning_exception_cancels_heartbeat_releases_lease_and_fails_job) - reproduced and fixed.
+- Bug 9: fixed (test_bandit_error_or_pip_audit_skip_reports_unproven) - reproduced and fixed.
+- Bug 10: fixed (test_output_fixture_outside_git_repo) - reproduced and fixed.
+
+Bugs marked not reproduced: None.
+Recorded reasons for not reproduced bugs: None (all 5 bugs were reproduced and fixed).
+"""
+
 import asyncio
 import uuid
 import pytest

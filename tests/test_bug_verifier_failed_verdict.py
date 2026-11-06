@@ -192,3 +192,11 @@ async def test_verifier_passed_verdict_still_succeeds(tmp_path: Path):
     assert exec_result2.status == "succeeded"
     assert task2.status == TaskStatus.SUCCEEDED
     assert exec_result2.metadata.get("verdict") == "passed"
+
+
+@pytest.mark.parametrize("role", ["verifier", "security"])
+def test_fail_closed_roles_are_told_to_report_a_verdict(role):
+    """Verifier and security tasks fail without a verdict, so both prompts must ask for one."""
+    task = TaskNode(task_id="t1", description="Check the work.", metadata={"role": role})
+    prompt = HermesActorAdapter().build_effective_prompt(base_prompt="Check the work.", role=role, task=task)
+    assert "--- HERMES VERIFICATION CONTRACT ---" in prompt

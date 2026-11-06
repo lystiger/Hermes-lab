@@ -988,8 +988,8 @@ class HermesActorAdapter(ActorAdapter):
             if mb_sec:
                 parts.append(mb_sec)
 
-        # Inject explicit verifier contract for verifier-role execution
-        if role == "verifier" or (task and isinstance(task.metadata, dict) and task.metadata.get("role") == "verifier"):
+        # Inject explicit verifier contract for verifier- and security-role execution (both fail without a verdict)
+        if role in ("verifier", "security") or (task and isinstance(task.metadata, dict) and task.metadata.get("role") in ("verifier", "security")):
             verifier_contract = (
                 "--- HERMES VERIFICATION CONTRACT ---\n"
                 "Your final response MUST contain a verification result in this JSON form:\n\n"

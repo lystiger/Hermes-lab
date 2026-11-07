@@ -108,6 +108,10 @@ class CodexAdapter(AgentAdapter):
                 is_pass = False
                 norm_verdict = "failed"
                 repairable = bool(json_obj.get("repairable", True))
+            elif raw_verdict == "unproven":
+                is_pass = False
+                norm_verdict = "unproven"
+                repairable = bool(json_obj.get("repairable", False))
             else:
                 # Do NOT fabricate or infer verdict from generic flags like {"success": true} or {"summary": "looks fine"}
                 return None
@@ -115,6 +119,22 @@ class CodexAdapter(AgentAdapter):
             blocked_by = str(json_obj.get("blocked_by") or "").strip().lower() or None
             if blocked_by == "environment":
                 repairable = False
+
+            checked = json_obj.get("checked")
+            total = json_obj.get("total")
+            warning = None
+            if checked is not None and total is not None:
+                try:
+                    if int(checked) < int(total):
+                        norm_verdict = "unproven"
+                        is_pass = False
+                except (ValueError, TypeError):
+                    warning = "Verification coverage numbers are invalid"
+            else:
+                warning = "Verification coverage missing checked or total count"
+
+            if norm_verdict == "unproven":
+                json_obj["verdict"] = "unproven"
 
             obs_list = []
             if is_pass:
@@ -126,9 +146,9 @@ class CodexAdapter(AgentAdapter):
             else:
                 obs_list.append({
                     "kind": "verification_failure",
-                    "content": f"Codex verification failed: {summary or 'defects detected.'}. Findings: {'; '.join(str(f) for f in findings) if findings else 'unspecified'}",
+                    "content": f"Codex verification {norm_verdict}: {summary or 'defects detected.'}. Findings: {'; '.join(str(f) for f in findings) if findings else 'unspecified'}",
                     "metadata": {
-                        "verdict": "failed",
+                        "verdict": norm_verdict,
                         "repairable": repairable,
                         "blocked_by": blocked_by,
                         "findings": findings,
@@ -136,7 +156,7 @@ class CodexAdapter(AgentAdapter):
                     },
                 })
 
-            return {
+            parsed_result = {
                 "verdict": norm_verdict,
                 "summary": summary,
                 "repairable": repairable,
@@ -147,13 +167,27 @@ class CodexAdapter(AgentAdapter):
                 "replan_reason": f"Codex verification failure: {summary}" if not is_pass else None,
                 "observations": obs_list,
             }
+            if checked is not None:
+                parsed_result["checked"] = checked
+            if total is not None:
+                parsed_result["total"] = total
+            if warning:
+                parsed_result["warning"] = warning
+            return parsed_result
 
         # 2. Try parsing structured text format (e.g. VERDICT: PASS / FAIL)
-        verdict_match = re.search(r"VERDICT\s*:\s*(PASS|FAIL|PASSED|FAILED|SUCCESS|ERROR)\b", cleaned, re.IGNORECASE)
+        verdict_match = re.search(r"VERDICT\s*:\s*(PASS|FAIL|PASSED|FAILED|SUCCESS|ERROR|UNPROVEN)\b", cleaned, re.IGNORECASE)
         if verdict_match:
             v_str = verdict_match.group(1).upper()
-            is_pass = v_str in ("PASS", "PASSED", "SUCCESS")
-            norm_verdict = "passed" if is_pass else "failed"
+            if v_str in ("PASS", "PASSED", "SUCCESS"):
+                is_pass = True
+                norm_verdict = "passed"
+            elif v_str == "UNPROVEN":
+                is_pass = False
+                norm_verdict = "unproven"
+            else:
+                is_pass = False
+                norm_verdict = "failed"
 
             summary_match = re.search(r"SUMMARY\s*:\s*([^\n]+)", cleaned, re.IGNORECASE)
             summary = summary_match.group(1).strip() if summary_match else ""
@@ -173,6 +207,18 @@ class CodexAdapter(AgentAdapter):
                     if cleaned_line:
                         findings.append(cleaned_line)
 
+            checked_match = re.search(r"CHECKED\s*:\s*(\d+)", cleaned, re.IGNORECASE)
+            total_match = re.search(r"TOTAL\s*:\s*(\d+)", cleaned, re.IGNORECASE)
+            checked = int(checked_match.group(1)) if checked_match else None
+            total = int(total_match.group(1)) if total_match else None
+            warning = None
+            if checked is not None and total is not None:
+                if checked < total:
+                    norm_verdict = "unproven"
+                    is_pass = False
+            else:
+                warning = "Verification coverage missing checked or total count"
+
             obs_list = []
             if is_pass:
                 obs_list.append({
@@ -183,9 +229,9 @@ class CodexAdapter(AgentAdapter):
             else:
                 obs_list.append({
                     "kind": "verification_failure",
-                    "content": f"Codex verification failed: {summary or 'defects detected.'}. Findings: {'; '.join(findings) if findings else 'unspecified'}",
+                    "content": f"Codex verification {norm_verdict}: {summary or 'defects detected.'}. Findings: {'; '.join(findings) if findings else 'unspecified'}",
                     "metadata": {
-                        "verdict": "failed",
+                        "verdict": norm_verdict,
                         "repairable": repairable,
                         "blocked_by": blocked_by,
                         "findings": findings,
@@ -193,7 +239,7 @@ class CodexAdapter(AgentAdapter):
                     },
                 })
 
-            return {
+            parsed_result = {
                 "verdict": norm_verdict,
                 "summary": summary,
                 "repairable": repairable,
@@ -210,5 +256,14 @@ class CodexAdapter(AgentAdapter):
                 "replan_reason": f"Codex verification failure: {summary}" if not is_pass else None,
                 "observations": obs_list,
             }
+            if checked is not None:
+                parsed_result["checked"] = checked
+                parsed_result["structured_verdict"]["checked"] = checked
+            if total is not None:
+                parsed_result["total"] = total
+                parsed_result["structured_verdict"]["total"] = total
+            if warning:
+                parsed_result["warning"] = warning
+            return parsed_result
 
         return None

@@ -634,6 +634,7 @@ class ReactiveJobEngine:
                 follow_up_observations: List[Observation] = []
                 explicit_replan_details: List[str] = []
                 environment_blocks: List[str] = []
+                unproven_retry_blocks: List[str] = []
 
                 for completed_task in done:
                     try:
@@ -642,6 +643,26 @@ class ReactiveJobEngine:
                         res = completed_task.result()
                         if isinstance(res, tuple) and len(res) == 2:
                             task_node, exec_res = res
+                            meta = exec_res.metadata or {}
+                            role = (task_node.metadata or {}).get("role") or (task_node.metadata or {}).get("execution_role") or meta.get("role")
+                            verdict = str(meta.get("verdict") or (meta.get("backend_runtime_metadata") or {}).get("verdict") or "").strip().lower()
+                            is_unproven = role in ("verifier", "security") and verdict == "unproven"
+
+                            if commit_sha := meta.get("commit_sha"):
+                                task_node.metadata["commit_sha"] = commit_sha
+                                is_repair_node = bool(
+                                    (task_node.metadata or {}).get("repair_of")
+                                    or task_node.task_id.startswith("repair_")
+                                )
+                                if is_repair_node:
+                                    for t in self.graph.list_tasks():
+                                        t_meta = getattr(t, "metadata", None) or {}
+                                        if t_meta.get("repair_task_id") == task_node.task_id or (
+                                            getattr(t, "task_id", "").startswith("recheck_")
+                                            and task_node.task_id in getattr(t, "dependencies", [])
+                                        ):
+                                            t.metadata["repair_commit"] = commit_sha
+
                             # Ingest observations
                             for obs in exec_res.observations:
                                 if isinstance(obs, Observation):
@@ -661,13 +682,26 @@ class ReactiveJobEngine:
                                 else:
                                     continue
 
-                                if (registered.metadata or {}).get("requires_follow_up"):
+                                if (registered.metadata or {}).get("requires_follow_up") and not is_unproven:
                                     follow_up_observations.append(registered)
 
                             if str((exec_res.metadata or {}).get("blocked_by") or "").lower() == "environment":
                                 environment_blocks.append(
                                     (exec_res.metadata or {}).get("verification_summary") or exec_res.error or task_node.task_id
                                 )
+                                continue
+
+                            # An unproven verdict from a verifier/security task fails as a normal attempt so the
+                            # scheduler retries once; if the retry is also unproven, block the job.
+                            if is_unproven:
+                                is_retry = bool(task_node.metadata.get("had_unproven"))
+                                if is_retry:
+                                    checked, total = self._extract_coverage_counts(meta, task_node)
+                                    checked_str = "?" if checked is None else str(checked)
+                                    total_str = "?" if total is None else str(total)
+                                    unproven_retry_blocks.append(f"verification incomplete: checked {checked_str} of {total_str}")
+                                else:
+                                    task_node.metadata["had_unproven"] = True
                                 continue
 
                             # A verifier or security task that found fixable problems sends the work back:
@@ -685,6 +719,15 @@ class ReactiveJobEngine:
                     except Exception as exc:
                         logger.error("Error processing completed task: %s", exc)
                         raise
+
+                if unproven_retry_blocks:
+                    reason = unproven_retry_blocks[0]
+                    await self._transition_job(
+                        JobState.BLOCKED,
+                        reason=reason,
+                    )
+                    await self._cancel_active_tasks(reason)
+                    return False
 
                 if environment_blocks:
                     await self._transition_job(
@@ -882,6 +925,34 @@ class ReactiveJobEngine:
         until = min(resets) - now
         return min(5.0, max(0.01, until.total_seconds()))
 
+    @staticmethod
+    def _extract_coverage_counts(meta: Dict[str, Any], task_node: Optional[TaskNode] = None) -> Tuple[Any, Any]:
+        backend_meta = meta.get("backend_runtime_metadata") or {}
+        structured = meta.get("structured_verdict") or {}
+        task_meta = (task_node.metadata or {}) if task_node else {}
+
+        checked = meta.get("checked")
+        if checked is None and isinstance(backend_meta, dict):
+            checked = backend_meta.get("checked")
+            if checked is None and isinstance(backend_meta.get("structured_verdict"), dict):
+                checked = backend_meta["structured_verdict"].get("checked")
+        if checked is None and isinstance(structured, dict):
+            checked = structured.get("checked")
+        if checked is None:
+            checked = task_meta.get("checked")
+
+        total = meta.get("total")
+        if total is None and isinstance(backend_meta, dict):
+            total = backend_meta.get("total")
+            if total is None and isinstance(backend_meta.get("structured_verdict"), dict):
+                total = backend_meta["structured_verdict"].get("total")
+        if total is None and isinstance(structured, dict):
+            total = structured.get("total")
+        if total is None:
+            total = task_meta.get("total")
+
+        return checked, total
+
     async def _repair_failed_verdict(self, task: TaskNode, exec_res: TaskExecutionResult) -> bool:
         """
         Handles a failed, repairable verdict from a verifier or security task. Adds a builder repair task
@@ -894,16 +965,51 @@ class ReactiveJobEngine:
             return False
         meta = exec_res.metadata or {}
         role = (task.metadata or {}).get("role") or (task.metadata or {}).get("execution_role")
+        verdict = str(meta.get("verdict") or (meta.get("backend_runtime_metadata") or {}).get("verdict") or "").strip().lower()
         if (
             exec_res.status != "failed"
             or role not in ("verifier", "security")
-            or str(meta.get("verdict", "")).lower() not in ("failed", "fail")
+            or verdict == "unproven"
+            or verdict not in ("failed", "fail")
             or not meta.get("repairable")
         ):
             return False
 
         summary = meta.get("verification_summary") or exec_res.error or "verification failed"
         findings = [str(f) for f in (meta.get("findings") or [])]
+        current_count = len(findings)
+
+        is_recheck = bool((task.metadata or {}).get("repair_root"))
+        root = (task.metadata or {}).get("repair_root") or task.task_id
+
+        if is_recheck:
+            history = list((task.metadata or {}).get("findings_history") or [])
+            if not history and "prior_findings" in (task.metadata or {}):
+                history = [len(task.metadata["prior_findings"])]
+            prior_cycle = (task.metadata or {}).get("repair_cycle")
+            if prior_cycle is None:
+                try:
+                    prior_cycle = int(task.task_id.rsplit("_", 1)[-1])
+                except Exception:
+                    prior_cycle = 1
+
+            prev_count = history[-1] if history else None
+            shrank = prev_count is not None and current_count < prev_count
+            if not shrank or prior_cycle >= 5:
+                full_history = history + [current_count]
+                counts_str = ", ".join(str(c) for c in full_history)
+                await self._transition_job(
+                    JobState.BLOCKED,
+                    reason=f"verification not converging: findings per cycle {counts_str}",
+                )
+                return True
+
+            cycle = prior_cycle + 1
+            new_history = history + [current_count]
+        else:
+            cycle = 1
+            new_history = [current_count]
+
         if self.job.repair_count >= self.limits.max_repairs_per_job:
             await self._transition_job(
                 JobState.BLOCKED,
@@ -912,20 +1018,19 @@ class ReactiveJobEngine:
             return True
 
         self.job.repair_count += 1
-        cycle = self.job.repair_count
-        root = task.metadata.get("repair_root") or task.task_id
         scope = task.metadata.get("original_description") or task.description
         finding_lines = "\n".join(f"- {f}" for f in findings) or f"- {summary}"
         base_meta = {k: v for k, v in (task.metadata or {}).items()
-                     if k not in ("role", "execution_role", "verification", "prior_findings")}
+                     if k not in ("role", "execution_role", "verification", "prior_findings", "findings_history", "repair_cycle")}
 
         repair = TaskNode(
             task_id=f"repair_{root}_{cycle}",
             job_id=self.job.job_id,
-            # Only the findings: the repair agent fixes what was reported, not the whole feature again.
+            # Fix reported instances and sweep for sibling defects of the same kind.
             description=(
-                f"An independent {role} checked the work and found problems. Fix exactly these, changing "
-                f"only what is needed, and keep every required check passing:\n{finding_lines}\n\n"
+                f"An independent {role} checked the work and found problems. Fix exactly the listed findings; "
+                f"then apply the same rule to every other item of the same kind in the work and fix any that break it; "
+                f"list in the final message what was swept, and keep every required check passing:\n{finding_lines}\n\n"
                 f"What was being checked: {scope}"
             ),
             required_capabilities=["implementation"],
@@ -934,19 +1039,29 @@ class ReactiveJobEngine:
                       "repair_of": task.task_id, "findings": findings},
             max_attempts=min(2, self.limits.max_task_attempts),
         )
+        recheck_meta = {k: v for k, v in (task.metadata or {}).items()
+                        if k not in ("repair_commit", "repair_cycle", "findings_history")}
         recheck = TaskNode(
             task_id=f"recheck_{root}_{cycle}",
             job_id=self.job.job_id,
-            # The re-check confirms the findings are resolved and runs the checks, rather than a full review.
+            # The re-check confirms earlier findings are resolved and reviews repair changes, rather than a full review.
             description=(
                 f"{scope}\n\nThis is re-check {cycle} after a repair. Confirm each earlier finding is resolved "
-                f"and run the required checks; do not re-review unrelated code. Earlier findings:\n{finding_lines}"
+                f"and review the changes made by the repair task only, without re-reviewing anything the repair did not change. "
+                f"Earlier findings:\n{finding_lines}"
             ),
             required_capabilities=list(task.required_capabilities),
             dependencies=[repair.task_id],
             assigned_actor=task.assigned_actor,
-            metadata={**(task.metadata or {}), "repair_root": root, "original_description": scope,
-                      "prior_findings": findings},
+            metadata={
+                **recheck_meta,
+                "repair_root": root,
+                "repair_task_id": repair.task_id,
+                "original_description": scope,
+                "prior_findings": findings,
+                "findings_history": new_history,
+                "repair_cycle": cycle,
+            },
             max_attempts=task.max_attempts,
         )
         self.graph.add_task(repair)

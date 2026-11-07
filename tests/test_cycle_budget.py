@@ -165,6 +165,44 @@ async def test_non_shrinking_cycle_equal_findings_blocks_with_reason():
 
 
 @pytest.mark.anyio
+async def test_non_shrinking_cycle_one_to_one_findings_blocks_with_reason():
+    """Assert that a recheck failing with 1 finding after an initial check with 1 finding (1 -> 1)
+    does not start a new cycle and blocks the job with reason:
+    'verification not converging: findings per cycle 1, 1'.
+    """
+    engine, verify = _make_engine(max_repairs=10)
+
+    # Initial check fails with 1 finding -> Cycle 1 created
+    handled1 = await engine._repair_failed_verdict(
+        verify, _failed_verdict(findings=["bug 1"])
+    )
+    assert handled1 is True
+    recheck_1 = engine.graph.get_task("recheck_verify_1")
+    assert recheck_1 is not None
+
+    # Recheck 1 fails with 1 finding (1 is not < 1: non-shrinking) -> Blocks job
+    handled2 = await engine._repair_failed_verdict(
+        recheck_1, _failed_verdict(findings=["bug 2"])
+    )
+    assert handled2 is True
+
+    # No cycle 2 created
+    assert engine.graph.get_task("repair_verify_2") is None, (
+        "No new cycle should start when findings do not shrink (1 -> 1)"
+    )
+    assert engine.graph.get_task("recheck_verify_2") is None, (
+        "No new recheck should be created when findings do not shrink (1 -> 1)"
+    )
+
+    # Job blocked with exact reason format
+    assert engine.job.state == JobState.BLOCKED
+    expected_reason = "verification not converging: findings per cycle 1, 1"
+    assert engine.job.blocked_reason == expected_reason, (
+        f"Expected blocked reason '{expected_reason}', got '{engine.job.blocked_reason}'"
+    )
+
+
+@pytest.mark.anyio
 async def test_non_shrinking_cycle_growing_findings_blocks_with_reason():
     """Assert that a cycle where findings increase blocks the job with reason:
     'verification not converging: findings per cycle A, B, C'.

@@ -29,7 +29,7 @@ def _make_engine(role: str = "verifier"):
         job_id=f"job_sweep_{role}",
         goal=f"Test sweep repair for {role}",
         planner=OptInPlanner(),
-        limits=RuntimeLimits(max_repairs_per_job=3),
+        limits=RuntimeLimits(max_repairs_per_job=10),
         event_bridge=RuntimeEventBridge(event_store=InMemoryRuntimeEventStore()),
     )
     engine.graph.add_task(
@@ -106,7 +106,7 @@ async def test_repair_task_description_contains_sweep_instructions(role: str):
 async def test_repair_task_description_sweep_instructions_in_subsequent_cycle():
     """Subsequent repair cycles (e.g. cycle 2) must also include the fix + sweep repair instructions."""
     engine, check_task = _make_engine(role="verifier")
-    await engine._repair_failed_verdict(check_task, _failed_verdict(["defect 1"]))
+    await engine._repair_failed_verdict(check_task, _failed_verdict(["defect 1", "defect 1b"]))
 
     recheck = engine.graph.get_task("recheck_check_verifier_1")
     assert recheck is not None

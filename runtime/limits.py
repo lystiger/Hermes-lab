@@ -6,7 +6,7 @@ from typing import Any, Dict
 class RuntimeLimits:
     """Configurable boundaries to prevent infinite execution and resource exhaustion."""
     max_replans_per_job: int = 3
-    max_repairs_per_job: int = 3
+    max_repairs_per_job: int = 10
     max_task_attempts: int = 2
     max_runtime_depth: int = 5
     max_subagent_depth: int = 2
@@ -26,7 +26,7 @@ class RuntimeLimits:
     def from_dict(cls, data: Dict[str, Any]) -> "RuntimeLimits":
         return cls(
             max_replans_per_job=int(data.get("max_replans_per_job") or data.get("maxReplansPerJob", 3)),
-            max_repairs_per_job=int(data.get("max_repairs_per_job") or data.get("maxRepairsPerJob", 3)),
+            max_repairs_per_job=int(data.get("max_repairs_per_job") if data.get("max_repairs_per_job") is not None else data.get("maxRepairsPerJob", 10)),
             max_task_attempts=int(data.get("max_task_attempts") or data.get("maxTaskAttempts", 2)),
             max_runtime_depth=int(data.get("max_runtime_depth") or data.get("maxRuntimeDepth", 5)),
             max_subagent_depth=int(data.get("max_subagent_depth") or data.get("maxSubagentDepth", 2)),

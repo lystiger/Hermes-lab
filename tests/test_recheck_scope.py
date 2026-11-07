@@ -41,7 +41,7 @@ def _make_engine(role: str = "verifier"):
         job_id=f"job_recheck_{role}",
         goal=f"Test recheck scope for {role}",
         planner=OptInPlanner(),
-        limits=RuntimeLimits(max_repairs_per_job=3),
+        limits=RuntimeLimits(max_repairs_per_job=10),
         event_bridge=RuntimeEventBridge(event_store=InMemoryRuntimeEventStore()),
     )
     engine.graph.add_task(
@@ -178,7 +178,7 @@ async def test_recheck_task_description_says_confirm_earlier_findings_and_review
 async def test_recheck_task_description_scope_in_subsequent_cycle():
     """Subsequent recheck cycles (e.g. cycle 2) must also include the scope instructions."""
     engine, check_task = _make_engine(role="verifier")
-    await engine._repair_failed_verdict(check_task, _failed_verdict(["defect 1"]))
+    await engine._repair_failed_verdict(check_task, _failed_verdict(["defect 1", "defect 1b"]))
 
     recheck_1 = engine.graph.get_task("recheck_check_verifier_1")
     assert recheck_1 is not None

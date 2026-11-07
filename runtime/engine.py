@@ -650,9 +650,18 @@ class ReactiveJobEngine:
 
                             if commit_sha := meta.get("commit_sha"):
                                 task_node.metadata["commit_sha"] = commit_sha
-                                for t in self.graph.list_tasks():
-                                    if task_node.task_id in getattr(t, "dependencies", []) or (getattr(t, "metadata", None) or {}).get("repair_task_id") == task_node.task_id:
-                                        t.metadata["repair_commit"] = commit_sha
+                                is_repair_node = bool(
+                                    (task_node.metadata or {}).get("repair_of")
+                                    or task_node.task_id.startswith("repair_")
+                                )
+                                if is_repair_node:
+                                    for t in self.graph.list_tasks():
+                                        t_meta = getattr(t, "metadata", None) or {}
+                                        if t_meta.get("repair_task_id") == task_node.task_id or (
+                                            getattr(t, "task_id", "").startswith("recheck_")
+                                            and task_node.task_id in getattr(t, "dependencies", [])
+                                        ):
+                                            t.metadata["repair_commit"] = commit_sha
 
                             # Ingest observations
                             for obs in exec_res.observations:
@@ -685,7 +694,7 @@ class ReactiveJobEngine:
                             # An unproven verdict from a verifier/security task fails as a normal attempt so the
                             # scheduler retries once; if the retry is also unproven, block the job.
                             if is_unproven:
-                                is_retry = task_node.metadata.get("had_unproven") or task_node.attempt > 1
+                                is_retry = bool(task_node.metadata.get("had_unproven"))
                                 if is_retry:
                                     checked, total = self._extract_coverage_counts(meta, task_node)
                                     checked_str = "?" if checked is None else str(checked)
@@ -985,7 +994,7 @@ class ReactiveJobEngine:
                     prior_cycle = 1
 
             prev_count = history[-1] if history else None
-            shrank = prev_count is not None and current_count < prev_count
+            shrank = prev_count is not None and (current_count < prev_count if prev_count > 1 else current_count <= prev_count)
             if not shrank or prior_cycle >= 5:
                 full_history = history + [current_count]
                 counts_str = ", ".join(str(c) for c in full_history)

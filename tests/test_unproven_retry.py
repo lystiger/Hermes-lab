@@ -300,3 +300,77 @@ async def test_checked_less_than_total_normalizes_to_unproven_and_retries_then_b
     assert engine.job.blocked_reason == expected_reason, (
         f"Expected blocked reason '{expected_reason}', got '{engine.job.blocked_reason}'"
     )
+
+
+@pytest.mark.anyio
+async def test_non_verdict_failure_on_attempt_1_retries_first_unproven_on_attempt_2(tmp_path: Path):
+    """If attempt 1 fails for a non-verdict reason, the first unproven verdict on attempt 2
+    must still be retried rather than immediately blocking the job.
+    """
+    unproven_payload = {
+        "verdict": "unproven",
+        "summary": "Check incomplete on attempt 2",
+        "checked": 2,
+        "total": 5,
+        "findings": ["incomplete"],
+    }
+    # Response 1: Non-verdict error (crash / command failed)
+    resp1 = ExecutionResult(
+        command="run check",
+        returncode=1,
+        stdout="",
+        stderr="Process killed / crash",
+        backend=MockExecutionBackend.name,
+    )
+    # Response 2: First unproven verdict
+    resp2 = ExecutionResult(
+        command="run check",
+        returncode=0,
+        stdout=json.dumps(unproven_payload),
+        stderr="",
+        backend=MockExecutionBackend.name,
+    )
+    # Response 3: Second unproven verdict (causes block)
+    resp3 = ExecutionResult(
+        command="run check",
+        returncode=0,
+        stdout=json.dumps(unproven_payload),
+        stderr="",
+        backend=MockExecutionBackend.name,
+    )
+
+    backend = MockExecutionBackend(responses=[resp1, resp2, resp3])
+    actor_id = "codex"
+    engine = _create_test_engine(tmp_path, actor_id=actor_id, backend=backend, max_task_attempts=3)
+
+    task = TaskNode(
+        task_id="T_non_verdict_retry",
+        job_id="job_unproven_test",
+        assigned_actor=actor_id,
+        status=TaskStatus.READY,
+        max_attempts=3,
+        required_capabilities=["verification"],
+        metadata={"role": "verifier", "backend": MockExecutionBackend.name},
+    )
+    await engine.initialize_and_plan(initial_tasks=[task])
+
+    # Attempt 1: non-verdict failure
+    await engine.step()
+    t = engine.graph.get_task(task.task_id)
+    assert t.attempt == 1
+    assert t.status == TaskStatus.READY
+    assert engine.job.state != JobState.BLOCKED
+
+    # Attempt 2: first unproven verdict. Must NOT block immediately!
+    await engine.step()
+    t = engine.graph.get_task(task.task_id)
+    assert t.attempt == 2
+    assert t.status == TaskStatus.READY
+    assert t.metadata.get("had_unproven") is True
+    assert engine.job.state != JobState.BLOCKED
+
+    # Attempt 3: second unproven verdict. Now it blocks.
+    await engine.step()
+    assert backend.call_count == 3
+    assert engine.job.state == JobState.BLOCKED
+    assert engine.job.blocked_reason == "verification incomplete: checked 2 of 5"

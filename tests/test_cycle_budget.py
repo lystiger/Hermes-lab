@@ -92,6 +92,12 @@ def test_job_wide_max_repairs_per_job_default_is_10():
         f"RuntimeLimits.from_dict default max_repairs_per_job must be 10, got {limits_from_dict.max_repairs_per_job}"
     )
 
+    # 0 in from_dict falls back to default 10 (matching other limit fields)
+    limits_zero = RuntimeLimits.from_dict({"max_repairs_per_job": 0})
+    assert limits_zero.max_repairs_per_job == 10, (
+        f"RuntimeLimits.from_dict with 0 should fall back to default 10, got {limits_zero.max_repairs_per_job}"
+    )
+
 
 @pytest.mark.anyio
 async def test_new_cycle_starts_only_if_recheck_has_fewer_findings():

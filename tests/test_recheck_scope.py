@@ -407,3 +407,27 @@ def test_non_recheck_verifier_prompt_has_no_repair_diff(tmp_path):
     assert not repair_section, (
         f"Initial verifier task prompt must not contain a repair diff section.\nGot section:\n{repair_section}"
     )
+
+
+@pytest.mark.anyio
+async def test_initial_verifier_does_not_get_repair_commit_from_builder_task():
+    """When a builder task completes with commit_sha, the engine must not set
+    repair_commit on dependent initial verifier tasks.
+    """
+    import asyncio
+    from runtime.job_state import JobState
+    engine, check_task = _make_engine(role="verifier")
+    engine.job.transition_to(JobState.PLANNING)
+    engine.job.transition_to(JobState.EXECUTING)
+    builder_task = engine.graph.get_task("build")
+
+    # Simulate builder task completion returning a commit_sha
+    res = (builder_task, TaskExecutionResult(status="completed", metadata={"commit_sha": "abc1234"}))
+    fut = asyncio.Future()
+    fut.set_result(res)
+    engine._active_async_tasks = {fut}
+
+    await engine.step()
+
+    assert builder_task.metadata.get("commit_sha") == "abc1234"
+    assert "repair_commit" not in check_task.metadata

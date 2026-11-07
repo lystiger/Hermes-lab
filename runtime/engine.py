@@ -980,10 +980,11 @@ class ReactiveJobEngine:
         repair = TaskNode(
             task_id=f"repair_{root}_{cycle}",
             job_id=self.job.job_id,
-            # Only the findings: the repair agent fixes what was reported, not the whole feature again.
+            # Fix reported instances and sweep for sibling defects of the same kind.
             description=(
-                f"An independent {role} checked the work and found problems. Fix exactly these, changing "
-                f"only what is needed, and keep every required check passing:\n{finding_lines}\n\n"
+                f"An independent {role} checked the work and found problems. Fix exactly the listed findings; "
+                f"then apply the same rule to every other item of the same kind in the work and fix any that break it; "
+                f"list in the final message what was swept, and keep every required check passing:\n{finding_lines}\n\n"
                 f"What was being checked: {scope}"
             ),
             required_capabilities=["implementation"],

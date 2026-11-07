@@ -786,6 +786,88 @@ class HermesActorAdapter(ActorAdapter):
         return "\n\n".join(["--- LYSSTACK CONTINUITY CONTEXT ---", *body_lines, "--- END CONTINUITY CONTEXT ---"])
 
     MAX_DIFF_CHARS = 30000
+    MAX_REPAIR_DIFF_LINES = 400
+
+    def _repair_diff_section(
+        self,
+        task: TaskNode,
+        worktree_path: Path,
+        tasks: Optional[List[Union[TaskNode, Dict[str, Any]]]] = None,
+    ) -> str:
+        """
+        Changed files and diff for the repair task commit, included in a recheck task prompt
+        so the verifier reviews only what the repair changed.
+        """
+        if not task:
+            return ""
+        task_meta = getattr(task, "metadata", None)
+        if not isinstance(task_meta, dict):
+            task_meta = {}
+
+        task_id = getattr(task, "task_id", "") or ""
+        is_recheck = bool(
+            task_meta.get("repair_commit")
+            or task_meta.get("repair_task_id")
+            or task_id.startswith("recheck_")
+        )
+        if not is_recheck:
+            return ""
+
+        repair_commit = task_meta.get("repair_commit")
+        if not repair_commit:
+            repair_task_id = task_meta.get("repair_task_id")
+            if not repair_task_id:
+                for dep in getattr(task, "dependencies", []):
+                    if "repair" in dep:
+                        repair_task_id = dep
+                        break
+            if repair_task_id and tasks:
+                for t in tasks:
+                    t_id = getattr(t, "task_id", None) if not isinstance(t, dict) else t.get("task_id")
+                    if t_id == repair_task_id:
+                        t_meta = getattr(t, "metadata", {}) if not isinstance(t, dict) else t.get("metadata", {})
+                        repair_commit = t_meta.get("commit_sha") or t_meta.get("repair_commit")
+                        if repair_commit:
+                            break
+
+        if not repair_commit:
+            return ""
+
+        cwd = worktree_path or self.target_repo
+        if not cwd or not self._is_git_repo(cwd):
+            return ""
+
+        names = self.run_cmd(
+            ["git", "diff-tree", "--no-commit-id", "--name-status", "-r", "-m", "--first-parent", "--root", str(repair_commit)],
+            cwd=cwd,
+            check=False,
+        )
+        diff = self.run_cmd(
+            ["git", "diff-tree", "-p", "--no-commit-id", "-m", "--first-parent", "--root", str(repair_commit)],
+            cwd=cwd,
+            check=False,
+        )
+        if names.returncode != 0 or diff.returncode != 0:
+            return ""
+
+        files = names.stdout.strip() or "(none)"
+        diff_lines = diff.stdout.splitlines()
+        if len(diff_lines) > self.MAX_REPAIR_DIFF_LINES:
+            body = (
+                "\n".join(diff_lines[:self.MAX_REPAIR_DIFF_LINES])
+                + f"\n... (diff cut at {self.MAX_REPAIR_DIFF_LINES} lines; read the files for the rest)"
+            )
+        else:
+            body = diff.stdout
+
+        return (
+            "\n\n--- WHAT THE REPAIR TASK CHANGED (from Hermes) ---\n"
+            "Every file changed by the repair task commit. Confirm each earlier finding is resolved "
+            "and review the changes made by the repair task only.\n\n"
+            f"Changed files (git status letter, path):\n{files}\n\n"
+            f"Diff:\n{body.strip() or '(empty)'}\n"
+            "--- END WHAT THE REPAIR TASK CHANGED ---"
+        )
 
     def _job_changes_section(self, worktree_path: Path) -> str:
         """
@@ -1042,6 +1124,7 @@ class HermesActorAdapter(ActorAdapter):
         if effective_role in ("verifier", "security"):
             if worktree_path:
                 base_prompt += self._job_changes_section(worktree_path)
+                base_prompt += self._repair_diff_section(task, worktree_path, tasks=tasks)
                 base_prompt += self._project_checks_section(worktree_path)
         elif effective_role in ("builder", "hardener"):
             base_prompt += self._builder_project_checks_section(worktree_path or self.target_repo)

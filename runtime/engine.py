@@ -648,6 +648,12 @@ class ReactiveJobEngine:
                             verdict = str(meta.get("verdict") or (meta.get("backend_runtime_metadata") or {}).get("verdict") or "").strip().lower()
                             is_unproven = role in ("verifier", "security") and verdict == "unproven"
 
+                            if commit_sha := meta.get("commit_sha"):
+                                task_node.metadata["commit_sha"] = commit_sha
+                                for t in self.graph.list_tasks():
+                                    if task_node.task_id in getattr(t, "dependencies", []) or (getattr(t, "metadata", None) or {}).get("repair_task_id") == task_node.task_id:
+                                        t.metadata["repair_commit"] = commit_sha
+
                             # Ingest observations
                             for obs in exec_res.observations:
                                 if isinstance(obs, Observation):
@@ -993,19 +999,21 @@ class ReactiveJobEngine:
                       "repair_of": task.task_id, "findings": findings},
             max_attempts=min(2, self.limits.max_task_attempts),
         )
+        recheck_meta = {k: v for k, v in (task.metadata or {}).items() if k != "repair_commit"}
         recheck = TaskNode(
             task_id=f"recheck_{root}_{cycle}",
             job_id=self.job.job_id,
-            # The re-check confirms the findings are resolved and runs the checks, rather than a full review.
+            # The re-check confirms earlier findings are resolved and reviews repair changes, rather than a full review.
             description=(
                 f"{scope}\n\nThis is re-check {cycle} after a repair. Confirm each earlier finding is resolved "
-                f"and run the required checks; do not re-review unrelated code. Earlier findings:\n{finding_lines}"
+                f"and review the changes made by the repair task only, without re-reviewing anything the repair did not change. "
+                f"Earlier findings:\n{finding_lines}"
             ),
             required_capabilities=list(task.required_capabilities),
             dependencies=[repair.task_id],
             assigned_actor=task.assigned_actor,
-            metadata={**(task.metadata or {}), "repair_root": root, "original_description": scope,
-                      "prior_findings": findings},
+            metadata={**recheck_meta, "repair_root": root, "repair_task_id": repair.task_id,
+                      "original_description": scope, "prior_findings": findings},
             max_attempts=task.max_attempts,
         )
         self.graph.add_task(repair)

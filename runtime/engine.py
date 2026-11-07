@@ -968,6 +968,39 @@ class ReactiveJobEngine:
 
         summary = meta.get("verification_summary") or exec_res.error or "verification failed"
         findings = [str(f) for f in (meta.get("findings") or [])]
+        current_count = len(findings)
+
+        is_recheck = bool((task.metadata or {}).get("repair_root"))
+        root = (task.metadata or {}).get("repair_root") or task.task_id
+
+        if is_recheck:
+            history = list((task.metadata or {}).get("findings_history") or [])
+            if not history and "prior_findings" in (task.metadata or {}):
+                history = [len(task.metadata["prior_findings"])]
+            prior_cycle = (task.metadata or {}).get("repair_cycle")
+            if prior_cycle is None:
+                try:
+                    prior_cycle = int(task.task_id.rsplit("_", 1)[-1])
+                except Exception:
+                    prior_cycle = 1
+
+            prev_count = history[-1] if history else None
+            shrank = prev_count is not None and current_count < prev_count
+            if not shrank or prior_cycle >= 5:
+                full_history = history + [current_count]
+                counts_str = ", ".join(str(c) for c in full_history)
+                await self._transition_job(
+                    JobState.BLOCKED,
+                    reason=f"verification not converging: findings per cycle {counts_str}",
+                )
+                return True
+
+            cycle = prior_cycle + 1
+            new_history = history + [current_count]
+        else:
+            cycle = 1
+            new_history = [current_count]
+
         if self.job.repair_count >= self.limits.max_repairs_per_job:
             await self._transition_job(
                 JobState.BLOCKED,
@@ -976,12 +1009,10 @@ class ReactiveJobEngine:
             return True
 
         self.job.repair_count += 1
-        cycle = self.job.repair_count
-        root = task.metadata.get("repair_root") or task.task_id
         scope = task.metadata.get("original_description") or task.description
         finding_lines = "\n".join(f"- {f}" for f in findings) or f"- {summary}"
         base_meta = {k: v for k, v in (task.metadata or {}).items()
-                     if k not in ("role", "execution_role", "verification", "prior_findings")}
+                     if k not in ("role", "execution_role", "verification", "prior_findings", "findings_history", "repair_cycle")}
 
         repair = TaskNode(
             task_id=f"repair_{root}_{cycle}",
@@ -999,7 +1030,8 @@ class ReactiveJobEngine:
                       "repair_of": task.task_id, "findings": findings},
             max_attempts=min(2, self.limits.max_task_attempts),
         )
-        recheck_meta = {k: v for k, v in (task.metadata or {}).items() if k != "repair_commit"}
+        recheck_meta = {k: v for k, v in (task.metadata or {}).items()
+                        if k not in ("repair_commit", "repair_cycle", "findings_history")}
         recheck = TaskNode(
             task_id=f"recheck_{root}_{cycle}",
             job_id=self.job.job_id,
@@ -1012,8 +1044,15 @@ class ReactiveJobEngine:
             required_capabilities=list(task.required_capabilities),
             dependencies=[repair.task_id],
             assigned_actor=task.assigned_actor,
-            metadata={**recheck_meta, "repair_root": root, "repair_task_id": repair.task_id,
-                      "original_description": scope, "prior_findings": findings},
+            metadata={
+                **recheck_meta,
+                "repair_root": root,
+                "repair_task_id": repair.task_id,
+                "original_description": scope,
+                "prior_findings": findings,
+                "findings_history": new_history,
+                "repair_cycle": cycle,
+            },
             max_attempts=task.max_attempts,
         )
         self.graph.add_task(repair)

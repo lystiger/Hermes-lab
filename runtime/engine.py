@@ -994,7 +994,7 @@ class ReactiveJobEngine:
                     prior_cycle = 1
 
             prev_count = history[-1] if history else None
-            shrank = prev_count is not None and (current_count < prev_count if prev_count > 1 else current_count <= prev_count)
+            shrank = prev_count is not None and current_count < prev_count
             if not shrank or prior_cycle >= 5:
                 full_history = history + [current_count]
                 counts_str = ", ".join(str(c) for c in full_history)

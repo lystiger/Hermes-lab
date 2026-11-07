@@ -36,7 +36,7 @@ def failed(findings, repairable=True):
 @pytest.mark.anyio
 async def test_a_failed_verdict_adds_a_repair_and_a_recheck():
     engine, verify = make_engine()
-    assert await engine._repair_failed_verdict(verify, failed(["test X fails"])) is True
+    assert await engine._repair_failed_verdict(verify, failed(["test X fails", "test Y fails"])) is True
 
     repair, recheck = engine.graph.get_task("repair_verify_1"), engine.graph.get_task("recheck_verify_1")
     assert repair.metadata["role"] == "builder" and "test X fails" in repair.description

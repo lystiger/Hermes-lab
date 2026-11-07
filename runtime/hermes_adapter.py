@@ -998,8 +998,12 @@ class HermesActorAdapter(ActorAdapter):
                 '  "summary": "short explanation",\n'
                 '  "repairable": true | false,\n'
                 '  "blocked_by": "environment" | null,\n'
+                '  "checked": <number of checked items>,\n'
+                '  "total": <total items in scope>,\n'
                 '  "findings": ["finding 1", "finding 2"]\n'
                 "}\n\n"
+                "List every failing item, not only the first few. "
+                "Report checked and total integers for items checked out of items in scope.\n"
                 "Do not omit verdict.\n"
                 "--- END VERIFICATION CONTRACT ---"
             )

@@ -634,6 +634,7 @@ class ReactiveJobEngine:
                 follow_up_observations: List[Observation] = []
                 explicit_replan_details: List[str] = []
                 environment_blocks: List[str] = []
+                unproven_retry_blocks: List[str] = []
 
                 for completed_task in done:
                     try:
@@ -642,6 +643,11 @@ class ReactiveJobEngine:
                         res = completed_task.result()
                         if isinstance(res, tuple) and len(res) == 2:
                             task_node, exec_res = res
+                            meta = exec_res.metadata or {}
+                            role = (task_node.metadata or {}).get("role") or (task_node.metadata or {}).get("execution_role") or meta.get("role")
+                            verdict = str(meta.get("verdict") or (meta.get("backend_runtime_metadata") or {}).get("verdict") or "").strip().lower()
+                            is_unproven = role in ("verifier", "security") and verdict == "unproven"
+
                             # Ingest observations
                             for obs in exec_res.observations:
                                 if isinstance(obs, Observation):
@@ -661,13 +667,26 @@ class ReactiveJobEngine:
                                 else:
                                     continue
 
-                                if (registered.metadata or {}).get("requires_follow_up"):
+                                if (registered.metadata or {}).get("requires_follow_up") and not is_unproven:
                                     follow_up_observations.append(registered)
 
                             if str((exec_res.metadata or {}).get("blocked_by") or "").lower() == "environment":
                                 environment_blocks.append(
                                     (exec_res.metadata or {}).get("verification_summary") or exec_res.error or task_node.task_id
                                 )
+                                continue
+
+                            # An unproven verdict from a verifier/security task fails as a normal attempt so the
+                            # scheduler retries once; if the retry is also unproven, block the job.
+                            if is_unproven:
+                                is_retry = task_node.metadata.get("had_unproven") or task_node.attempt > 1
+                                if is_retry:
+                                    checked, total = self._extract_coverage_counts(meta, task_node)
+                                    checked_str = "?" if checked is None else str(checked)
+                                    total_str = "?" if total is None else str(total)
+                                    unproven_retry_blocks.append(f"verification incomplete: checked {checked_str} of {total_str}")
+                                else:
+                                    task_node.metadata["had_unproven"] = True
                                 continue
 
                             # A verifier or security task that found fixable problems sends the work back:
@@ -685,6 +704,15 @@ class ReactiveJobEngine:
                     except Exception as exc:
                         logger.error("Error processing completed task: %s", exc)
                         raise
+
+                if unproven_retry_blocks:
+                    reason = unproven_retry_blocks[0]
+                    await self._transition_job(
+                        JobState.BLOCKED,
+                        reason=reason,
+                    )
+                    await self._cancel_active_tasks(reason)
+                    return False
 
                 if environment_blocks:
                     await self._transition_job(
@@ -882,6 +910,34 @@ class ReactiveJobEngine:
         until = min(resets) - now
         return min(5.0, max(0.01, until.total_seconds()))
 
+    @staticmethod
+    def _extract_coverage_counts(meta: Dict[str, Any], task_node: Optional[TaskNode] = None) -> Tuple[Any, Any]:
+        backend_meta = meta.get("backend_runtime_metadata") or {}
+        structured = meta.get("structured_verdict") or {}
+        task_meta = (task_node.metadata or {}) if task_node else {}
+
+        checked = meta.get("checked")
+        if checked is None and isinstance(backend_meta, dict):
+            checked = backend_meta.get("checked")
+            if checked is None and isinstance(backend_meta.get("structured_verdict"), dict):
+                checked = backend_meta["structured_verdict"].get("checked")
+        if checked is None and isinstance(structured, dict):
+            checked = structured.get("checked")
+        if checked is None:
+            checked = task_meta.get("checked")
+
+        total = meta.get("total")
+        if total is None and isinstance(backend_meta, dict):
+            total = backend_meta.get("total")
+            if total is None and isinstance(backend_meta.get("structured_verdict"), dict):
+                total = backend_meta["structured_verdict"].get("total")
+        if total is None and isinstance(structured, dict):
+            total = structured.get("total")
+        if total is None:
+            total = task_meta.get("total")
+
+        return checked, total
+
     async def _repair_failed_verdict(self, task: TaskNode, exec_res: TaskExecutionResult) -> bool:
         """
         Handles a failed, repairable verdict from a verifier or security task. Adds a builder repair task
@@ -894,10 +950,12 @@ class ReactiveJobEngine:
             return False
         meta = exec_res.metadata or {}
         role = (task.metadata or {}).get("role") or (task.metadata or {}).get("execution_role")
+        verdict = str(meta.get("verdict") or (meta.get("backend_runtime_metadata") or {}).get("verdict") or "").strip().lower()
         if (
             exec_res.status != "failed"
             or role not in ("verifier", "security")
-            or str(meta.get("verdict", "")).lower() not in ("failed", "fail")
+            or verdict == "unproven"
+            or verdict not in ("failed", "fail")
             or not meta.get("repairable")
         ):
             return False

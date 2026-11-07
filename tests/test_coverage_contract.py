@@ -53,6 +53,11 @@ def test_verification_contract_injected_states_exhaustive_findings_and_coverage(
     assert "checked" in contract, f"Contract for role '{role}' must name 'checked' field"
     assert "total" in contract, f"Contract for role '{role}' must name 'total' field"
 
+    # Must list all three verdicts: passed, failed, unproven
+    assert '"verdict": "passed" | "failed" | "unproven"' in contract, (
+        f"Contract template for role '{role}' must list 'passed' | 'failed' | 'unproven'.\nGot:\n{contract}"
+    )
+
 
 def test_verification_contract_not_injected_for_builder_role():
     """Non-verification roles must not receive the verification contract."""

@@ -1076,7 +1076,7 @@ class HermesActorAdapter(ActorAdapter):
                 "--- HERMES VERIFICATION CONTRACT ---\n"
                 "Your final response MUST contain a verification result in this JSON form:\n\n"
                 "{\n"
-                '  "verdict": "passed" | "failed",\n'
+                '  "verdict": "passed" | "failed" | "unproven",\n'
                 '  "summary": "short explanation",\n'
                 '  "repairable": true | false,\n'
                 '  "blocked_by": "environment" | null,\n'
